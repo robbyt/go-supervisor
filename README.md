@@ -91,7 +91,7 @@ func main() {
         os.Exit(1)
     }
     
-    // Run the supervisor (handles Boot and Exec internally)
+    // Blocking call to Run(), starts listening to signals and starts all Runnables
     if err := super.Run(); err != nil {
         fmt.Printf("Error: %v\n", err)
         os.Exit(1)
