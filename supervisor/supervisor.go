@@ -78,9 +78,10 @@ func WithContext(ctx context.Context) Option {
 }
 
 // WithRunnables sets the runnables to be managed by the PIDZero instance.
-func WithRunnables(runnables []Runnable) Option {
+// Accepts multiple runnables as variadic arguments.
+func WithRunnables(runnables ...Runnable) Option {
 	return func(p *PIDZero) {
-		if runnables != nil {
+		if len(runnables) > 0 {
 			p.runnables = runnables
 		}
 	}

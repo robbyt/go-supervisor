@@ -53,7 +53,7 @@ func TestPIDZero_GetState(t *testing.T) {
 
 			// Create a supervisor with the mock runnable
 			runnable := tt.setupMock()
-			pidZero, err := New(WithRunnables([]Runnable{runnable}))
+			pidZero, err := New(WithRunnables(runnable))
 			assert.NoError(t, err)
 
 			// Get the state of the runnable
@@ -105,7 +105,7 @@ func TestPIDZero_GetStates(t *testing.T) {
 	}
 
 	// Create a supervisor with the mock runnables
-	pidZero, err := New(WithRunnables([]Runnable{mockService1, mockService2, nonStateableRunnable}))
+	pidZero, err := New(WithRunnables(mockService1, mockService2, nonStateableRunnable))
 	assert.NoError(t, err)
 
 	// Get the states of all runnables
@@ -141,7 +141,7 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	mockService.On("GetStateChan", mock.Anything).Return(stateChan).Once()
 
 	// Create a supervisor with the mock runnable
-	pidZero, err := New(WithContext(ctx), WithRunnables([]Runnable{mockService}))
+	pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
 	assert.NoError(t, err)
 
 	// Manually store initial state to match production behavior
@@ -218,7 +218,7 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 	mockService2.On("String").Return("mock2").Maybe()
 
 	// Create a supervisor with the mock runnables
-	pidZero, err := New(WithContext(ctx), WithRunnables([]Runnable{mockService1, mockService2}))
+	pidZero, err := New(WithContext(ctx), WithRunnables(mockService1, mockService2))
 	assert.NoError(t, err)
 
 	// Store initial states manually in stateMap

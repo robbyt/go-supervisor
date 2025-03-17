@@ -161,7 +161,7 @@ func TestRunServerInvalidPort(t *testing.T) {
 		// Create supervisor
 		sv, err := supervisor.New(
 			supervisor.WithContext(ctx),
-			supervisor.WithRunnables([]supervisor.Runnable{runner}),
+			supervisor.WithRunnables(runner),
 			supervisor.WithLogHandler(logHandler))
 		if err != nil {
 			customCancel()
