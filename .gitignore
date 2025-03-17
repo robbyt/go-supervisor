@@ -1,0 +1,16 @@
+# Binaries for programs and plugins
+/bin
+config.toml
+*.log
+
+# Output of the go coverage tool
+*.out
+
+# Temporary files
+*swp
+.DS_Store
+
+# IDE/editor directories and files
+.vscode/
+.idea/
+*.iml

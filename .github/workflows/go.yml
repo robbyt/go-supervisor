@@ -1,0 +1,42 @@
+name: Go
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+env:
+  GOCACHE: "/tmp/go-cache"
+  GOMODCACHE: "/tmp/go-mod-cache"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Display Go version
+        run: go version
+
+      - name: go mod tidy (fails if changes are needed)
+        run: go mod tidy --diff
+
+      - name: Go test
+        run: go test ./... -cover -race
+
+      - name: Build example
+        run: cd example && go build .
+
+      - name: "smoke test"
+        run: cd example && ./example

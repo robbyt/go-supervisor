@@ -15,8 +15,6 @@ A lightweight, flexible service supervisor for Go applications. The `go-supervis
 - **Context Propagation**: Pass context through service lifecycle for proper cancellation
 - **Structured Logging**: Integrated with Go's `slog` package
 - **Flexible Configuration**: Functional options pattern for easy customization
-- **Finite State Machine**: Integrated with FSM for robust state management
-- **Ready-to-use Runnables**: Includes HTTP server implementation
 
 ## Installation
 
@@ -100,7 +98,10 @@ func main() {
 
 ## Core Interfaces
 
-The package is built around the following interfaces:
+The package is built around the following interfaces. A "Runnable" is any service that can be
+started and stopped, while "Reloadable" and "Stateable" services can be reloaded or report
+their state, respectively. The supervisor will discover the capabilities of each service
+and manage them accordingly.
 
 ```go
 // Runnable represents a service that can be run and stopped
@@ -206,114 +207,14 @@ func (s *StatefulService) Stop() {
 }
 ```
 
-### Custom Signal Handling
+## Example Runnables
 
-```go
-super := supervisor.New(
-    []supervisor.Runnable{service1, service2},
-    supervisor.WithSignals(syscall.SIGINT, syscall.SIGTERM),
-)
-```
-
-## Advanced Topics
-
-### Error Handling
-
-When a service returns an error from its `Run` method, the supervisor will:
-
-1. Log the error with relevant context
-2. Initiate graceful shutdown of all services
-3. Return the error from `Exec()`
-
-### Runnables
-
-The package includes ready-to-use runnables for common use cases:
+The package includes some ready-to-use runnables for common use cases, and example:
 
 - HTTP Server Runnable: A configurable HTTP server with routing and middleware support
 
 Each runnable has its own documentation in its directory (e.g., `runnables/httpserver/README.md`).
 
-For usage examples, see the `examples/` directory.
-
-### Monitoring Service States
-
-You can query the state of services at any time:
-
-```go
-// Get state of a specific service
-state := super.GetState(service1)
-fmt.Printf("Service1 state: %s\n", state)
-
-// Get states of all services
-states := super.GetStates()
-for service, state := range states {
-    fmt.Printf("%s: %s\n", service, state)
-}
-```
-
-### Custom Context
-
-You can provide a custom context to the supervisor:
-
-```go
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
-
-super := supervisor.NewWithContext(ctx, services, options...)
-```
-
-## Testing
-
-The package provides mock implementations of all interfaces for testing:
-
-```go
-import (
-    "context"
-    "testing"
-    "time"
-    
-    "github.com/robbyt/go-supervisor"
-    "github.com/robbyt/go-supervisor/runnables/mocks"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/mock"
-)
-
-func TestMyComponent(t *testing.T) {
-    // Create a mock service
-    mockService := &mocks.MockService{}
-    
-    // Set expectations
-    mockService.On("Run", mock.Anything).Return(nil)
-    mockService.On("Stop").Once()
-    
-    // Create supervisor with mock
-    super := supervisor.New([]supervisor.Runnable{mockService})
-    
-    // Run test...
-    
-    // Verify expectations
-    mockService.AssertExpectations(t)
-}
-```
-
-## Development
-
-For development, use the following commands:
-
-```bash
-# Run all tests with race detection
-make test
-
-# Run linter
-make lint
-
-# Fix common linting issues
-make lint-fix 
-
-# Run benchmarks
-make bench
-```
-
 ## License
 
-MIT
+Apache License 2.0 - See [LICENSE](LICENSE) for details.
