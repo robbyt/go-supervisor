@@ -83,7 +83,7 @@ func main() {
     
     // Create a supervisor with our services and custom logger
     super, err := supervisor.New(
-        supervisor.WithRunnables([]supervisor.Runnable{service1, service2}),
+        supervisor.WithRunnables(service1, service2),
         supervisor.WithLogHandler(handler),
     )
     if err != nil {

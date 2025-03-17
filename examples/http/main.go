@@ -123,7 +123,7 @@ func RunServer(ctx context.Context, logHandler slog.Handler, routes []httpserver
 	// Create a PIDZero supervisor and add the runner
 	sv, err := supervisor.New(
 		supervisor.WithContext(ctx),
-		supervisor.WithRunnables([]supervisor.Runnable{runner}),
+		supervisor.WithRunnables(runner),
 		supervisor.WithLogHandler(logHandler))
 	if err != nil {
 		customCancel()

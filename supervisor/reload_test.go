@@ -26,7 +26,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender.On("GetState").Return("running").Maybe()
 		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
-		p, err := New(WithContext(context.Background()), WithRunnables([]Runnable{sender}))
+		p, err := New(WithContext(context.Background()), WithRunnables(sender))
 		assert.NoError(t, err)
 
 		done := make(chan struct{})
@@ -78,7 +78,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
 		sender2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
-		p, err := New(WithContext(context.Background()), WithRunnables([]Runnable{sender1, sender2}))
+		p, err := New(WithContext(context.Background()), WithRunnables(sender1, sender2))
 		assert.NoError(t, err)
 
 		done := make(chan struct{})
@@ -118,7 +118,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender.On("GetState").Return("running").Maybe()
 		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
-		p, err := New(WithContext(ctx), WithRunnables([]Runnable{sender}))
+		p, err := New(WithContext(ctx), WithRunnables(sender))
 		assert.NoError(t, err)
 
 		done := make(chan struct{})
@@ -169,7 +169,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockService1, mockService2}))
+		pid0, err := New(WithContext(ctx), WithRunnables(mockService1, mockService2))
 		assert.NoError(t, err)
 
 		// Start supervisor
