@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-fsm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // MockConfigCallback is a mock implementation of the config callback function
@@ -207,7 +208,7 @@ func TestReloadConfig_EdgeCases(t *testing.T) {
 
 		// Create a mock FSM
 		mockFSM := NewMockStateMachine()
-		mockFSM.On("GetState").Return(fsm.StatusRunning)
+		mockFSM.On("GetState").Return(finiteState.StatusRunning)
 
 		// Create a sequence of callbacks
 		mockCallback1 := new(MockConfigCallback)

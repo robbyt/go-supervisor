@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-fsm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // waitForRunningState waits for the server to enter the Running state
@@ -25,7 +26,7 @@ func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
 			t.Fatalf("Server did not reach Running state in time. Current state: %s", server.GetState())
 		}
 
-		if server.GetState() == fsm.StatusRunning {
+		if server.GetState() == finiteState.StatusRunning {
 			break
 		}
 
@@ -360,7 +361,7 @@ func TestBootFailure(t *testing.T) {
 			err = runner.Run(context.Background())
 			assert.Error(t, err)
 			tc.checkErr(t, err)
-			assert.Equal(t, fsm.StatusError, runner.GetState())
+			assert.Equal(t, finiteState.StatusError, runner.GetState())
 		})
 	}
 }
@@ -459,5 +460,5 @@ func TestServerLifecycle(t *testing.T) {
 	err = <-done
 
 	assert.NoError(t, err, "Server should shut down without error")
-	assert.Equal(t, fsm.StatusStopped, server.GetState(), "Server should be in stopped state")
+	assert.Equal(t, finiteState.StatusStopped, server.GetState(), "Server should be in stopped state")
 }

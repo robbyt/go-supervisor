@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/robbyt/go-fsm"
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // Option represents a functional option for configuring Runner.
@@ -57,7 +57,7 @@ type Runner struct {
 	server         *http.Server
 	serverRunning  atomic.Bool
 	serverErrors   chan error
-	fsm            stateMachine // implemented by go-fsm
+	fsm            finiteState.Machine // implemented by go-fsm
 	ctx            context.Context
 	cancel         context.CancelFunc
 	logger         *slog.Logger
@@ -91,7 +91,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 	// Create FSM with the configured logger
 	fsmLogger := r.logger.WithGroup("fsm")
-	machine, err := fsm.New(fsmLogger.Handler(), fsm.StatusNew, fsm.TypicalTransitions)
+	machine, err := finiteState.New(fsmLogger.Handler())
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
 	}
@@ -120,7 +120,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer runCancel()
 
 	// Transition from New to Booting
-	err := r.fsm.Transition(fsm.StatusBooting)
+	err := r.fsm.Transition(finiteState.StatusBooting)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// Transition from Booting to Running
-	err = r.fsm.Transition(fsm.StatusRunning)
+	err = r.fsm.Transition(finiteState.StatusRunning)
 	if err != nil {
 		r.setStateError()
 		return err
@@ -152,9 +152,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// Try to transition to Stopping state
-	if !r.fsm.TransitionBool(fsm.StatusStopping) {
+	if !r.fsm.TransitionBool(finiteState.StatusStopping) {
 		// If already in Stopping state, this is okay and we can continue
-		if r.fsm.GetState() == fsm.StatusStopping {
+		if r.fsm.GetState() == finiteState.StatusStopping {
 			r.logger.Debug("Already in Stopping state, continuing shutdown")
 		} else {
 			// Otherwise, this is a real failure
@@ -173,7 +173,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	err = r.fsm.Transition(fsm.StatusStopped)
+	err = r.fsm.Transition(finiteState.StatusStopped)
 	if err != nil {
 		r.setStateError()
 		return err
@@ -186,7 +186,7 @@ func (r *Runner) Run(ctx context.Context) error {
 // Stop will cancel the parent context, which will close the HTTP server
 func (r *Runner) Stop() {
 	// Only transition to Stopping if we're currently Running
-	err := r.fsm.TransitionIfCurrentState(fsm.StatusRunning, fsm.StatusStopping)
+	err := r.fsm.TransitionIfCurrentState(finiteState.StatusRunning, finiteState.StatusStopping)
 	if err != nil {
 		// This error is expected if we're already stopping, so only log at debug level
 		r.logger.Debug("Note: Not transitioning to Stopping state", "error", err)

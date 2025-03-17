@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-fsm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 func TestSetStateError_Mocked(t *testing.T) {
@@ -22,7 +23,7 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM := NewMockStateMachine()
 
 		// Setup the TransitionBool to return success
-		mockFSM.On("TransitionBool", fsm.StatusError).Return(true)
+		mockFSM.On("TransitionBool", finiteState.StatusError).Return(true)
 
 		// Create runner with mocked FSM
 		r := &Runner{
@@ -37,7 +38,7 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM.AssertExpectations(t)
 
 		// TransitionBool should have been called once, but SetState should not be called
-		mockFSM.AssertCalled(t, "TransitionBool", fsm.StatusError)
+		mockFSM.AssertCalled(t, "TransitionBool", finiteState.StatusError)
 		mockFSM.AssertNotCalled(t, "SetState", mock.Anything)
 	})
 
@@ -47,10 +48,10 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM := NewMockStateMachine()
 
 		// Setup the TransitionBool to return failure
-		mockFSM.On("TransitionBool", fsm.StatusError).Return(false)
+		mockFSM.On("TransitionBool", finiteState.StatusError).Return(false)
 
 		// Setup the SetState to succeed
-		mockFSM.On("SetState", fsm.StatusError).Return(nil)
+		mockFSM.On("SetState", finiteState.StatusError).Return(nil)
 
 		// Create runner with mocked FSM
 		r := &Runner{
@@ -65,11 +66,11 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM.AssertExpectations(t)
 
 		// Both TransitionBool and SetState should have been called
-		mockFSM.AssertCalled(t, "TransitionBool", fsm.StatusError)
-		mockFSM.AssertCalled(t, "SetState", fsm.StatusError)
+		mockFSM.AssertCalled(t, "TransitionBool", finiteState.StatusError)
+		mockFSM.AssertCalled(t, "SetState", finiteState.StatusError)
 
 		// The Unknown state should not have been used
-		mockFSM.AssertNotCalled(t, "SetState", fsm.StatusUnknown)
+		mockFSM.AssertNotCalled(t, "SetState", finiteState.StatusUnknown)
 	})
 
 	// Test fallback to StatusUnknown when both TransitionBool and the first SetState fail
@@ -81,13 +82,13 @@ func TestSetStateError_Mocked(t *testing.T) {
 		testErr := errors.New("cannot set error state")
 
 		// Setup the TransitionBool to return failure
-		mockFSM.On("TransitionBool", fsm.StatusError).Return(false)
+		mockFSM.On("TransitionBool", finiteState.StatusError).Return(false)
 
 		// Setup the first SetState to fail
-		mockFSM.On("SetState", fsm.StatusError).Return(testErr)
+		mockFSM.On("SetState", finiteState.StatusError).Return(testErr)
 
 		// Setup the fallback SetState to succeed
-		mockFSM.On("SetState", fsm.StatusUnknown).Return(nil)
+		mockFSM.On("SetState", finiteState.StatusUnknown).Return(nil)
 
 		// Create runner with mocked FSM
 		r := &Runner{
@@ -102,9 +103,9 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM.AssertExpectations(t)
 
 		// All three method calls should have been made
-		mockFSM.AssertCalled(t, "TransitionBool", fsm.StatusError)
-		mockFSM.AssertCalled(t, "SetState", fsm.StatusError)
-		mockFSM.AssertCalled(t, "SetState", fsm.StatusUnknown)
+		mockFSM.AssertCalled(t, "TransitionBool", finiteState.StatusError)
+		mockFSM.AssertCalled(t, "SetState", finiteState.StatusError)
+		mockFSM.AssertCalled(t, "SetState", finiteState.StatusUnknown)
 	})
 
 	// Test complete failure case where all attempts fail
@@ -117,13 +118,13 @@ func TestSetStateError_Mocked(t *testing.T) {
 		unknownStateErr := errors.New("cannot set unknown state either")
 
 		// Setup the TransitionBool to return failure
-		mockFSM.On("TransitionBool", fsm.StatusError).Return(false)
+		mockFSM.On("TransitionBool", finiteState.StatusError).Return(false)
 
 		// Setup the first SetState to fail
-		mockFSM.On("SetState", fsm.StatusError).Return(errorStateErr)
+		mockFSM.On("SetState", finiteState.StatusError).Return(errorStateErr)
 
 		// Setup the fallback SetState to also fail
-		mockFSM.On("SetState", fsm.StatusUnknown).Return(unknownStateErr)
+		mockFSM.On("SetState", finiteState.StatusUnknown).Return(unknownStateErr)
 
 		// Create runner with mocked FSM
 		r := &Runner{
@@ -138,9 +139,9 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM.AssertExpectations(t)
 
 		// All three method calls should have been made
-		mockFSM.AssertCalled(t, "TransitionBool", fsm.StatusError)
-		mockFSM.AssertCalled(t, "SetState", fsm.StatusError)
-		mockFSM.AssertCalled(t, "SetState", fsm.StatusUnknown)
+		mockFSM.AssertCalled(t, "TransitionBool", finiteState.StatusError)
+		mockFSM.AssertCalled(t, "SetState", finiteState.StatusError)
+		mockFSM.AssertCalled(t, "SetState", finiteState.StatusUnknown)
 	})
 }
 
@@ -153,12 +154,12 @@ func TestSetStateError_FullIntegration(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 
 	// Set up initial conditions with FSM in Stopped state
-	err := server.fsm.SetState(fsm.StatusStopped)
+	err := server.fsm.SetState(finiteState.StatusStopped)
 	require.NoError(t, err)
 
 	// Call the function under test which should fall back to SetState
 	server.setStateError()
 
 	// Verify we ended up in Error state
-	assert.Equal(t, fsm.StatusError, server.fsm.GetState())
+	assert.Equal(t, finiteState.StatusError, server.fsm.GetState())
 }
