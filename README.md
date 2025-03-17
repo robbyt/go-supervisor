@@ -24,6 +24,8 @@ go get github.com/robbyt/go-supervisor
 
 ## Quick Start
 
+To begin using the go-supervisor, you first need to define your "runnable" with a few functions. At very least it needs to have a `Run(ctx context.Context) error` and `Stop()`, implementing the Runnable interface. Additional capabilities can be implemented in your code, and the supervisor will take advantage of them while running. See `supervisor/interfaces.go` for more info.
+
 ```go
 package main
 
@@ -34,7 +36,7 @@ import (
     "os"
     "time"
 
-    "github.com/robbyt/go-supervisor"
+    "github.com/robbyt/go-supervisor/supervisor"
 )
 
 // Example service that implements Runnable interface
@@ -80,16 +82,17 @@ func main() {
     })
     
     // Create a supervisor with our services and custom logger
-    super := supervisor.New(
-        []supervisor.Runnable{service1, service2},
-        supervisor.WithHandler(handler),
+    super, err := supervisor.New(
+        supervisor.WithRunnables([]supervisor.Runnable{service1, service2}),
+        supervisor.WithLogHandler(handler),
     )
+    if err != nil {
+        fmt.Printf("Error creating supervisor: %v\n", err)
+        os.Exit(1)
+    }
     
-    // Boot the supervisor
-    super.Boot()
-    
-    // Start all services and wait
-    if err := super.Exec(); err != nil {
+    // Run the supervisor (handles Boot and Exec internally)
+    if err := super.Run(); err != nil {
         fmt.Printf("Error: %v\n", err)
         os.Exit(1)
     }
