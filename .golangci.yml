@@ -1,0 +1,74 @@
+run:
+  timeout: 5m
+  go: '1.24'
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Examine suspicious constructs
+    - ineffassign   # Detect unused assignments
+    - staticcheck   # Static analysis checks
+    - unused        # Check for unused constants, variables, functions, and types
+    - bodyclose     # Checks HTTP response body is closed
+    - errorlint     # Check error handling
+
+    # Additional linters - commented out for now, can be enabled incrementally later
+    - contextcheck  # Check whether the function uses a non-inherited context
+    - gofmt         # Check code formatting
+    - goimports     # Check import formatting
+    - misspell      # Find commonly misspelled English words
+    # - revive        # Replacement for golint (many style warnings)
+    # - stylecheck    # Style checks (can be strict about naming conventions)
+    - whitespace    # Check for unnecessary whitespace
+    # - wrapcheck     # Check that errors are wrapped properly (produces many warnings)
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    # check-type-assertions: false
+    # Exclude common type assertions
+    exclude-functions:
+      - (*github.com/stretchr/testify/mock.Mock).Get
+      - (net.Listener).Addr
+      - (sync/atomic.Value).Load
+
+  govet:
+    enable-all: false  # Reduced from enable-all: true to limit warnings
+    enable:
+      - assign
+      - atomic
+      - bools
+      - buildtag
+      - copylocks
+      - httpresponse
+      - loopclosure
+      - lostcancel
+      - nilfunc
+      - stdmethods
+      - structtag
+      - tests
+      - unmarshal
+      - unreachable
+      - unusedresult
+
+  # Commented out settings for linters that are disabled for now
+  # Will be useful when enabling these linters incrementally
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+  goimports:
+    local-prefixes: "github.com/robbyt/go-supervisor"
+  stylecheck:
+    checks: ["all"]
+  wrapcheck:
+    ignoreSigs:
+      - ".Errorf("
+      - "errors.New("
+      - "errors.Unwrap"
+
+issues:
+  max-issues-per-linter: 20
+  max-same-issues: 5

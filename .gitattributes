@@ -1,0 +1,18 @@
+# Documentation
+*.md linguist-documentation
+
+# Go source files
+*.go text diff=go
+
+# Makefiles need to always use Unix-style line endings
+Makefile text eol=lf
+*.mk text eol=lf
+
+# Protobuf
+*.proto text diff=proto
+
+# Binary files
+*.pb.go binary
+
+# Scripts
+*.sh text eol=lf
