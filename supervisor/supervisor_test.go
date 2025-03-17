@@ -29,7 +29,7 @@ func TestPIDZero_NewPIDZero(t *testing.T) {
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 	ctx := context.Background()
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	assert.NotNil(t, pid0)
@@ -52,7 +52,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	mockRunnable.On("Stop").Maybe()
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
-	pid0, err := New(WithRunnables([]Runnable{mockRunnable}), WithLogHandler(customHandler))
+	pid0, err := New(WithRunnables(mockRunnable), WithLogHandler(customHandler))
 	assert.NoError(t, err)
 
 	// Verify that the logger was set correctly
@@ -66,7 +66,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	mockRunnable2.On("Stop").Maybe()
 	mockRunnable2.On("GetState").Return("running").Maybe()
 	mockRunnable2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
-	defaultPid0, err := New(WithRunnables([]Runnable{mockRunnable2}), WithLogHandler(nil))
+	defaultPid0, err := New(WithRunnables(mockRunnable2), WithLogHandler(nil))
 	assert.NoError(t, err)
 	assert.NotNil(t, defaultPid0.logger)
 }
@@ -85,7 +85,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	mockRunnable.On("Stop").Maybe()
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
-	pid0, err := New(WithRunnables([]Runnable{mockRunnable}), WithSignals(customSignals...))
+	pid0, err := New(WithRunnables(mockRunnable), WithSignals(customSignals...))
 	assert.NoError(t, err)
 
 	// Verify that the signals were set correctly
@@ -101,7 +101,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	mockRunnable2.On("Stop").Maybe()
 	mockRunnable2.On("GetState").Return("running").Maybe()
 	mockRunnable2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
-	defaultPid0, err := New(WithRunnables([]Runnable{mockRunnable2}))
+	defaultPid0, err := New(WithRunnables(mockRunnable2))
 	assert.NoError(t, err)
 	assert.Len(t, defaultPid0.subscribeSignals, 3)
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGINT)
@@ -125,7 +125,7 @@ func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	// Ensure cleanup
@@ -167,7 +167,7 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -212,7 +212,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -259,7 +259,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -322,7 +322,7 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable1, mockRunnable2}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable1, mockRunnable2))
 	assert.NoError(t, err)
 
 	pid0.listenForSignals()
@@ -365,7 +365,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 	mockService.On("Stop").Maybe()
 	mockService.On("GetState").Return("running").Maybe()
 	mockService.On("GetStateChan", mock.Anything).Return(serviceStateChan).Maybe()
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockService}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockService))
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -406,7 +406,7 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -461,7 +461,7 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 
 	// Ensure cleanup
@@ -539,7 +539,7 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 
 	// Create PIDZero with the mock runnable
 	ctx, cancel := context.WithCancel(context.Background())
-	pid0, err := New(WithContext(ctx), WithRunnables([]Runnable{mockRunnable}))
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
 	pid0.listenForSignals()
 

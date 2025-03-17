@@ -56,7 +56,7 @@ func TestStateDeduplication(t *testing.T) {
 	}
 
 	// Create a new supervisor with our test runnable
-	pidZero, err := New(WithContext(ctx), WithRunnables([]Runnable{runnable}))
+	pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
 	assert.NoError(t, err)
 
 	// Track the broadcasts that occur
