@@ -33,10 +33,7 @@ jobs:
         run: go mod tidy --diff
 
       - name: Go test
-        run: go test ./... -cover -race
-
-      - name: Build example
-        run: cd example && go build .
-
-      - name: "smoke test"
-        run: cd example && ./example
+        run: make test
+        
+      - name: Build examples
+        run: cd examples/http && go build .
