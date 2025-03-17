@@ -380,7 +380,6 @@ func TestReload(t *testing.T) {
 		// Verify the server is in Error state
 		assert.Equal(t, finiteState.StatusError, server.GetState(), "Server should be in Error state")
 	})
-
 }
 
 // Test rapid reload operations
