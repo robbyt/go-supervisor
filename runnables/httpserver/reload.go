@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/robbyt/go-fsm"
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // reloadConfig reloads the configuration using the config callback
@@ -42,7 +42,7 @@ func (r *Runner) Reload() {
 	defer r.bootLock.Unlock()
 	r.logger.Debug("Reloading...")
 
-	if err := r.fsm.Transition(fsm.StatusReloading); err != nil {
+	if err := r.fsm.Transition(finiteState.StatusReloading); err != nil {
 		r.logger.Error("Failed to transition to Reloading", "error", err)
 		return
 	}
@@ -53,7 +53,7 @@ func (r *Runner) Reload() {
 		r.logger.Debug("Config reloaded")
 	case errors.Is(err, ErrOldConfig):
 		r.logger.Debug("Config unchanged, skipping reload")
-		if stateErr := r.fsm.Transition(fsm.StatusRunning); stateErr != nil {
+		if stateErr := r.fsm.Transition(finiteState.StatusRunning); stateErr != nil {
 			r.logger.Error("Failed to transition to Running", "error", stateErr)
 			r.setStateError()
 		}
@@ -76,7 +76,7 @@ func (r *Runner) Reload() {
 		return
 	}
 
-	if err := r.fsm.Transition(fsm.StatusRunning); err != nil {
+	if err := r.fsm.Transition(finiteState.StatusRunning); err != nil {
 		r.logger.Error("Failed to transition to Running", "error", err)
 		r.setStateError()
 		return

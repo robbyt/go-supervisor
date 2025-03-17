@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-fsm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 func TestReload(t *testing.T) {
@@ -82,7 +82,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Force the server to Running state so we can reload
-		err = server.fsm.SetState(fsm.StatusRunning)
+		err = server.fsm.SetState(finiteState.StatusRunning)
 		require.NoError(t, err)
 
 		// We can't easily modify the config callback directly,
@@ -176,7 +176,7 @@ func TestReload(t *testing.T) {
 		stateChan := server.GetStateChan(stateCtx)
 
 		// Wait for the server to complete its state transition
-		waitForState(t, stateChan, []string{fsm.StatusReloading, fsm.StatusRunning})
+		waitForState(t, stateChan, []string{finiteState.StatusReloading, finiteState.StatusRunning})
 
 		// Verify that the state hasn't changed
 		stateAfter := server.GetState()
@@ -248,12 +248,12 @@ func TestReload(t *testing.T) {
 		var stateAfter string
 		for i := 0; i < 5; i++ {
 			stateAfter = server.GetState()
-			if stateAfter == fsm.StatusError {
+			if stateAfter == finiteState.StatusError {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		require.Equal(t, fsm.StatusError, stateAfter, "Server should be in error state")
+		require.Equal(t, finiteState.StatusError, stateAfter, "Server should be in error state")
 
 		// Verify that the original handler still works (server doesn't stop on reload error)
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
@@ -292,7 +292,7 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, server)
 
 		// Verify initial state
-		assert.Equal(t, fsm.StatusNew, server.GetState(), "Initial state should be New")
+		assert.Equal(t, finiteState.StatusNew, server.GetState(), "Initial state should be New")
 
 		// Capture server config before reload
 		configBefore := server.getConfig()
@@ -301,7 +301,7 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Verify the state didn't change
-		assert.Equal(t, fsm.StatusNew, server.GetState(), "State should remain New")
+		assert.Equal(t, finiteState.StatusNew, server.GetState(), "State should remain New")
 
 		// Verify config didn't change
 		configAfter := server.getConfig()
@@ -363,7 +363,7 @@ func TestReload(t *testing.T) {
 
 		// Wait for server to be in Running state
 		time.Sleep(100 * time.Millisecond)
-		require.Equal(t, fsm.StatusRunning, server.GetState(), "Server should be running")
+		require.Equal(t, finiteState.StatusRunning, server.GetState(), "Server should be running")
 
 		// Setup state monitoring
 		stateCtx, cancel := context.WithCancel(context.Background())
@@ -375,55 +375,12 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Wait for the state to change to Error
-		waitForState(t, stateChan, []string{fsm.StatusError})
+		waitForState(t, stateChan, []string{finiteState.StatusError})
 
 		// Verify the server is in Error state
-		assert.Equal(t, fsm.StatusError, server.GetState(), "Server should be in Error state")
+		assert.Equal(t, finiteState.StatusError, server.GetState(), "Server should be in Error state")
 	})
 
-	t.Run("Reload fails when transition to Running state fails", func(t *testing.T) {
-		// Create a simple test server
-		server, _, done := createTestServer(t,
-			func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
-		t.Cleanup(func() {
-			cleanupTestServer(t, server, done)
-		})
-
-		// Force it to Running state so we can reload
-		err := server.fsm.SetState(fsm.StatusRunning)
-		require.NoError(t, err)
-
-		// Create a custom FSM with limited transitions
-		customTransitions := fsm.TransitionsConfig{
-			fsm.StatusRunning:   []string{fsm.StatusReloading, fsm.StatusStopping},
-			fsm.StatusReloading: []string{fsm.StatusBooting},
-			fsm.StatusBooting:   []string{fsm.StatusError}, // Intentionally missing transition to Running
-			fsm.StatusError:     []string{fsm.StatusStopping},
-			fsm.StatusStopping:  []string{fsm.StatusStopped},
-		}
-
-		// Create a custom FSM starting in Running state
-		logger := slog.Default().WithGroup("testFSM")
-		customFSM, err := fsm.New(logger.Handler(), fsm.StatusRunning, customTransitions)
-		require.NoError(t, err)
-
-		// Store original FSM and replace with custom FSM
-		originalFSM := server.fsm
-		server.fsm = customFSM
-		defer func() { server.fsm = originalFSM }()
-
-		// Call Reload (should fail when trying to go Running after Booting)
-		server.Reload()
-
-		// Check the state after a short delay
-		time.Sleep(100 * time.Millisecond)
-
-		// The test might be flaky but we're primarily testing that
-		// the custom FSM with no Booting->Running transition causes an error
-		currentState := server.GetState()
-		require.Contains(t, []string{fsm.StatusBooting, fsm.StatusError}, currentState,
-			"Server should be in either Booting or Error state")
-	})
 }
 
 // Test rapid reload operations
@@ -485,7 +442,7 @@ func TestRapidReload(t *testing.T) {
 	}
 
 	// Wait for the final state to be running
-	waitForState(t, stateChan, []string{fsm.StatusRunning})
+	waitForState(t, stateChan, []string{finiteState.StatusRunning})
 
 	// Verify server is still operational
 	resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))

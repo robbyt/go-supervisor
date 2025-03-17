@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/stretchr/testify/mock"
+
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // MockStateMachine is a mock implementation of the stateMachine interface
@@ -67,12 +69,12 @@ func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 // of config storage for testing purposes
 type MockRunner struct {
 	storedConfig *Config
-	mockFSM      stateMachine
+	mockFSM      finiteState.Machine
 	callback     func() (*Config, error)
 }
 
 // Creates a new MockRunner with mocked config storage
-func NewMockRunner(configCallback func() (*Config, error), fsm stateMachine) *MockRunner {
+func NewMockRunner(configCallback func() (*Config, error), fsm finiteState.Machine) *MockRunner {
 	return &MockRunner{
 		callback: configCallback,
 		mockFSM:  fsm,
