@@ -114,7 +114,7 @@ func RunServer(ctx context.Context, logHandler slog.Handler, routes []httpserver
 	runner, err := httpserver.NewRunner(
 		httpserver.WithContext(customCtx),
 		httpserver.WithConfigCallback(configCallback),
-		httpserver.WithLogHandler(logHandler.WithGroup("httpserver")))
+		httpserver.WithLogHandler(logHandler))
 	if err != nil {
 		customCancel()
 		return nil, nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
@@ -170,5 +170,4 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Shutdown complete")
 }
