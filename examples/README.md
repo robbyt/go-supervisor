@@ -2,15 +2,16 @@
 
 This directory contains examples demonstrating how to use the go-supervisor package in real-world scenarios. Each example showcases different aspects of service lifecycle management, configuration, and state handling.
 
+> **Note:** More examples are coming soon as we add additional runnable implementations to the project. Currently, the HTTP server example demonstrates a complete implementation of the supervisor interfaces.
+
 ## HTTP Server Example
 
-The [http](./http/) directory contains a complete example of an HTTP server managed by the go-supervisor package. This example demonstrates:
+The [http](./http/) directory contains a complete example of an HTTP server managed by the go-supervisor package.
 
-- Integration with the `runnables/httpserver` implementation
-- Proper configuration of routes and handlers
-- Custom logging with slog
-- Integration with the PIDZero supervisor
-- Signal handling for graceful shutdown
+This example demonstrates:
+- Creating a `runnables.HttpServer`, implementing `supervisor.PIDZero` interfaces (Runnable, Reloadable, Stateable)
+- Configuration of routes and handlers, from the `httpserver` package
+- Logging with an `slog.Handler`
 
 Key components of the HTTP server example:
 
@@ -35,53 +36,6 @@ Then access the server at:
 Press Ctrl+C to trigger a graceful shutdown.
 
 ## Implementing Your Own Runnable
-
-When implementing your own service that integrates with go-supervisor, you typically need to:
-
-1. **Implement the Runnable Interface**:
-   ```go
-   type MyService struct {
-       // Your service fields
-   }
-   
-   func (s *MyService) Run(ctx context.Context) error {
-       // Start your service
-       // Monitor ctx.Done() for cancellation
-   }
-   
-   func (s *MyService) Stop() {
-       // Clean shutdown logic
-   }
-   ```
-
-2. **Optionally Implement Reloadable**:
-   ```go
-   func (s *MyService) Reload() {
-       // Reload configuration
-   }
-   ```
-
-3. **Optionally Implement Stateable**:
-   ```go
-   func (s *MyService) GetState() string {
-       // Return current state
-   }
-   
-   func (s *MyService) GetStateChan(ctx context.Context) <-chan string {
-       // Return channel that emits state changes
-   }
-   ```
-
-4. **Create and Start a Supervisor**:
-   ```go
-   super := supervisor.New(
-       []supervisor.Runnable{myService},
-       supervisor.WithLogHandler(logHandler),
-   )
-   
-   if err := super.Run(); err != nil {
-       log.Fatalf("Error: %v", err)
-   }
-   ```
+For detailed instructions on implementing your own runnable, please refer to the root-level README. The HTTP example in this directory provides a complete implementation that you can use as a reference.
 
 See the [HTTP example](./http/main.go) for a complete implementation.

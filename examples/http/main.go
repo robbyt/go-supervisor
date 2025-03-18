@@ -101,7 +101,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 }
 
 // RunServer initializes and runs the HTTP server with supervisor
-// Returns the supervisor and a cleanup function that can be used for testing
+// Returns the supervisor and a cleanup function
 func RunServer(ctx context.Context, logHandler slog.Handler, routes []httpserver.Route) (*supervisor.PIDZero, func(), error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
@@ -139,7 +139,7 @@ func RunServer(ctx context.Context, logHandler slog.Handler, routes []httpserver
 }
 
 func main() {
-	// Configure a custom logger
+	// Configure the custom logger
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 		// AddSource: true,
@@ -169,5 +169,4 @@ func main() {
 		slog.Error("Supervisor failed", "error", err)
 		os.Exit(1)
 	}
-
 }
