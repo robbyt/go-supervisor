@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/supervisor"
 )
 
 // Option represents a functional option for configuring Runner.
@@ -62,6 +63,11 @@ type Runner struct {
 	cancel         context.CancelFunc
 	logger         *slog.Logger
 }
+
+// Interface guards to ensure all of these are implemented
+var _ supervisor.Runnable = (*Runner)(nil)
+var _ supervisor.Reloadable = (*Runner)(nil)
+var _ supervisor.Stateable = (*Runner)(nil)
 
 // NewRunner initializes a new HTTPServer runner instance.
 func NewRunner(opts ...Option) (*Runner, error) {
