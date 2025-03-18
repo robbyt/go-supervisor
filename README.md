@@ -45,6 +45,9 @@ type MyService struct {
     done chan struct{}
 }
 
+// Interface guard, ensuring that MyService implements Runnable
+var _ supervisor.Runnable = (*MyService)(nil)
+
 func (s *MyService) Run(ctx context.Context) error {
     fmt.Printf("%s: Starting\n", s.name)
     
@@ -141,6 +144,10 @@ type ConfigurableService struct {
     mu     sync.Mutex
 }
 
+// Interface guards, ensuring that ConfigurableService implements Runnable and Reloadable
+var _ supervisor.Runnable = (*ConfigurableService)(nil)
+var _ supervisor.Reloadable = (*ConfigurableService)(nil)
+
 type Config struct {
     Interval time.Duration
 }
@@ -166,6 +173,10 @@ type StatefulService struct {
     stateChan chan string
     mu        sync.Mutex
 }
+
+// Interface guards, ensuring that StatefulService implements Runnable and Stateable
+var _ supervisor.Runnable = (*StatefulService)(nil)
+var _ supervisor.Stateable = (*StatefulService)(nil)
 
 func NewStatefulService(name string) *StatefulService {
     return &StatefulService{
