@@ -23,7 +23,7 @@ func TestPIDZero_GetState(t *testing.T) {
 		{
 			name: "runnable implements Stateable",
 			setupMock: func() Runnable {
-				mockService := mocks.NewMockService()
+				mockService := mocks.NewMockRunnable()
 				mockService.On("GetState").Return("running").Once()
 				return mockService
 			},
@@ -63,7 +63,7 @@ func TestPIDZero_GetState(t *testing.T) {
 			assert.Equal(t, tt.expectedState, state)
 
 			// If using a mock, verify expectations
-			if m, ok := runnable.(*mocks.MockService); ok {
+			if m, ok := runnable.(*mocks.Runnable); ok {
 				m.AssertExpectations(t)
 			}
 		})
@@ -89,10 +89,10 @@ func TestPIDZero_GetStates(t *testing.T) {
 	t.Parallel()
 
 	// Create mock services
-	mockService1 := mocks.NewMockService()
+	mockService1 := mocks.NewMockRunnable()
 	mockService1.On("GetState").Return("running").Once()
 
-	mockService2 := mocks.NewMockService()
+	mockService2 := mocks.NewMockRunnable()
 	mockService2.On("GetState").Return("stopped").Once()
 
 	// Create a non-Stateable runnable
@@ -134,7 +134,7 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	defer cancel()
 
 	// Create mock service that implements Stateable
-	mockService := mocks.NewMockService()
+	mockService := mocks.NewMockRunnable()
 	stateChan := make(chan string, 3) // Buffered to prevent blocking
 
 	mockService.On("GetState").Return("initial").Maybe()
@@ -207,12 +207,12 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 	defer cancel()
 
 	// Create mock services that implement Stateable
-	mockService1 := mocks.NewMockService()
+	mockService1 := mocks.NewMockRunnable()
 	stateChan1 := make(chan string, 2)
 	mockService1.On("GetStateChan", mock.Anything).Return(stateChan1).Once()
 	mockService1.On("String").Return("mock1").Maybe()
 
-	mockService2 := mocks.NewMockService()
+	mockService2 := mocks.NewMockRunnable()
 	stateChan2 := make(chan string, 2)
 	mockService2.On("GetStateChan", mock.Anything).Return(stateChan2).Once()
 	mockService2.On("String").Return("mock2").Maybe()

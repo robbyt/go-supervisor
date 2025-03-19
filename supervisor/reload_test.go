@@ -15,7 +15,7 @@ import (
 func TestPIDZero_ReloadManager(t *testing.T) {
 	t.Run("handles reload notifications", func(t *testing.T) {
 		// Setup mock
-		sender := mocks.NewMockServiceWithReload()
+		sender := mocks.NewMockRunnableWithReload()
 		reloadTrigger := make(chan struct{})
 		stateChan := make(chan string)
 
@@ -53,8 +53,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 	})
 
 	t.Run("handles multiple reloads", func(t *testing.T) {
-		sender1 := mocks.NewMockServiceWithReload()
-		sender2 := mocks.NewMockServiceWithReload()
+		sender1 := mocks.NewMockRunnableWithReload()
+		sender2 := mocks.NewMockRunnableWithReload()
 
 		reloadTrigger1 := make(chan struct{})
 		reloadTrigger2 := make(chan struct{})
@@ -108,7 +108,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 	t.Run("graceful shutdown", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		sender := mocks.NewMockServiceWithReload()
+		sender := mocks.NewMockRunnableWithReload()
 		reloadTrigger := make(chan struct{})
 		stateChan := make(chan string)
 
@@ -145,8 +145,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 	t.Run("manual ReloadAll call", func(t *testing.T) {
 		// Setup multiple reloadable services that aren't reload senders
-		mockService1 := mocks.NewMockService()
-		mockService2 := mocks.NewMockService()
+		mockService1 := mocks.NewMockRunnable()
+		mockService2 := mocks.NewMockRunnable()
 
 		stateChan1 := make(chan string)
 		stateChan2 := make(chan string)

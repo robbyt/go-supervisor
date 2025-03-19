@@ -21,7 +21,7 @@ import (
 // TestPIDZero_NewPIDZero tests creating a new PIDZero instance.
 func TestPIDZero_NewPIDZero(t *testing.T) {
 	// Create a mock runnable for testing
-	mockRunnable := mocks.NewMockService()
+	mockRunnable := mocks.NewMockRunnable()
 	stateChan := make(chan string)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 	mockRunnable.On("Stop").Maybe()
@@ -46,7 +46,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	customHandler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
 
 	// Create a PIDZero with the custom log handler
-	mockRunnable := mocks.NewMockService()
+	mockRunnable := mocks.NewMockRunnable()
 	stateChan := make(chan string)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 	mockRunnable.On("Stop").Maybe()
@@ -60,7 +60,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	assert.NotNil(t, pid0.logger)
 
 	// Test with nil handler (should use default)
-	mockRunnable2 := mocks.NewMockService()
+	mockRunnable2 := mocks.NewMockRunnable()
 	stateChan2 := make(chan string)
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 	mockRunnable2.On("Stop").Maybe()
@@ -79,7 +79,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	customSignals := []os.Signal{syscall.SIGUSR1, syscall.SIGUSR2}
 
 	// Create a PIDZero with custom signals
-	mockRunnable := mocks.NewMockService()
+	mockRunnable := mocks.NewMockRunnable()
 	stateChan := make(chan string)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 	mockRunnable.On("Stop").Maybe()
@@ -95,7 +95,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	assert.Contains(t, pid0.subscribeSignals, syscall.SIGUSR2)
 
 	// Verify the default signals are used when not specified
-	mockRunnable2 := mocks.NewMockService()
+	mockRunnable2 := mocks.NewMockRunnable()
 	stateChan2 := make(chan string)
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 	mockRunnable2.On("Stop").Maybe()
@@ -112,7 +112,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 // TestPIDZero_Reap_ErrorFromRunnable tests that an error from a runnable initiates shutdown.
 func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
 	// Create a mock runnable
-	mockRunnable := new(mocks.MockService)
+	mockRunnable := new(mocks.Runnable)
 	mockRunnable.On("Run", mock.Anything).Return(errors.New("runnable error")).Once()
 	mockRunnable.On("Stop").Once()
 
@@ -155,7 +155,7 @@ func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
 // TestPIDZero_Reap_HandleSIGINT tests that receiving SIGINT initiates shutdown.
 func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	t.Parallel()
-	mockRunnable := new(mocks.MockService)
+	mockRunnable := new(mocks.Runnable)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once()
 
@@ -200,7 +200,7 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 
 // TestPIDZero_Reap_HandleSIGTERM tests that receiving SIGTERM initiates shutdown.
 func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
-	mockRunnable := new(mocks.MockService)
+	mockRunnable := new(mocks.Runnable)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once()
 
@@ -246,7 +246,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 // TestPIDZero_Reap_HandleSIGHUP tests that receiving SIGHUP triggers reload.
 func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	t.Parallel()
-	mockRunnable := new(mocks.MockService)
+	mockRunnable := new(mocks.Runnable)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Reload").Once()
 	mockRunnable.On("Stop").Once()
@@ -299,8 +299,8 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 // TestPIDZero_Reap_MultipleSignals tests handling multiple signals.
 func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	t.Parallel()
-	mockRunnable1 := new(mocks.MockService)
-	mockRunnable2 := new(mocks.MockService)
+	mockRunnable1 := new(mocks.Runnable)
+	mockRunnable2 := new(mocks.Runnable)
 	mockRunnable1.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Once()
 
@@ -359,7 +359,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mockService := mocks.NewMockService()
+	mockService := mocks.NewMockRunnable()
 	serviceStateChan := make(chan string)
 	mockService.On("Run", mock.Anything).Return(nil).Maybe()
 	mockService.On("Stop").Maybe()
@@ -394,7 +394,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 // TestPIDZero_Reap_ShutdownCalledOnce tests that Shutdown is only called once.
 func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	t.Parallel()
-	mockRunnable := new(mocks.MockService)
+	mockRunnable := new(mocks.Runnable)
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once()
 
@@ -443,7 +443,7 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	t.Parallel()
 	// Create a mock runnable
-	mockRunnable := mocks.NewMockService()
+	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.DelayStop = 500 * time.Millisecond
 	mockRunnable.DelayRun = 1 * time.Millisecond
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
@@ -524,7 +524,7 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 func TestPIDZero_CancelContextFromParent(t *testing.T) {
 	t.Parallel()
 	// Create a mock runnable
-	mockRunnable := mocks.NewMockService()
+	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.DelayStop = 500 * time.Millisecond
 	mockRunnable.DelayRun = 1 * time.Millisecond
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
