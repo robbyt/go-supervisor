@@ -2,8 +2,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/robbyt/go-fsm v0.0.0-20250314065216-08d5cb65da9c h1:cb/xWBmD245FVNPyfppLDYpG0g97GRLI0zT2acE2gPU=
-github.com/robbyt/go-fsm v0.0.0-20250314065216-08d5cb65da9c/go.mod h1:ExLWB3jXQjFxgAE09QxWt4URvu3Yi0Nakmyj0u1D2pE=
+github.com/robbyt/go-fsm v1.0.0 h1:xOnrReHk5cCLllH7fcBoIGd10nvAgp8igWM9/uywaLY=
+github.com/robbyt/go-fsm v1.0.0/go.mod h1:ExLWB3jXQjFxgAE09QxWt4URvu3Yi0Nakmyj0u1D2pE=
 github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
 github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
