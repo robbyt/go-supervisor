@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/stretchr/testify/mock"
-
 	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/stretchr/testify/mock"
 )
 
 // MockStateMachine is a mock implementation of the stateMachine interface

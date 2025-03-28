@@ -26,7 +26,12 @@ func getAvailablePort(t *testing.T, basePort int) string {
 }
 
 // createTestServer creates a new server for testing but doesn't start it
-func createTestServer(t *testing.T, handler http.HandlerFunc, path string, drainTimeout time.Duration) (*Runner, string, chan error) {
+func createTestServer(
+	t *testing.T,
+	handler http.HandlerFunc,
+	path string,
+	drainTimeout time.Duration,
+) (*Runner, string, chan error) {
 	t.Helper()
 
 	listenPort := getAvailablePort(t, 8000)
@@ -50,7 +55,12 @@ func createTestServer(t *testing.T, handler http.HandlerFunc, path string, drain
 
 // setupTestServer creates a server and starts it
 // nolint:unused
-func setupTestServer(t *testing.T, handler http.HandlerFunc, path string, drainTimeout time.Duration) (*Runner, string, chan error) {
+func setupTestServer(
+	t *testing.T,
+	handler http.HandlerFunc,
+	path string,
+	drainTimeout time.Duration,
+) (*Runner, string, chan error) {
 	t.Helper()
 
 	server, listenPort, done := createTestServer(t, handler, path, drainTimeout)

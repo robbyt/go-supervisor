@@ -11,7 +11,6 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/supervisor"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

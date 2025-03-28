@@ -102,7 +102,11 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 
 // RunServer initializes and runs the HTTP server with supervisor
 // Returns the supervisor and a cleanup function
-func RunServer(ctx context.Context, logHandler slog.Handler, routes []httpserver.Route) (*supervisor.PIDZero, func(), error) {
+func RunServer(
+	ctx context.Context,
+	logHandler slog.Handler,
+	routes []httpserver.Route,
+) (*supervisor.PIDZero, func(), error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
 		return httpserver.NewConfig(ListenOn, DrainTimeout, routes)
