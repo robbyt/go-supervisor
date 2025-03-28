@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 func TestReload(t *testing.T) {
@@ -92,7 +91,10 @@ func TestReload(t *testing.T) {
 		}
 
 		// Create a new runner with our callback
-		updatedServer, err := NewRunner(WithContext(context.Background()), WithConfigCallback(newCfgCallback))
+		updatedServer, err := NewRunner(
+			WithContext(context.Background()),
+			WithConfigCallback(newCfgCallback),
+		)
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			updatedServer.Stop() // Clean up the updated server too
@@ -259,7 +261,12 @@ func TestReload(t *testing.T) {
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
 		require.NoError(t, err, "After a failed reload, original server should still be running")
 		defer resp.Body.Close() // Close the response body to avoid resource leaks
-		require.Equal(t, http.StatusOK, resp.StatusCode, "After a failed reload, the request should still be handled")
+		require.Equal(
+			t,
+			http.StatusOK,
+			resp.StatusCode,
+			"After a failed reload, the request should still be handled",
+		)
 
 		server.Stop()
 		err = <-errChan
@@ -378,7 +385,12 @@ func TestReload(t *testing.T) {
 		waitForState(t, stateChan, []string{finiteState.StatusError})
 
 		// Verify the server is in Error state
-		assert.Equal(t, finiteState.StatusError, server.GetState(), "Server should be in Error state")
+		assert.Equal(
+			t,
+			finiteState.StatusError,
+			server.GetState(),
+			"Server should be in Error state",
+		)
 	})
 }
 

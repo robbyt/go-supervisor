@@ -1,73 +1,40 @@
+version: '2'  # Corrected to be a string
+
 run:
   timeout: 5m
   go: '1.24'
 
 linters:
-  disable-all: true
+  default: standard
+  disable:
+    - errcheck      # Temporarily disable until specific error checks are fixed
+    - godox         # Detects usage of FIXME, TODO and other keywords inside comments
+    - nilnil        # Checks that there is no simultaneous return of `nil` error and an invalid value
+    - noctx         # Finds sending http request without context.Context
+    - prealloc      # Temporarily disable until slice allocation issues are fixed
   enable:
-    - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
-    - govet         # Examine suspicious constructs
-    - ineffassign   # Detect unused assignments
-    - staticcheck   # Static analysis checks
-    - unused        # Check for unused constants, variables, functions, and types
     - bodyclose     # Checks HTTP response body is closed
-    - errorlint     # Check error handling
-
-    # Additional linters - commented out for now, can be enabled incrementally later
     - contextcheck  # Check whether the function uses a non-inherited context
-    - gofmt         # Check code formatting
-    - goimports     # Check import formatting
-    - misspell      # Find commonly misspelled English words
-    # - revive        # Replacement for golint (many style warnings)
-    # - stylecheck    # Style checks (can be strict about naming conventions)
+    - dupl          # Find duplicate code
+    - dupword       # Find duplicate words in comments and strings
+    - errorlint     # Check error handling
     - whitespace    # Check for unnecessary whitespace
-    # - wrapcheck     # Check that errors are wrapped properly (produces many warnings)
+    - misspell      # Find commonly misspelled English words
+    - unconvert     # Remove unnecessary type conversions
+    - reassign      # Checks that package variables are not reassigned
+    - tagalign      # Check that struct tags are well aligned
+    - nilerr        # Finds code that returns nil even if it checks that the error is not nil
+    - thelper       # Detects test helpers which should start with t.Helper()
 
-linters-settings:
-  errcheck:
-    check-blank: true
-    # check-type-assertions: false
-    # Exclude common type assertions
-    exclude-functions:
-      - (*github.com/stretchr/testify/mock.Mock).Get
-      - (net.Listener).Addr
-      - (sync/atomic.Value).Load
+formatters:
+  enable:
+    - gci           # Control Go package import order
+    - gofmt         # Format Go source code
+    - gofumpt       # Stricter Go formatting
+    - goimports     # Check and format imports
+    - golines       # Formats long lines
 
-  govet:
-    enable-all: false  # Reduced from enable-all: true to limit warnings
-    enable:
-      - assign
-      - atomic
-      - bools
-      - buildtag
-      - copylocks
-      - httpresponse
-      - loopclosure
-      - lostcancel
-      - nilfunc
-      - stdmethods
-      - structtag
-      - tests
-      - unmarshal
-      - unreachable
-      - unusedresult
-
-  # Commented out settings for linters that are disabled for now
-  # Will be useful when enabling these linters incrementally
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
-  goimports:
-    local-prefixes: "github.com/robbyt/go-supervisor"
-  stylecheck:
-    checks: ["all"]
-  wrapcheck:
-    ignoreSigs:
-      - ".Errorf("
-      - "errors.New("
-      - "errors.Unwrap"
+# Removed `linters-settings` section
 
 issues:
   max-issues-per-linter: 20

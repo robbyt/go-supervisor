@@ -27,14 +27,23 @@ func createTestHandler(t *testing.T, checkResponse bool) http.HandlerFunc {
 }
 
 // executeHandlerWithLogger runs the provided handler with the Logger middleware
-func executeHandlerWithLogger(t *testing.T, handler http.HandlerFunc, logger *slog.Logger, rec *httptest.ResponseRecorder, req *http.Request) {
+func executeHandlerWithLogger(
+	t *testing.T,
+	handler http.HandlerFunc,
+	logger *slog.Logger,
+	rec *httptest.ResponseRecorder,
+	req *http.Request,
+) {
 	t.Helper()
 	wrappedHandler := Logger(logger)(handler)
 	wrappedHandler(rec, req)
 }
 
 // setupDetailedRequest creates a test HTTP request with user agent and remote addr
-func setupDetailedRequest(t *testing.T, method, path, userAgent, remoteAddr string) (*httptest.ResponseRecorder, *http.Request) {
+func setupDetailedRequest(
+	t *testing.T,
+	method, path, userAgent, remoteAddr string,
+) (*httptest.ResponseRecorder, *http.Request) {
 	t.Helper()
 	rec, req := setupRequest(t, method, path)
 	req.Header.Set("User-Agent", userAgent)

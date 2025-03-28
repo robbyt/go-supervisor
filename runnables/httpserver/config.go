@@ -30,7 +30,12 @@ func NewConfig(addr string, drainTimeout time.Duration, routes Routes) (*Config,
 
 // String returns a human-readable representation of the Config
 func (c *Config) String() string {
-	return fmt.Sprintf("Config<addr=%s, drainTimeout=%s, routes=%s>", c.ListenAddr, c.DrainTimeout, c.Routes)
+	return fmt.Sprintf(
+		"Config<addr=%s, drainTimeout=%s, routes=%s>",
+		c.ListenAddr,
+		c.DrainTimeout,
+		c.Routes,
+	)
 }
 
 // getMux creates and returns a new http.ServeMux with all configured routes registered.
