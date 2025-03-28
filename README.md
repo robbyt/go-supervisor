@@ -4,7 +4,9 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/robbyt/go-supervisor)](https://goreportcard.com/report/github.com/robbyt/go-supervisor)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-A lightweight, flexible service supervisor for Go applications. The `go-supervisor` package provides robust lifecycle management for multiple services with support for graceful shutdown, configuration reloading, and state monitoring. It uses a clean interface-based design that makes it easy to implement and test service components.
+Your Go app needs graceful shutdown and termination handling. If you don't "trap" a SIGTERM from a `ctrl-c`, your app may exit without cleaning up resources or saving the final state. This is especially important for long-running applications.
+
+This service supervisor for Go applications provides lifecycle management for multiple services and supports graceful shutdown, hot reloading, and state monitoring. It uses an interface-based capability design that makes it easy to incrementally implement service features without unnecessary complexity.
 
 ## Features
 
@@ -42,7 +44,6 @@ import (
 // Example service that implements Runnable interface
 type MyService struct {
     name string
-    done chan struct{}
 }
 
 // Interface guard, ensuring that MyService implements Runnable
@@ -76,8 +77,8 @@ func (s *MyService) String() string {
 
 func main() {
     // Create some services
-    service1 := &MyService{name: "Service1", done: make(chan struct{})}
-    service2 := &MyService{name: "Service2", done: make(chan struct{})}
+    service1 := &MyService{name: "Service1"}
+    service2 := &MyService{name: "Service2"}
     
     // Create a custom logger
     handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
