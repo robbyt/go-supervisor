@@ -65,9 +65,11 @@ type Runner struct {
 }
 
 // Interface guards to ensure all of these are implemented
-var _ supervisor.Runnable = (*Runner)(nil)
-var _ supervisor.Reloadable = (*Runner)(nil)
-var _ supervisor.Stateable = (*Runner)(nil)
+var (
+	_ supervisor.Runnable   = (*Runner)(nil)
+	_ supervisor.Reloadable = (*Runner)(nil)
+	_ supervisor.Stateable  = (*Runner)(nil)
+)
 
 // NewRunner initializes a new HTTPServer runner instance.
 func NewRunner(opts ...Option) (*Runner, error) {

@@ -75,7 +75,9 @@ func (p *PIDZero) AddStateSubscriber(ch chan StateMap) func() {
 	case ch <- p.GetStateMap():
 		p.logger.Debug("Sent initial state to subscriber")
 	default:
-		p.logger.Warn("Unable to write initial state to channel; next state change will be sent instead")
+		p.logger.Warn(
+			"Unable to write initial state to channel; next state change will be sent instead",
+		)
 	}
 
 	return func() {
@@ -197,7 +199,15 @@ func (p *PIDZero) startStateMonitor() {
 						// Only broadcast if the state has actually changed from the last known state
 						if state != lastState {
 							p.stateMap.Store(r, state)
-							p.logger.Debug("State changed", "runnable", r, "oldState", lastState, "newState", state)
+							p.logger.Debug(
+								"State changed",
+								"runnable",
+								r,
+								"oldState",
+								lastState,
+								"newState",
+								state,
+							)
 							lastState = state
 
 							// Broadcast state change to all subscribers

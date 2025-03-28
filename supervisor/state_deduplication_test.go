@@ -164,7 +164,22 @@ func TestStateDeduplication(t *testing.T) {
 
 	// We should have unique state broadcasts (one each)
 	// for running, stopped, and error states
-	assert.Equal(t, 1, statesReceived["running"], "Should receive exactly one 'running' state broadcast")
-	assert.Equal(t, 1, statesReceived["stopped"], "Should receive exactly one 'stopped' state broadcast")
-	assert.Equal(t, 1, statesReceived["error"], "Should receive exactly one 'error' state broadcast")
+	assert.Equal(
+		t,
+		1,
+		statesReceived["running"],
+		"Should receive exactly one 'running' state broadcast",
+	)
+	assert.Equal(
+		t,
+		1,
+		statesReceived["stopped"],
+		"Should receive exactly one 'stopped' state broadcast",
+	)
+	assert.Equal(
+		t,
+		1,
+		statesReceived["error"],
+		"Should receive exactly one 'error' state broadcast",
+	)
 }

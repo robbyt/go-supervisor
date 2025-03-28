@@ -20,7 +20,10 @@ type Route struct {
 
 // applyMiddlewares wraps a handler with multiple middleware functions.
 // The first middleware in the list is the outermost wrapper (executed first).
-func applyMiddlewares(handler http.HandlerFunc, middlewares ...middleware.Middleware) http.HandlerFunc {
+func applyMiddlewares(
+	handler http.HandlerFunc,
+	middlewares ...middleware.Middleware,
+) http.HandlerFunc {
 	// Apply middlewares in reverse order so the first middleware is outermost
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		handler = middlewares[i](handler)
@@ -52,7 +55,12 @@ func NewRoute(name string, path string, handler http.HandlerFunc) (*Route, error
 
 // NewRouteWithMiddleware creates a new Route with the given name, path, handler,
 // and applies the provided middlewares to the handler in the order they are provided.
-func NewRouteWithMiddleware(name string, path string, handler http.HandlerFunc, middlewares ...middleware.Middleware) (*Route, error) {
+func NewRouteWithMiddleware(
+	name string,
+	path string,
+	handler http.HandlerFunc,
+	middlewares ...middleware.Middleware,
+) (*Route, error) {
 	if name == "" {
 		return nil, errors.New("name cannot be empty")
 	}
@@ -76,7 +84,11 @@ func NewRouteWithMiddleware(name string, path string, handler http.HandlerFunc, 
 
 // NewWildcardRoute creates a route that handles everything under /prefix/*.
 // Clients calling /prefix/foo/bar will match this route.
-func NewWildcardRoute(prefix string, handler http.HandlerFunc, middlewares ...middleware.Middleware) (*Route, error) {
+func NewWildcardRoute(
+	prefix string,
+	handler http.HandlerFunc,
+	middlewares ...middleware.Middleware,
+) (*Route, error) {
 	logger := slog.Default().WithGroup("httpserver.NewWildcardRoute")
 	if prefix == "" {
 		return nil, errors.New("prefix cannot be empty")

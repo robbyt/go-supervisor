@@ -17,7 +17,13 @@ func createStateProvider(t *testing.T, state string) func() string {
 }
 
 // executeHandlerWithState runs the provided handler with the StateDebugger middleware
-func executeHandlerWithState(t *testing.T, handler http.HandlerFunc, stateProvider func() string, rec *httptest.ResponseRecorder, req *http.Request) {
+func executeHandlerWithState(
+	t *testing.T,
+	handler http.HandlerFunc,
+	stateProvider func() string,
+	rec *httptest.ResponseRecorder,
+	req *http.Request,
+) {
 	t.Helper()
 	wrappedHandler := StateDebugger(stateProvider)(handler)
 	wrappedHandler(rec, req)

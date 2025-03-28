@@ -22,7 +22,12 @@ func createStatusHandler(t *testing.T, status int, message string) http.HandlerF
 }
 
 // executeHandlerWithMetrics runs the provided handler with the MetricCollector middleware
-func executeHandlerWithMetrics(t *testing.T, handler http.HandlerFunc, rec *httptest.ResponseRecorder, req *http.Request) {
+func executeHandlerWithMetrics(
+	t *testing.T,
+	handler http.HandlerFunc,
+	rec *httptest.ResponseRecorder,
+	req *http.Request,
+) {
 	t.Helper()
 	metricsMiddleware := MetricCollector()
 	wrappedHandler := metricsMiddleware(handler)
