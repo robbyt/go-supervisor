@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func getAvailablePort(t *testing.T, basePort int) string {
 	for port := basePort; port <= 65535; port++ {
 		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
-			listener.Close()
+			assert.NoError(t, listener.Close())
 			return fmt.Sprintf(":%d", port)
 		}
 	}
@@ -97,6 +98,6 @@ func makeTestRequest(t *testing.T, url string) *http.Response {
 	resp, err := http.Get(url)
 	require.NoError(t, err, "HTTP request failed")
 
-	defer resp.Body.Close()
+	defer func() { assert.NoError(t, resp.Body.Close()) }()
 	return resp
 }

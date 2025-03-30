@@ -7,7 +7,6 @@ run:
 linters:
   default: standard
   disable:
-    - errcheck      # Temporarily disable until specific error checks are fixed
     - godox         # Detects usage of FIXME, TODO and other keywords inside comments
     - nilnil        # Checks that there is no simultaneous return of `nil` error and an invalid value
     - noctx         # Finds sending http request without context.Context
@@ -25,6 +24,17 @@ linters:
     - tagalign      # Check that struct tags are well aligned
     - nilerr        # Finds code that returns nil even if it checks that the error is not nil
     - thelper       # Detects test helpers which should start with t.Helper()
+  settings:
+    errcheck:
+      check-blank: true
+      # Standard exclusions for common patterns:
+      exclude-functions:
+        # Ignoring error from fmt.Fprintf is almost always okay in HTTP handlers
+        - fmt.Fprintf
+        # Common test library functions that rarely need error checking
+        - (*github.com/stretchr/testify/mock.Mock).Get
+        - (net.Listener).Addr
+        - (sync/atomic.Value).Load
 
 formatters:
   enable:

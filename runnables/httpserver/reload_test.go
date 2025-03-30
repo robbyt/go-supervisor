@@ -187,7 +187,7 @@ func TestReload(t *testing.T) {
 		// Verify that the handler still works
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.True(t, handlerCalled, "Handler was not called")
 	})
@@ -260,7 +260,7 @@ func TestReload(t *testing.T) {
 		// Verify that the original handler still works (server doesn't stop on reload error)
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
 		require.NoError(t, err, "After a failed reload, original server should still be running")
-		defer resp.Body.Close() // Close the response body to avoid resource leaks
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
 		require.Equal(
 			t,
 			http.StatusOK,
@@ -458,6 +458,6 @@ func TestRapidReload(t *testing.T) {
 	// Verify server is still operational
 	resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { assert.NoError(t, resp.Body.Close()) }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

@@ -82,7 +82,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	go func() {
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/sleep", listenPort))
 		if err == nil {
-			resp.Body.Close()
+			assert.NoError(t, resp.Body.Close())
 		}
 	}()
 
@@ -152,7 +152,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	go func() {
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/long", listenPort))
 		if err == nil {
-			resp.Body.Close()
+			assert.NoError(t, resp.Body.Close())
 		}
 	}()
 

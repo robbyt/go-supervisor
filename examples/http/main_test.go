@@ -50,7 +50,7 @@ func TestRunServer(t *testing.T) {
 	if err == nil {
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err, "Failed to read response body")
-		resp.Body.Close()
+		assert.NoError(t, resp.Body.Close())
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "Status: OK\n", string(body))
@@ -60,7 +60,7 @@ func TestRunServer(t *testing.T) {
 		if err == nil {
 			metricsBody, err := io.ReadAll(metricsResp.Body)
 			require.NoError(t, err, "Failed to read metrics response body")
-			metricsResp.Body.Close()
+			assert.NoError(t, metricsResp.Body.Close())
 
 			assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 			// Check that the response contains expected metrics format
