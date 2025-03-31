@@ -35,6 +35,7 @@ jobs:
         run: |
           go test \
           -cover -coverprofile=unit.coverage.out \
+          github.com/robbyt/go-supervisor/internal/... \
           github.com/robbyt/go-supervisor/runnables/... \
           github.com/robbyt/go-supervisor/supervisor/...
       
