@@ -51,4 +51,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.go.coverage.reportPaths: unit.coverage.out
+            -Dsonar.projectKey=robbyt_go-supervisor
+            -Dsonar.organization=robbyt
+            -Dsonar.go.coverage.reportPaths=unit.coverage.out
