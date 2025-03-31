@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -68,12 +68,12 @@ func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 // of config storage for testing purposes
 type MockRunner struct {
 	storedConfig *Config
-	mockFSM      finiteState.Machine
+	mockFSM      finitestate.Machine
 	callback     func() (*Config, error)
 }
 
 // Creates a new MockRunner with mocked config storage
-func NewMockRunner(configCallback func() (*Config, error), fsm finiteState.Machine) *MockRunner {
+func NewMockRunner(configCallback func() (*Config, error), fsm finitestate.Machine) *MockRunner {
 	return &MockRunner{
 		callback: configCallback,
 		mockFSM:  fsm,

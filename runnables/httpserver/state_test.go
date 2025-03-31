@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,12 +22,12 @@ func TestSetStateError(t *testing.T) {
 			func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 
 		// Set a known state that can transition to error
-		err := server.fsm.SetState(finiteState.StatusNew)
+		err := server.fsm.SetState(finitestate.StatusNew)
 		require.NoError(t, err)
 
 		// Test state transition to error
 		server.setStateError()
-		assert.Equal(t, finiteState.StatusError, server.GetState())
+		assert.Equal(t, finitestate.StatusError, server.GetState())
 	})
 
 	// Test forced SetState path
@@ -37,16 +37,16 @@ func TestSetStateError(t *testing.T) {
 
 		// Set a state that won't normally transition to error
 		// Force it to be in Running state first
-		err := server.fsm.SetState(finiteState.StatusRunning)
+		err := server.fsm.SetState(finitestate.StatusRunning)
 		require.NoError(t, err)
 
 		// Then set a non-standard state
-		err = server.fsm.Transition(finiteState.StatusStopping) // A valid transition
+		err = server.fsm.Transition(finitestate.StatusStopping) // A valid transition
 		require.NoError(t, err)
 
 		// This should fail normal transition and use SetState instead
 		server.setStateError()
-		assert.Equal(t, finiteState.StatusError, server.GetState())
+		assert.Equal(t, finitestate.StatusError, server.GetState())
 	})
 
 	// Test transition to Error from Stopping
@@ -57,11 +57,11 @@ func TestSetStateError(t *testing.T) {
 		// Get typical transitions to use as base
 		logger := slog.Default().WithGroup("testFSM")
 		// Create valid FSM but force it to a specific state
-		validFSM, err := finiteState.New(logger.Handler())
+		validFSM, err := finitestate.New(logger.Handler())
 		require.NoError(t, err)
 
 		// Force it to be in Stopping state
-		err = validFSM.SetState(finiteState.StatusStopping)
+		err = validFSM.SetState(finitestate.StatusStopping)
 		require.NoError(t, err)
 
 		// Save original FSM to restore after test
@@ -75,7 +75,7 @@ func TestSetStateError(t *testing.T) {
 		server.setStateError()
 
 		// Should be able to transition to Error even from Stopping
-		assert.Equal(t, finiteState.StatusError, server.GetState(), "Should be in Error state")
+		assert.Equal(t, finitestate.StatusError, server.GetState(), "Should be in Error state")
 	})
 }
 
@@ -87,17 +87,17 @@ func TestGetState(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 
 	// Test initial state
-	assert.Equal(t, finiteState.StatusNew, server.GetState(), "Initial state should be New")
+	assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
 
 	// Test after changing state
-	err := server.fsm.SetState(finiteState.StatusRunning)
+	err := server.fsm.SetState(finitestate.StatusRunning)
 	require.NoError(t, err)
-	assert.Equal(t, finiteState.StatusRunning, server.GetState(), "Should return Running state")
+	assert.Equal(t, finitestate.StatusRunning, server.GetState(), "Should return Running state")
 
 	// Test after another state change
-	err = server.fsm.SetState(finiteState.StatusStopping)
+	err = server.fsm.SetState(finitestate.StatusStopping)
 	require.NoError(t, err)
-	assert.Equal(t, finiteState.StatusStopping, server.GetState(), "Should return Stopping state")
+	assert.Equal(t, finitestate.StatusStopping, server.GetState(), "Should return Stopping state")
 }
 
 // TestGetStateChan verifies that the state channel works correctly
@@ -116,15 +116,15 @@ func TestGetStateChan(t *testing.T) {
 
 	// Verify we can receive state changes
 	initialState := <-stateChan
-	assert.Equal(t, finiteState.StatusNew, initialState, "Initial state should be New")
+	assert.Equal(t, finitestate.StatusNew, initialState, "Initial state should be New")
 
 	// Make a state change
-	err := server.fsm.SetState(finiteState.StatusRunning)
+	err := server.fsm.SetState(finitestate.StatusRunning)
 	require.NoError(t, err)
 
 	// Verify the state change is received
 	newState := <-stateChan
-	assert.Equal(t, finiteState.StatusRunning, newState, "Should receive Running state")
+	assert.Equal(t, finitestate.StatusRunning, newState, "Should receive Running state")
 
 	// Test context cancellation
 	cancel()
@@ -218,20 +218,20 @@ func TestWaitForState(t *testing.T) {
 	// Set the state after a short delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		err := server.fsm.SetState(finiteState.StatusRunning)
+		err := server.fsm.SetState(finitestate.StatusRunning)
 		require.NoError(t, err)
 	}()
 
 	// Wait for the state change
-	waitForState(t, stateChan, []string{finiteState.StatusRunning})
+	waitForState(t, stateChan, []string{finitestate.StatusRunning})
 
 	// Verify the current state
-	assert.Equal(t, finiteState.StatusRunning, server.GetState())
+	assert.Equal(t, finitestate.StatusRunning, server.GetState())
 
 	// Test waiting for multiple possible states
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		err := server.fsm.SetState(finiteState.StatusStopping)
+		err := server.fsm.SetState(finitestate.StatusStopping)
 		require.NoError(t, err)
 	}()
 
@@ -239,7 +239,7 @@ func TestWaitForState(t *testing.T) {
 	waitForState(
 		t,
 		stateChan,
-		[]string{finiteState.StatusStopped, finiteState.StatusStopping, finiteState.StatusError},
+		[]string{finitestate.StatusStopped, finitestate.StatusStopping, finitestate.StatusError},
 	)
-	assert.Equal(t, finiteState.StatusStopping, server.GetState())
+	assert.Equal(t, finitestate.StatusStopping, server.GetState())
 }
