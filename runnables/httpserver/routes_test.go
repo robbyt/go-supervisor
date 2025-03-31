@@ -155,7 +155,7 @@ func TestNewWildcardRoute(t *testing.T) {
 
 				route.Handler(w, req)
 				resp := w.Result()
-				defer resp.Body.Close()
+				defer func() { assert.NoError(t, resp.Body.Close()) }()
 
 				// The wildcard handler should respond successfully
 				assert.Equal(t, http.StatusOK, resp.StatusCode)

@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // TestSetStateError verifies the error state setting functionality
@@ -237,6 +236,10 @@ func TestWaitForState(t *testing.T) {
 	}()
 
 	// Should return when any of the expected states is reached
-	waitForState(t, stateChan, []string{finiteState.StatusStopped, finiteState.StatusStopping, finiteState.StatusError})
+	waitForState(
+		t,
+		stateChan,
+		[]string{finiteState.StatusStopped, finiteState.StatusStopping, finiteState.StatusError},
+	)
 	assert.Equal(t, finiteState.StatusStopping, server.GetState())
 }

@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // waitForRunningState waits for the server to enter the Running state
@@ -23,7 +22,10 @@ func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
 
 	for {
 		if time.Since(startTime) > timeout {
-			t.Fatalf("Server did not reach Running state in time. Current state: %s", server.GetState())
+			t.Fatalf(
+				"Server did not reach Running state in time. Current state: %s",
+				server.GetState(),
+			)
 		}
 
 		if server.GetState() == finiteState.StatusRunning {
@@ -80,7 +82,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	go func() {
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/sleep", listenPort))
 		if err == nil {
-			resp.Body.Close()
+			assert.NoError(t, resp.Body.Close())
 		}
 	}()
 
@@ -150,7 +152,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	go func() {
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/long", listenPort))
 		if err == nil {
-			resp.Body.Close()
+			assert.NoError(t, resp.Body.Close())
 		}
 	}()
 
@@ -231,7 +233,7 @@ func TestString(t *testing.T) {
 		// Create stub with logger and config callback that returns nil
 		stub := &stubRunner{}
 		stub.configCallback = func() (*Config, error) { return nil, nil }
-		stub.Runner.logger = slog.Default().WithGroup("httpserver.Runner")
+		stub.logger = slog.Default().WithGroup("httpserver.Runner")
 
 		// Test string representation with nil config
 		assert.Equal(t, "HTTPServer<nil>", stub.String())
@@ -291,79 +293,63 @@ func TestRoutesRequired(t *testing.T) {
 func TestBootFailure(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name           string
-		createCallback func() func() (*Config, error)
-		expectRunner   bool
-		checkErr       func(*testing.T, error)
-	}{
-		{
-			name: "Config callback returns nil",
-			createCallback: func() func() (*Config, error) {
-				return func() (*Config, error) { return nil, nil }
-			},
-			expectRunner: false,
-			checkErr: func(t *testing.T, err error) {
-				assert.Contains(t, err.Error(), "failed to load initial config")
-			},
-		},
-		{
-			name: "Config callback returns error",
-			createCallback: func() func() (*Config, error) {
-				return func() (*Config, error) { return nil, errors.New("failed to load config") }
-			},
-			expectRunner: false,
-			checkErr: func(t *testing.T, err error) {
-				assert.Contains(t, err.Error(), "failed to load initial config")
-			},
-		},
-		{
-			name: "Server boot fails with invalid port",
-			createCallback: func() func() (*Config, error) {
-				handler := func(w http.ResponseWriter, r *http.Request) {}
-				route, err := NewRoute("v1", "/", handler)
-				require.NoError(t, err)
-				return func() (*Config, error) {
-					return &Config{
-						ListenAddr:   "invalid-port",
-						DrainTimeout: 1 * time.Second,
-						Routes:       Routes{*route},
-					}, nil
-				}
-			},
-			expectRunner: true,
-			checkErr: func(t *testing.T, err error) {
-				assert.True(t, errors.Is(err, ErrHttpServer),
-					"Expected error to be ErrHttpServer")
-			},
-		},
-	}
+	t.Run("Config callback returns nil", func(t *testing.T) {
+		t.Parallel()
 
-	for _, tc := range tests {
-		tc := tc // Capture range variable
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+		callback := func() (*Config, error) { return nil, nil }
+		runner, err := NewRunner(
+			WithContext(context.Background()),
+			WithConfigCallback(callback),
+		)
 
-			callback := tc.createCallback()
-			runner, err := NewRunner(WithContext(context.Background()), WithConfigCallback(callback))
+		assert.Error(t, err)
+		assert.Nil(t, runner)
+		assert.Contains(t, err.Error(), "failed to load initial config")
+	})
 
-			if !tc.expectRunner {
-				assert.Error(t, err)
-				assert.Nil(t, runner)
-				tc.checkErr(t, err)
-				return
-			}
+	t.Run("Config callback returns error", func(t *testing.T) {
+		t.Parallel()
 
-			assert.NoError(t, err)
-			assert.NotNil(t, runner)
+		callback := func() (*Config, error) { return nil, errors.New("failed to load config") }
+		runner, err := NewRunner(
+			WithContext(context.Background()),
+			WithConfigCallback(callback),
+		)
 
-			// Test actual run
-			err = runner.Run(context.Background())
-			assert.Error(t, err)
-			tc.checkErr(t, err)
-			assert.Equal(t, finiteState.StatusError, runner.GetState())
-		})
-	}
+		assert.Error(t, err)
+		assert.Nil(t, runner)
+		assert.Contains(t, err.Error(), "failed to load initial config")
+	})
+
+	t.Run("Server boot fails with invalid port", func(t *testing.T) {
+		t.Parallel()
+
+		handler := func(w http.ResponseWriter, r *http.Request) {}
+		route, err := NewRoute("v1", "/", handler)
+		require.NoError(t, err)
+
+		callback := func() (*Config, error) {
+			return &Config{
+				ListenAddr:   "invalid-port",
+				DrainTimeout: 1 * time.Second,
+				Routes:       Routes{*route},
+			}, nil
+		}
+
+		runner, err := NewRunner(
+			WithContext(context.Background()),
+			WithConfigCallback(callback),
+		)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, runner)
+
+		// Test actual run
+		err = runner.Run(context.Background())
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrHttpServer), "Expected error to be ErrHttpServer")
+		assert.Equal(t, finiteState.StatusError, runner.GetState())
+	})
 }
 
 // TestStopServerWhenNotRunning verifies behavior when stopping a non-running server
@@ -460,5 +446,10 @@ func TestServerLifecycle(t *testing.T) {
 	err = <-done
 
 	assert.NoError(t, err, "Server should shut down without error")
-	assert.Equal(t, finiteState.StatusStopped, server.GetState(), "Server should be in stopped state")
+	assert.Equal(
+		t,
+		finiteState.StatusStopped,
+		server.GetState(),
+		"Server should be in stopped state",
+	)
 }
