@@ -1,4 +1,4 @@
-package finiteState
+package finitestate
 
 import (
 	"context"

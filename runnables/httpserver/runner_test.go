@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +28,7 @@ func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
 			)
 		}
 
-		if server.GetState() == finiteState.StatusRunning {
+		if server.GetState() == finitestate.StatusRunning {
 			break
 		}
 
@@ -348,7 +348,7 @@ func TestBootFailure(t *testing.T) {
 		err = runner.Run(context.Background())
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrHttpServer), "Expected error to be ErrHttpServer")
-		assert.Equal(t, finiteState.StatusError, runner.GetState())
+		assert.Equal(t, finitestate.StatusError, runner.GetState())
 	})
 }
 
@@ -448,7 +448,7 @@ func TestServerLifecycle(t *testing.T) {
 	assert.NoError(t, err, "Server should shut down without error")
 	assert.Equal(
 		t,
-		finiteState.StatusStopped,
+		finitestate.StatusStopped,
 		server.GetState(),
 		"Server should be in stopped state",
 	)

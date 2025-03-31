@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -210,7 +210,7 @@ func TestReloadConfig_EdgeCases(t *testing.T) {
 
 		// Create a mock FSM
 		mockFSM := NewMockStateMachine()
-		mockFSM.On("GetState").Return(finiteState.StatusRunning)
+		mockFSM.On("GetState").Return(finitestate.StatusRunning)
 
 		// Create a sequence of callbacks
 		mockCallback1 := new(MockConfigCallback)

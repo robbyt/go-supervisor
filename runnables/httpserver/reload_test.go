@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,7 +81,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Force the server to Running state so we can reload
-		err = server.fsm.SetState(finiteState.StatusRunning)
+		err = server.fsm.SetState(finitestate.StatusRunning)
 		require.NoError(t, err)
 
 		// We can't easily modify the config callback directly,
@@ -178,7 +178,7 @@ func TestReload(t *testing.T) {
 		stateChan := server.GetStateChan(stateCtx)
 
 		// Wait for the server to complete its state transition
-		waitForState(t, stateChan, []string{finiteState.StatusReloading, finiteState.StatusRunning})
+		waitForState(t, stateChan, []string{finitestate.StatusReloading, finitestate.StatusRunning})
 
 		// Verify that the state hasn't changed
 		stateAfter := server.GetState()
@@ -250,12 +250,12 @@ func TestReload(t *testing.T) {
 		var stateAfter string
 		for i := 0; i < 5; i++ {
 			stateAfter = server.GetState()
-			if stateAfter == finiteState.StatusError {
+			if stateAfter == finitestate.StatusError {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		require.Equal(t, finiteState.StatusError, stateAfter, "Server should be in error state")
+		require.Equal(t, finitestate.StatusError, stateAfter, "Server should be in error state")
 
 		// Verify that the original handler still works (server doesn't stop on reload error)
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
@@ -299,7 +299,7 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, server)
 
 		// Verify initial state
-		assert.Equal(t, finiteState.StatusNew, server.GetState(), "Initial state should be New")
+		assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
 
 		// Capture server config before reload
 		configBefore := server.getConfig()
@@ -308,7 +308,7 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Verify the state didn't change
-		assert.Equal(t, finiteState.StatusNew, server.GetState(), "State should remain New")
+		assert.Equal(t, finitestate.StatusNew, server.GetState(), "State should remain New")
 
 		// Verify config didn't change
 		configAfter := server.getConfig()
@@ -370,7 +370,7 @@ func TestReload(t *testing.T) {
 
 		// Wait for server to be in Running state
 		time.Sleep(100 * time.Millisecond)
-		require.Equal(t, finiteState.StatusRunning, server.GetState(), "Server should be running")
+		require.Equal(t, finitestate.StatusRunning, server.GetState(), "Server should be running")
 
 		// Setup state monitoring
 		stateCtx, cancel := context.WithCancel(context.Background())
@@ -382,12 +382,12 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Wait for the state to change to Error
-		waitForState(t, stateChan, []string{finiteState.StatusError})
+		waitForState(t, stateChan, []string{finitestate.StatusError})
 
 		// Verify the server is in Error state
 		assert.Equal(
 			t,
-			finiteState.StatusError,
+			finitestate.StatusError,
 			server.GetState(),
 			"Server should be in Error state",
 		)
@@ -453,7 +453,7 @@ func TestRapidReload(t *testing.T) {
 	}
 
 	// Wait for the final state to be running
-	waitForState(t, stateChan, []string{finiteState.StatusRunning})
+	waitForState(t, stateChan, []string{finitestate.StatusRunning})
 
 	// Verify server is still operational
 	resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
