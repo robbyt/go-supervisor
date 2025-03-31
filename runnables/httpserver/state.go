@@ -3,24 +3,24 @@ package httpserver
 import (
 	"context"
 
-	"github.com/robbyt/go-supervisor/internal/finiteState"
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 )
 
 // setStateError transitions the state machine to the Error state,
 // falling back to alternative approaches if the transition fails.
 func (r *Runner) setStateError() {
 	// First try with normal transition
-	if r.fsm.TransitionBool(finiteState.StatusError) {
+	if r.fsm.TransitionBool(finitestate.StatusError) {
 		return
 	}
 
 	// If that fails, force the state using SetState
 	r.logger.Debug("Using SetState to force Error state")
-	if err := r.fsm.SetState(finiteState.StatusError); err != nil {
+	if err := r.fsm.SetState(finitestate.StatusError); err != nil {
 		r.logger.Error("Failed to set Error state", "error", err)
 
 		// Last resort - try to set to Unknown
-		if err := r.fsm.SetState(finiteState.StatusUnknown); err != nil {
+		if err := r.fsm.SetState(finitestate.StatusUnknown); err != nil {
 			r.logger.Error("Failed to set Unknown state", "error", err)
 		}
 	}
