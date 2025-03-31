@@ -1,5 +1,6 @@
 # go-supervisor
 
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/35c314196ded499fb8e45be36d5b4ac2)](https://app.codacy.com/gh/robbyt/go-supervisor/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![Go Reference](https://pkg.go.dev/badge/github.com/robbyt/go-supervisor.svg)](https://pkg.go.dev/github.com/robbyt/go-supervisor)
 [![Go Report Card](https://goreportcard.com/badge/github.com/robbyt/go-supervisor)](https://goreportcard.com/report/github.com/robbyt/go-supervisor)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)

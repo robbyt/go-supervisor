@@ -33,7 +33,7 @@ jobs:
         run: go test \
           -cover -coverprofile=unit.coverage.out \
           github.com/robbyt/go-supervisor/runnables/... \
-          github.com/robbyt/go-supervisor/supervisor/... \
+          github.com/robbyt/go-supervisor/supervisor/...
       
       - name: Run codacy-coverage-reporter
         uses: codacy/codacy-coverage-reporter-action@v1.3.0
