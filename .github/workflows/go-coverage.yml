@@ -30,7 +30,8 @@ jobs:
         run: go version
 
       - name: Go test
-        run: go test \
+        run: |
+          go test \
           -cover -coverprofile=unit.coverage.out \
           github.com/robbyt/go-supervisor/runnables/... \
           github.com/robbyt/go-supervisor/supervisor/...
