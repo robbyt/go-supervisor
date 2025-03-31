@@ -5,10 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-
-	"github.com/robbyt/go-supervisor/runnables/mocks"
 )
 
 // TestPIDZero_ReloadManager tests the reload manager functionality.

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func getAvailablePort(t *testing.T, basePort int) string {
 	for port := basePort; port <= 65535; port++ {
 		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err == nil {
-			listener.Close()
+			assert.NoError(t, listener.Close())
 			return fmt.Sprintf(":%d", port)
 		}
 	}
@@ -26,7 +27,12 @@ func getAvailablePort(t *testing.T, basePort int) string {
 }
 
 // createTestServer creates a new server for testing but doesn't start it
-func createTestServer(t *testing.T, handler http.HandlerFunc, path string, drainTimeout time.Duration) (*Runner, string, chan error) {
+func createTestServer(
+	t *testing.T,
+	handler http.HandlerFunc,
+	path string,
+	drainTimeout time.Duration,
+) (*Runner, string, chan error) {
 	t.Helper()
 
 	listenPort := getAvailablePort(t, 8000)
@@ -50,7 +56,12 @@ func createTestServer(t *testing.T, handler http.HandlerFunc, path string, drain
 
 // setupTestServer creates a server and starts it
 // nolint:unused
-func setupTestServer(t *testing.T, handler http.HandlerFunc, path string, drainTimeout time.Duration) (*Runner, string, chan error) {
+func setupTestServer(
+	t *testing.T,
+	handler http.HandlerFunc,
+	path string,
+	drainTimeout time.Duration,
+) (*Runner, string, chan error) {
 	t.Helper()
 
 	server, listenPort, done := createTestServer(t, handler, path, drainTimeout)
@@ -87,6 +98,6 @@ func makeTestRequest(t *testing.T, url string) *http.Response {
 	resp, err := http.Get(url)
 	require.NoError(t, err, "HTTP request failed")
 
-	defer resp.Body.Close()
+	defer func() { assert.NoError(t, resp.Body.Close()) }()
 	return resp
 }

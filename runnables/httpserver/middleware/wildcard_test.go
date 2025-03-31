@@ -20,7 +20,13 @@ func createPathEchoHandler(t *testing.T) http.HandlerFunc {
 }
 
 // executeHandlerWithWildcard runs the provided handler with the WildcardRouter middleware
-func executeHandlerWithWildcard(t *testing.T, handler http.HandlerFunc, prefix string, rec *httptest.ResponseRecorder, req *http.Request) {
+func executeHandlerWithWildcard(
+	t *testing.T,
+	handler http.HandlerFunc,
+	prefix string,
+	rec *httptest.ResponseRecorder,
+	req *http.Request,
+) {
 	t.Helper()
 	wrappedHandler := WildcardRouter(prefix)(handler)
 	wrappedHandler(rec, req)

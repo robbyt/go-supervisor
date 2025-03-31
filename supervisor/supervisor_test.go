@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-
-	"github.com/robbyt/go-supervisor/runnables/mocks"
 )
 
 // TestPIDZero_NewPIDZero tests creating a new PIDZero instance.

@@ -7,11 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finiteState"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-
-	"github.com/robbyt/go-supervisor/internal/finiteState"
 )
 
 // MockConfigCallback is a mock implementation of the config callback function
@@ -30,6 +29,7 @@ func (m *MockConfigCallback) Call() (*Config, error) {
 
 // Helper function to create a test route
 func createTestRouteForMock(t *testing.T, path string) Route {
+	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
@@ -40,6 +40,7 @@ func createTestRouteForMock(t *testing.T, path string) Route {
 
 // Helper function to create a simple test config
 func createSimpleConfigForMock(t *testing.T, addr string) *Config {
+	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/")}
 	cfg, err := NewConfig(addr, 1*time.Second, routes)
 	require.NoError(t, err)
@@ -48,6 +49,7 @@ func createSimpleConfigForMock(t *testing.T, addr string) *Config {
 
 // Helper function to create a modified config
 func createModifiedConfigForMock(t *testing.T, addr string) *Config {
+	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/modified")}
 	cfg, err := NewConfig(addr, 2*time.Second, routes)
 	require.NoError(t, err)
@@ -329,13 +331,16 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a dynamically changing config callback
-		var currentConfig = initialConfig
+		currentConfig := initialConfig
 		configCallback := func() (*Config, error) {
 			return currentConfig, nil
 		}
 
 		// Create the Runner with the config callback
-		runner, err := NewRunner(WithContext(context.Background()), WithConfigCallback(configCallback))
+		runner, err := NewRunner(
+			WithContext(context.Background()),
+			WithConfigCallback(configCallback),
+		)
 		require.NoError(t, err)
 
 		// Verify initial config is set
