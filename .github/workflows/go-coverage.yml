@@ -51,7 +51,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.test.inclusions: "**_test.go"
             -Dsonar.language: go
             -Dsonar.sourceEncoding: UTF-8
             -Dsonar.go.coverage.reportPaths: unit.coverage.out
