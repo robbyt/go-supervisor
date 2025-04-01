@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Fetch all history for proper SonarQube analysis
           fetch-depth: 0
 
       - name: Set up Go
@@ -38,13 +39,6 @@ jobs:
           github.com/robbyt/go-supervisor/internal/... \
           github.com/robbyt/go-supervisor/runnables/... \
           github.com/robbyt/go-supervisor/supervisor/...
-      
-      - name: Run codacy-coverage-reporter
-        uses: codacy/codacy-coverage-reporter-action@v1.3.0
-        with:
-          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
-          coverage-reports: unit.coverage.out
-          force-coverage-parser: go
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
@@ -56,7 +50,9 @@ jobs:
             -Dsonar.organization=robbyt
             -Dsonar.go.coverage.reportPaths=unit.coverage.out
             -Dsonar.sources=.
+            -Dsonar.coverage.exclusions=examples/**
             -Dsonar.exclusions=**/*_test.go
             -Dsonar.tests=.
             -Dsonar.test.inclusions=**/*_test.go
             -Dsonar.language=go
+            -Dsonar.sourceEncoding=UTF-8

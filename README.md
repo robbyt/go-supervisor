@@ -2,8 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/robbyt/go-supervisor.svg)](https://pkg.go.dev/github.com/robbyt/go-supervisor)
 [![Go Report Card](https://goreportcard.com/badge/github.com/robbyt/go-supervisor)](https://goreportcard.com/report/github.com/robbyt/go-supervisor)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/35c314196ded499fb8e45be36d5b4ac2)](https://app.codacy.com/gh/robbyt/go-supervisor/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Codacy Badge](https://app.codacy.com/project/badge/Coverage/35c314196ded499fb8e45be36d5b4ac2)](https://app.codacy.com/gh/robbyt/go-supervisor/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=robbyt_go-supervisor&metric=coverage)](https://sonarcloud.io/summary/new_code?id=robbyt_go-supervisor)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Your Go app needs graceful shutdown and termination handling. If you don't "trap" a SIGTERM from a `ctrl-c`, your app may exit without cleaning up resources or saving the final state. This is especially important for long-running applications.
