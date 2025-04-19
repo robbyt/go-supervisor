@@ -138,16 +138,37 @@ func (p *PIDZero) Run() error {
 	}()
 	p.listenForSignals()
 
-	p.wg.Add(1) // wait for reload manager upon exit
-	go p.startReloadManager()
+	// Start the reload manager if any runnables support reloading
+	for _, r := range p.runnables {
+		if _, ok := r.(Reloadable); ok {
+			p.wg.Add(1)
+			go p.startReloadManager()
+			break
+		}
+	}
 
-	// log state changes for all runnables that are "stateable"
-	p.startStateMonitor()
+	// Start the shutdown manager if any runnables support the Stateable interface
+	for _, r := range p.runnables {
+		if _, ok := r.(Stateable); ok {
+			p.wg.Add(1)
+			go p.startStateMonitor()
+			break
+		}
+	}
+
+	// Start the shutdown manager if any runnables support the ShutdownSender interface
+	for _, r := range p.runnables {
+		if _, ok := r.(ShutdownSender); ok {
+			p.wg.Add(1)
+			go p.startShutdownManager()
+			break
+		}
+	}
 
 	// Start each service in sequence
 	for _, r := range p.runnables {
+		p.wg.Add(1)
 		go p.startRunnable(r)
-		p.wg.Add(1) // wait for each runnable upon exit
 	}
 
 	// Begin reaping process

@@ -54,3 +54,9 @@ type ReloadSender interface {
 	// GetReloadTrigger returns a channel that emits signals when a reload is requested.
 	GetReloadTrigger() <-chan struct{}
 }
+
+// ShutdownSender represents a service that can trigger system shutdown.
+type ShutdownSender interface {
+	// GetShutdownTrigger returns a channel that emits signals when a shutdown is requested.
+	GetShutdownTrigger() <-chan struct{}
+}

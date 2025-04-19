@@ -15,11 +15,14 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// TestInterfaceGuards uses compile-time type assertions to ensure that mock implementations
+// correctly implement their respective interfaces.
 func TestInterfaceGuards(t *testing.T) {
 	// Create mock instances
 	mockRunnable := mocks.NewMockRunnable()
 	mockRunnableWithState := mocks.NewMockRunnableWithStatable()
 	mockRunnableWithReload := mocks.NewMockRunnableWithReloadSender()
+	mockRunnableWithShutdown := mocks.NewMockRunnableWithShutdownSender()
 
 	// Type assertions to verify mock types implement the correct interfaces
 	var (
@@ -36,10 +39,85 @@ func TestInterfaceGuards(t *testing.T) {
 		_ supervisor.Runnable     = mockRunnableWithReload
 		_ supervisor.Reloadable   = mockRunnableWithReload
 		_ supervisor.ReloadSender = mockRunnableWithReload
+
+		// MockRunnableWithReload should implement the base Runnable interface + ReloadSender
+		_ supervisor.Runnable       = mockRunnableWithShutdown
+		_ supervisor.Reloadable     = mockRunnableWithShutdown
+		_ supervisor.ShutdownSender = mockRunnableWithShutdown
 	)
 }
 
-// TestMockRunnable tests the basic Runnable implementation
+// testHelperInheritedMethods checks that a mock properly inherits all base Runnable behavior
+func testHelperInheritedMethods(t *testing.T, mockRunnable interface{}, displayName string) {
+	t.Helper()
+
+	// Add expectations based on the type of mock
+	switch mockObj := mockRunnable.(type) {
+	case *mocks.Runnable:
+		mockObj.On("Run", mock.Anything).Return(nil)
+		mockObj.On("Stop").Return()
+		mockObj.On("Reload").Return()
+		mockObj.On("String").Return(displayName)
+
+		// Call and verify methods
+		err := mockObj.Run(context.Background())
+		assert.NoError(t, err)
+		mockObj.Stop()
+		mockObj.Reload()
+		name := mockObj.String()
+		assert.Equal(t, displayName, name)
+		mockObj.AssertExpectations(t)
+
+	case *mocks.MockRunnableWithStatable:
+		mockObj.On("Run", mock.Anything).Return(nil)
+		mockObj.On("Stop").Return()
+		mockObj.On("Reload").Return()
+		mockObj.On("String").Return(displayName)
+
+		// Call and verify methods
+		err := mockObj.Run(context.Background())
+		assert.NoError(t, err)
+		mockObj.Stop()
+		mockObj.Reload()
+		name := mockObj.String()
+		assert.Equal(t, displayName, name)
+		mockObj.AssertExpectations(t)
+
+	case *mocks.MockRunnableWithReloadSender:
+		mockObj.On("Run", mock.Anything).Return(nil)
+		mockObj.On("Stop").Return()
+		mockObj.On("Reload").Return()
+		mockObj.On("String").Return(displayName)
+
+		// Call and verify methods
+		err := mockObj.Run(context.Background())
+		assert.NoError(t, err)
+		mockObj.Stop()
+		mockObj.Reload()
+		name := mockObj.String()
+		assert.Equal(t, displayName, name)
+		mockObj.AssertExpectations(t)
+
+	case *mocks.MockRunnableWithShutdownSender:
+		mockObj.On("Run", mock.Anything).Return(nil)
+		mockObj.On("Stop").Return()
+		mockObj.On("Reload").Return()
+		mockObj.On("String").Return(displayName)
+
+		// Call and verify methods
+		err := mockObj.Run(context.Background())
+		assert.NoError(t, err)
+		mockObj.Stop()
+		mockObj.Reload()
+		name := mockObj.String()
+		assert.Equal(t, displayName, name)
+		mockObj.AssertExpectations(t)
+
+	default:
+		t.Fatalf("Unsupported mock type: %T", mockRunnable)
+	}
+}
+
 func TestMockRunnable(t *testing.T) {
 	t.Run("Run method", func(t *testing.T) {
 		// Create a mock with a shorter delay for testing
@@ -57,11 +135,7 @@ func TestMockRunnable(t *testing.T) {
 
 		// Verify behavior
 		assert.Equal(t, expectedErr, err)
-		assert.GreaterOrEqual(
-			t,
-			elapsed, 5*time.Millisecond,
-			"Run should delay by at least DelayRun duration",
-		)
+		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -79,11 +153,7 @@ func TestMockRunnable(t *testing.T) {
 		elapsed := time.Since(start)
 
 		// Verify behavior
-		assert.GreaterOrEqual(
-			t,
-			elapsed, 5*time.Millisecond,
-			"Stop should delay by at least DelayStop duration",
-		)
+		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -101,11 +171,7 @@ func TestMockRunnable(t *testing.T) {
 		elapsed := time.Since(start)
 
 		// Verify behavior
-		assert.GreaterOrEqual(
-			t,
-			elapsed, 5*time.Millisecond,
-			"Reload should delay by at least DelayReload duration",
-		)
+		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -140,7 +206,6 @@ func TestMockRunnable(t *testing.T) {
 	})
 }
 
-// TestMockRunnableWithStatable tests the MockRunnableWithStatable implementation
 func TestMockRunnableWithStatable(t *testing.T) {
 	t.Run("GetState method", func(t *testing.T) {
 		// Create a mock with a shorter delay for testing
@@ -157,11 +222,7 @@ func TestMockRunnableWithStatable(t *testing.T) {
 
 		// Verify behavior
 		assert.Equal(t, "running", state)
-		assert.GreaterOrEqual(
-			t,
-			elapsed, 5*time.Millisecond,
-			"GetState should delay by at least DelayGetState duration",
-		)
+		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -186,30 +247,10 @@ func TestMockRunnableWithStatable(t *testing.T) {
 	})
 
 	t.Run("inherits from base Runnable", func(t *testing.T) {
-		// Create a mock
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-
-		// Set up expectations for base methods
-		mockRunnable.On("Run", mock.Anything).Return(nil)
-		mockRunnable.On("Stop").Return()
-		mockRunnable.On("Reload").Return()
-		mockRunnable.On("String").Return("StatefulService")
-
-		// Call and verify all the inherited methods
-		err := mockRunnable.Run(context.Background())
-		assert.NoError(t, err)
-
-		mockRunnable.Stop()
-		mockRunnable.Reload()
-
-		name := mockRunnable.String()
-		assert.Equal(t, "StatefulService", name)
-
-		mockRunnable.AssertExpectations(t)
+		testHelperInheritedMethods(t, mocks.NewMockRunnableWithStatable(), "StatefulService")
 	})
 }
 
-// TestMockRunnableWithReloadSender tests the MockRunnableWithReloadSender implementation
 func TestMockRunnableWithReloadSender(t *testing.T) {
 	t.Run("GetReloadTrigger method", func(t *testing.T) {
 		// Create a mock
@@ -237,26 +278,38 @@ func TestMockRunnableWithReloadSender(t *testing.T) {
 	})
 
 	t.Run("inherits from base Runnable", func(t *testing.T) {
+		testHelperInheritedMethods(t, mocks.NewMockRunnableWithReloadSender(), "ReloadingService")
+	})
+}
+
+func TestMockRunnableWithShutdownSender(t *testing.T) {
+	t.Run("GetShutdownTrigger method", func(t *testing.T) {
 		// Create a mock
-		mockRunnable := mocks.NewMockRunnableWithReloadSender()
+		mockRunnable := mocks.NewMockRunnableWithShutdownSender()
 
-		// Set up expectations for base methods
-		mockRunnable.On("Run", mock.Anything).Return(nil)
-		mockRunnable.On("Stop").Return()
-		mockRunnable.On("Reload").Return()
-		mockRunnable.On("String").Return("ReloadingService")
+		// Create a test channel
+		testChan := make(chan struct{}, 1)
+		testChan <- struct{}{}
 
-		// Call and verify all the inherited methods
-		err := mockRunnable.Run(context.Background())
-		assert.NoError(t, err)
+		// Set up expectations
+		mockRunnable.On("GetShutdownTrigger").Return(testChan)
 
-		mockRunnable.Stop()
-		mockRunnable.Reload()
+		// Call the method
+		resultChan := mockRunnable.GetShutdownTrigger()
 
-		name := mockRunnable.String()
-		assert.Equal(t, "ReloadingService", name)
+		// Verify behavior - we should receive a signal from the channel
+		select {
+		case <-resultChan:
+			// Success - we received a signal
+		case <-time.After(50 * time.Millisecond):
+			t.Fatal("Did not receive expected signal from shutdown channel")
+		}
 
 		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("inherits from base Runnable", func(t *testing.T) {
+		testHelperInheritedMethods(t, mocks.NewMockRunnableWithShutdownSender(), "ShutdownService")
 	})
 }
 
@@ -279,6 +332,13 @@ func TestFactoryMethods(t *testing.T) {
 
 	t.Run("NewMockRunnableWithReloadSender creates with default delays", func(t *testing.T) {
 		mock := mocks.NewMockRunnableWithReloadSender()
+		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
+		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
+		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
+	})
+
+	t.Run("NewMockRunnableWithShutdownSender creates with default delays", func(t *testing.T) {
+		mock := mocks.NewMockRunnableWithShutdownSender()
 		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
 		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
 		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)

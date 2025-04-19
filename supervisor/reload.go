@@ -30,29 +30,25 @@ func (p *PIDZero) startReloadManager() {
 
 	// iterate all the runnables, and find the ones that are can send reload notifications
 	// and start a goroutine to listen for signals from them.
-	for _, r := range p.runnables {
-		if rldSender, ok := r.(ReloadSender); ok {
-			r := r // capture the loop variable
-
-			go func() {
+	for _, run := range p.runnables {
+		if rldSender, ok := run.(ReloadSender); ok {
+			go func(r Runnable, s ReloadSender) {
 				for {
 					select {
 					case <-p.ctx.Done():
-						p.logger.Debug("Context canceled, closing goroutine")
 						return
 					case <-rldSender.GetReloadTrigger():
 						p.reloadListener <- struct{}{}
 						p.logger.Debug("Reload notifier received from runnable", "runnable", r)
 					}
 				}
-			}()
+			}(run, rldSender)
 		}
 	}
 
 	for {
 		select {
 		case <-p.ctx.Done():
-			p.logger.Debug("Context canceled, closing goroutine")
 			return
 		case <-p.reloadListener:
 			reloads := p.reloadAllRunnables()
@@ -89,6 +85,5 @@ func (p *PIDZero) reloadAllRunnables() int {
 		}
 		p.logger.Debug("Skipping Reload, not supported", "runnable", r)
 	}
-	p.logger.Debug("Reload complete", "runnablesReloaded", reloads)
 	return reloads
 }
