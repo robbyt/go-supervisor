@@ -92,7 +92,8 @@ func TestStateDeduplication(t *testing.T) {
 	pidZero.stateMap.Store(runnable, "initial")
 
 	// Start the state monitor
-	pidZero.startStateMonitor()
+	pidZero.wg.Add(1)
+	go pidZero.startStateMonitor()
 
 	// Send the initial state to be discarded as per implementation
 	t.Log("Sending 'initial' to be discarded")
@@ -110,27 +111,22 @@ func TestStateDeduplication(t *testing.T) {
 	t.Log("Sending 'running' state")
 	runnable.stateValue = "running" // Update internal state first
 	stateChan <- "running"
-	time.Sleep(50 * time.Millisecond)
 
 	// Send duplicate states - should be ignored
 	t.Log("Sending 'running' state again (should be ignored)")
 	stateChan <- "running"
-	time.Sleep(50 * time.Millisecond)
 
 	t.Log("Sending 'running' state a third time (should be ignored)")
 	stateChan <- "running"
-	time.Sleep(50 * time.Millisecond)
 
 	// Second state change
 	t.Log("Sending 'stopped' state")
 	runnable.stateValue = "stopped" // Update internal state first
 	stateChan <- "stopped"
-	time.Sleep(50 * time.Millisecond)
 
 	// Another duplicate - should be ignored
 	t.Log("Sending 'stopped' state again (should be ignored)")
 	stateChan <- "stopped"
-	time.Sleep(50 * time.Millisecond)
 
 	// Third state change
 	t.Log("Sending 'error' state")
@@ -165,21 +161,15 @@ func TestStateDeduplication(t *testing.T) {
 	// We should have unique state broadcasts (one each)
 	// for running, stopped, and error states
 	assert.Equal(
-		t,
-		1,
-		statesReceived["running"],
+		t, 1, statesReceived["running"],
 		"Should receive exactly one 'running' state broadcast",
 	)
 	assert.Equal(
-		t,
-		1,
-		statesReceived["stopped"],
+		t, 1, statesReceived["stopped"],
 		"Should receive exactly one 'stopped' state broadcast",
 	)
 	assert.Equal(
-		t,
-		1,
-		statesReceived["error"],
+		t, 1, statesReceived["error"],
 		"Should receive exactly one 'error' state broadcast",
 	)
 }

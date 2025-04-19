@@ -208,8 +208,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	assert.NoError(t, err)
