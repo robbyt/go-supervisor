@@ -95,6 +95,15 @@ func (r *MockRunner) configCallback() (*Config, error) {
 	return r.callback()
 }
 
+// String returns a string representation of the MockRunner
+func (r *MockRunner) String() string {
+	config := r.getConfig()
+	if config == nil {
+		return "MockRunner<nil>"
+	}
+	return fmt.Sprintf("MockRunner{listening: %s}", config.ListenAddr)
+}
+
 // reloadConfig implementation similar to Runner's reloadConfig
 func (r *MockRunner) reloadConfig() error {
 	newConfig, err := r.configCallback()
