@@ -14,7 +14,7 @@ import (
 func TestPIDZero_ReloadManager(t *testing.T) {
 	t.Run("handles reload notifications", func(t *testing.T) {
 		// Setup mock
-		sender := mocks.NewMockRunnableWithReload()
+		sender := mocks.NewMockRunnableWithReloadSender()
 		reloadTrigger := make(chan struct{})
 		stateChan := make(chan string)
 
@@ -52,8 +52,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 	})
 
 	t.Run("handles multiple reloads", func(t *testing.T) {
-		sender1 := mocks.NewMockRunnableWithReload()
-		sender2 := mocks.NewMockRunnableWithReload()
+		sender1 := mocks.NewMockRunnableWithReloadSender()
+		sender2 := mocks.NewMockRunnableWithReloadSender()
 
 		reloadTrigger1 := make(chan struct{})
 		reloadTrigger2 := make(chan struct{})
@@ -107,7 +107,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 	t.Run("graceful shutdown", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		sender := mocks.NewMockRunnableWithReload()
+		sender := mocks.NewMockRunnableWithReloadSender()
 		reloadTrigger := make(chan struct{})
 		stateChan := make(chan string)
 
@@ -147,8 +147,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService1 := mocks.NewMockRunnable()
 		mockService2 := mocks.NewMockRunnable()
 
-		stateChan1 := make(chan string)
-		stateChan2 := make(chan string)
+		mockService1.On("String").Return("ReloadableService1").Maybe()
+		mockService2.On("String").Return("ReloadableService2").Maybe()
 
 		mockService1.On("Reload").Once()
 		mockService2.On("Reload").Once()
@@ -158,11 +158,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		mockService1.On("Stop").Once()
 		mockService2.On("Stop").Once()
-
-		mockService1.On("GetState").Return("idle").Maybe()
-		mockService2.On("GetState").Return("idle").Maybe()
-		mockService1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
-		mockService2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
 		// Create supervisor with both services
 		ctx, cancel := context.WithCancel(context.Background())

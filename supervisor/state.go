@@ -18,7 +18,6 @@ package supervisor
 
 import (
 	"context"
-	"fmt"
 )
 
 // StateMap is a map of runnable string representation to its current state
@@ -53,7 +52,7 @@ func (p *PIDZero) GetStateMap() StateMap {
 	p.stateMap.Range(func(key, value any) bool {
 		r := key.(Runnable)
 		state := value.(string)
-		stateMap[fmt.Sprintf("%s", r)] = state
+		stateMap[r.String()] = state
 		return true
 	})
 

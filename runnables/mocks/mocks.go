@@ -58,19 +58,17 @@ const defaultDelay = 1 * time.Millisecond
 // service behavior.
 type Runnable struct {
 	mock.Mock
-	DelayRun      time.Duration // Delay before Run returns
-	DelayStop     time.Duration // Delay before Stop returns
-	DelayReload   time.Duration // Delay before Reload returns
-	DelayGetState time.Duration // Delay before GetState and GetStateChan return
+	DelayRun    time.Duration // Delay before Run returns
+	DelayStop   time.Duration // Delay before Stop returns
+	DelayReload time.Duration // Delay before Reload returns
 }
 
 // NewMockRunnable creates a new Runnable mock with default delays.
 func NewMockRunnable() *Runnable {
 	return &Runnable{
-		DelayRun:      defaultDelay,
-		DelayStop:     defaultDelay,
-		DelayReload:   defaultDelay,
-		DelayGetState: defaultDelay,
+		DelayRun:    defaultDelay,
+		DelayStop:   defaultDelay,
+		DelayReload: defaultDelay,
 	}
 }
 
@@ -96,24 +94,6 @@ func (m *Runnable) Reload() {
 	m.Called()
 }
 
-// GetState mocks the GetState method of the Stateable interface.
-// It returns the current state of the service as configured in test expectations.
-func (m *Runnable) GetState() string {
-	time.Sleep(m.DelayGetState)
-	args := m.Called()
-	return args.String(0)
-}
-
-// GetStateChan mocks the GetStateChan method of the Stateable interface.
-// It returns a receive-only channel that will emit state updates as configured in test expectations.
-func (m *Runnable) GetStateChan(ctx context.Context) <-chan string {
-	time.Sleep(m.DelayGetState)
-	args := m.Called(ctx)
-	// For testing purposes, most tests will pass a regular chan string
-	// which is compatible with the expected <-chan string return type
-	return args.Get(0).(chan string)
-}
-
 // String returns a string representation of the mock service.
 // It can be mocked by doing mock.On("String").Return("customValue") in tests.
 func (m *Runnable) String() string {
@@ -123,23 +103,50 @@ func (m *Runnable) String() string {
 	return "Runnable"
 }
 
-// MockRunnableWithReload extends Runnable to also implement the ReloadSender interface.
-type MockRunnableWithReload struct {
+// MockRunnableWithState extends Runnable to also implement the ReloadSender interface.
+type MockRunnableWithStatable struct {
+	*Runnable
+	DelayGetState time.Duration // Delay before GetState and GetStateChan return
+}
+
+// GetState mocks the GetState method of the Stateable interface.
+// It returns the current state of the service as configured in test expectations.
+func (m *MockRunnableWithStatable) GetState() string {
+	time.Sleep(m.DelayGetState)
+	args := m.Called()
+	return args.String(0)
+}
+
+// GetStateChan mocks the GetStateChan method of the Stateable interface.
+// It returns a receive-only channel that will emit state updates as configured in test expectations.
+func (m *MockRunnableWithStatable) GetStateChan(ctx context.Context) <-chan string {
+	args := m.Called(ctx)
+	return args.Get(0).(chan string)
+}
+
+// NewMockRunnableWithStatable creates a new MockRunnableWithStatable with default delays.
+func NewMockRunnableWithStatable() *MockRunnableWithStatable {
+	return &MockRunnableWithStatable{
+		Runnable:      NewMockRunnable(),
+		DelayGetState: defaultDelay,
+	}
+}
+
+// MockRunnableWithReloadSender extends Runnable to also implement the ReloadSender interface.
+type MockRunnableWithReloadSender struct {
 	*Runnable
 }
 
 // GetReloadTrigger implements the ReloadSender interface.
 // It returns a receive-only channel that emits signals when a reload is requested.
-func (m *MockRunnableWithReload) GetReloadTrigger() <-chan struct{} {
+func (m *MockRunnableWithReloadSender) GetReloadTrigger() <-chan struct{} {
 	args := m.Called()
-	// For testing purposes, most tests will pass a regular chan struct{}
-	// which is compatible with the expected <-chan struct{} return type
 	return args.Get(0).(chan struct{})
 }
 
-// NewMockRunnableWithReload creates a new MockRunnableWithReload with default delays.
-func NewMockRunnableWithReload() *MockRunnableWithReload {
-	return &MockRunnableWithReload{
+// NewMockRunnableWithReloadSender creates a new MockRunnableWithReload with default delays.
+func NewMockRunnableWithReloadSender() *MockRunnableWithReloadSender {
+	return &MockRunnableWithReloadSender{
 		Runnable: NewMockRunnable(),
 	}
 }

@@ -114,6 +114,7 @@ and manage them accordingly.
 ```go
 // Runnable represents a service that can be run and stopped
 type Runnable interface {
+    fmt.Stringer
     Run(ctx context.Context) error
     Stop()
 }

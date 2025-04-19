@@ -22,8 +22,9 @@ func TestPIDZero_GetState(t *testing.T) {
 		{
 			name: "runnable implements Stateable",
 			setupMock: func() Runnable {
-				mockService := mocks.NewMockRunnable()
+				mockService := mocks.NewMockRunnableWithStatable()
 				mockService.On("GetState").Return("running").Once()
+				mockService.On("String").Return("StatableService").Maybe()
 				return mockService
 			},
 			expectedState: "running",
@@ -32,14 +33,10 @@ func TestPIDZero_GetState(t *testing.T) {
 			name: "runnable does not implement Stateable",
 			setupMock: func() Runnable {
 				// Create a mock that only implements Runnable but not Stateable
-				m := new(mock.Mock)
-				m.On("Run", mock.Anything).Return(nil)
-				m.On("Stop")
-
-				// Create a simple runnable implementation that wraps the mock
-				return &simpleRunnable{
-					m: m,
-				}
+				mockRunnable := mocks.NewMockRunnable()
+				// Since we're not actually calling Run or Stop in this test, we only need String
+				mockRunnable.On("String").Return("SimpleRunnable").Maybe()
+				return mockRunnable
 			},
 			expectedState: "unknown",
 		},
@@ -69,39 +66,22 @@ func TestPIDZero_GetState(t *testing.T) {
 	}
 }
 
-// Simple implementation of a Runnable that doesn't implement Stateable
-type simpleRunnable struct {
-	m *mock.Mock
-}
-
-func (s *simpleRunnable) Run(ctx context.Context) error {
-	args := s.m.Called(ctx)
-	return args.Error(0)
-}
-
-func (s *simpleRunnable) Stop() {
-	s.m.Called()
-}
-
 // TestPIDZero_GetStates tests the GetStates method with multiple runnables.
 func TestPIDZero_GetStates(t *testing.T) {
 	t.Parallel()
 
 	// Create mock services
-	mockService1 := mocks.NewMockRunnable()
+	mockService1 := mocks.NewMockRunnableWithStatable()
 	mockService1.On("GetState").Return("running").Once()
+	mockService1.On("String").Return("MockService1").Maybe()
 
-	mockService2 := mocks.NewMockRunnable()
+	mockService2 := mocks.NewMockRunnableWithStatable()
 	mockService2.On("GetState").Return("stopped").Once()
+	mockService2.On("String").Return("MockService2").Maybe()
 
-	// Create a non-Stateable runnable
-	m := new(mock.Mock)
-	m.On("Run", mock.Anything).Return(nil)
-	m.On("Stop")
-
-	nonStateableRunnable := &simpleRunnable{
-		m: m,
-	}
+	// Create a non-Stateable runnable that doesn't implement GetState
+	nonStateableRunnable := mocks.NewMockRunnable()
+	nonStateableRunnable.On("String").Return("NonStateableRunnable").Maybe()
 
 	// Create a supervisor with the mock runnables
 	pidZero, err := New(WithRunnables(mockService1, mockService2, nonStateableRunnable))
@@ -133,11 +113,12 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	defer cancel()
 
 	// Create mock service that implements Stateable
-	mockService := mocks.NewMockRunnable()
+	mockService := mocks.NewMockRunnableWithStatable()
 	stateChan := make(chan string, 3) // Buffered to prevent blocking
 
 	mockService.On("GetState").Return("initial").Maybe()
 	mockService.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+	mockService.On("String").Return("MockServiceStateMonitor").Maybe()
 
 	// Create a supervisor with the mock runnable
 	pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
@@ -206,12 +187,12 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 	defer cancel()
 
 	// Create mock services that implement Stateable
-	mockService1 := mocks.NewMockRunnable()
+	mockService1 := mocks.NewMockRunnableWithStatable()
 	stateChan1 := make(chan string, 2)
 	mockService1.On("GetStateChan", mock.Anything).Return(stateChan1).Once()
 	mockService1.On("String").Return("mock1").Maybe()
 
-	mockService2 := mocks.NewMockRunnable()
+	mockService2 := mocks.NewMockRunnableWithStatable()
 	stateChan2 := make(chan string, 2)
 	mockService2.On("GetStateChan", mock.Anything).Return(stateChan2).Once()
 	mockService2.On("String").Return("mock2").Maybe()
