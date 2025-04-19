@@ -150,3 +150,22 @@ func NewMockRunnableWithReloadSender() *MockRunnableWithReloadSender {
 		Runnable: NewMockRunnable(),
 	}
 }
+
+// MockRunnableWithShutdownSender extends Runnable to also implement the ShutdownSender interface.
+type MockRunnableWithShutdownSender struct {
+	*Runnable
+}
+
+// ShutdownSender mocks implementation of the ShutdownSender interface.
+// It returns a receive-only channel that emits signals when a shutdown is requested.
+func (m *MockRunnableWithShutdownSender) GetShutdownTrigger() <-chan struct{} {
+	args := m.Called()
+	return args.Get(0).(chan struct{})
+}
+
+// NewMockRunnableWithShutdown creates a new MockRunnableWithReload with default delays.
+func NewMockRunnableWithShutdownSender() *MockRunnableWithShutdownSender {
+	return &MockRunnableWithShutdownSender{
+		Runnable: NewMockRunnable(),
+	}
+}

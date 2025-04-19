@@ -18,6 +18,7 @@ package supervisor
 
 import (
 	"context"
+	"sync"
 )
 
 // StateMap is a map of runnable string representation to its current state
@@ -149,74 +150,95 @@ func (p *PIDZero) broadcastState() {
 // 4. Updates the internal stateMap when states change
 // 5. Broadcasts state changes to all subscribers
 //
-// The stateMap serves multiple critical functions:
+// The many purposes of the stateMap:
 //   - Provides a thread-safe cache of the latest state for each runnable
 //   - Enables state change deduplication (avoiding duplicate broadcasts of identical states)
-//   - Serves as the single source of truth for runnable states within the supervisor
+//   - Represents the supervisor's "truth" for the state of current runnables
 //   - Allows state querying without directly accessing runnables (e.g. for APIs or UIs)
 //
 // State deduplication works by comparing incoming states against the previously recorded state.
 // Only when a state differs from the previous one is it stored and broadcast, preventing
 // unnecessary broadcasts and reducing system load when runnables emit frequent duplicate states.
+// startStateMonitor initiates background goroutines to monitor state changes for each
+// Stateable runnable. It blocks until the context is done, coordinating state updates
+// from all state-emitting services.
 func (p *PIDZero) startStateMonitor() {
-	for _, r := range p.runnables {
-		if stateable, ok := r.(Stateable); ok {
-			r := r // capture loop variable
-			go func() {
-				stateChan := stateable.GetStateChan(p.ctx)
+	defer p.wg.Done()
+	p.logger.Debug("Starting state monitor...")
+
+	// Create a WaitGroup to track state monitoring goroutines
+	var stateWg sync.WaitGroup
+
+	// Start a goroutine for each Stateable runnable
+	for _, run := range p.runnables {
+		if stateable, ok := run.(Stateable); ok {
+			stateWg.Add(1)
+			go func(r Runnable, s Stateable) {
+				defer stateWg.Done()
+				stateChan := s.GetStateChan(p.ctx)
 
 				// Read the first state and discard it - it's the initial state
 				// that we've already captured and stored manually in startRunnable
 				select {
+				case <-p.ctx.Done():
+					return
 				case state, ok := <-stateChan:
 					if !ok {
-						p.logger.Debug("State channel closed during initialization", "runnable", r)
 						return
 					}
 					// First state discarded to avoid duplicate broadcast
 					p.logger.Debug("Discarded initial state", "runnable", r, "state", state)
-				case <-p.ctx.Done():
-					return
 				}
 
 				// Keep track of the last state to avoid duplicate broadcasts
 				var lastState string
-				if currentState, loaded := p.stateMap.Load(r); loaded {
+				if currentState, ok := p.stateMap.Load(r); ok {
 					lastState = currentState.(string)
 				}
 
+				// Process state changes until context is done
 				for {
 					select {
 					case <-p.ctx.Done():
 						return
 					case state, ok := <-stateChan:
 						if !ok {
-							p.logger.Debug("State channel closed", "runnable", r)
 							return
 						}
 
-						// Only broadcast if the state has actually changed from the last known state
-						if state != lastState {
-							p.stateMap.Store(r, state)
+						if state == lastState {
 							p.logger.Debug(
-								"State changed",
-								"runnable",
-								r,
-								"oldState",
-								lastState,
-								"newState",
-								state,
-							)
-							lastState = state
-
-							// Broadcast state change to all subscribers
-							p.broadcastState()
-						} else {
-							p.logger.Debug("Received duplicate state (ignoring)", "runnable", r, "state", state)
+								"Received duplicate state (ignoring)",
+								"runnable", r,
+								"state", state)
+							continue
 						}
+
+						prev, loaded := p.stateMap.Swap(r, state)
+						if !loaded {
+							// The state map entry for this runnable should have been created elsewhere
+							p.logger.Warn(
+								"Unexpected State map entry created",
+								"runnable", r,
+								"state", state)
+						} else {
+							p.logger.Debug(
+								"State map entry updated",
+								"runnable", r,
+								"oldState", prev,
+								"state", state)
+						}
+						lastState = state  // enable local state deduplication
+						p.broadcastState() // Broadcast state change to all subscribers
 					}
 				}
-			}()
+			}(run, stateable)
 		}
 	}
+
+	// Block here until context is done, then wait for all monitoring goroutines to finish
+	<-p.ctx.Done()
+	p.logger.Debug("State monitor received context done signal, waiting for monitors to exit...")
+	stateWg.Wait()
+	p.logger.Debug("State monitor complete.")
 }

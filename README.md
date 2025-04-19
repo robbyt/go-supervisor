@@ -138,7 +138,7 @@ type ReloadSender interface {
 
 ## Advanced Usage
 
-### Implementing Reloadable Services
+### Implementing a Reloadable Service
 
 ```go
 type ConfigurableService struct {
@@ -164,63 +164,6 @@ func (s *ConfigurableService) Reload() {
     s.config = newConfig
     
     fmt.Printf("%s: Configuration reloaded\n", s.name)
-}
-```
-
-### Implementing Stateable Services
-
-```go
-type StatefulService struct {
-    MyService
-    state     string
-    stateChan chan string
-    mu        sync.Mutex
-}
-
-// Interface guards, ensuring that StatefulService implements Runnable and Stateable
-var _ supervisor.Runnable = (*StatefulService)(nil)
-var _ supervisor.Stateable = (*StatefulService)(nil)
-
-func NewStatefulService(name string) *StatefulService {
-    return &StatefulService{
-        MyService: MyService{name: name, done: make(chan struct{})},
-        state:     "initialized",
-        stateChan: make(chan string, 10),
-    }
-}
-
-func (s *StatefulService) GetState() string {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    return s.state
-}
-
-func (s *StatefulService) GetStateChan(ctx context.Context) <-chan string {
-    return s.stateChan
-}
-
-func (s *StatefulService) setState(state string) {
-    s.mu.Lock()
-    s.state = state
-    s.mu.Unlock()
-    
-    // Non-blocking send to state channel
-    select {
-    case s.stateChan <- state:
-    default:
-    }
-}
-
-func (s *StatefulService) Run(ctx context.Context) error {
-    s.setState("running")
-    // Run implementation
-    return nil
-}
-
-func (s *StatefulService) Stop() {
-    s.setState("stopping")
-    // Stop implementation
-    s.setState("stopped")
 }
 ```
 

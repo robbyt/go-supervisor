@@ -128,7 +128,8 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	pidZero.stateMap.Store(mockService, "initial")
 
 	// Start the state monitor
-	pidZero.startStateMonitor()
+	pidZero.wg.Add(1)
+	go pidZero.startStateMonitor()
 
 	// Send an initial state that will be discarded
 	stateChan <- "initial"
@@ -206,7 +207,8 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 	pidZero.stateMap.Store(mockService2, "initial2")
 
 	// Start the state monitor
-	pidZero.startStateMonitor()
+	pidZero.wg.Add(1)
+	go pidZero.startStateMonitor()
 
 	// Subscribe to state changes
 	stateMapChan := pidZero.SubscribeStateChanges(ctx)
