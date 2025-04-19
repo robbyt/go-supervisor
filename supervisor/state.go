@@ -209,18 +209,16 @@ func (p *PIDZero) startStateMonitor() {
 						if state == lastState {
 							p.logger.Debug(
 								"Received duplicate state (ignoring)",
-								"runnable",
-								r,
-								"state",
-								state,
-							)
+								"runnable", r,
+								"state", state)
 							continue
 						}
 
-						prev, loaded := p.stateMap.Swap(s, state)
+						prev, loaded := p.stateMap.Swap(r, state)
 						if !loaded {
-							p.logger.Debug(
-								"State map entry created",
+							// The state map entry for this runnable should have been created elsewhere
+							p.logger.Warn(
+								"Unexpected State map entry created",
 								"runnable", r,
 								"state", state)
 						} else {
