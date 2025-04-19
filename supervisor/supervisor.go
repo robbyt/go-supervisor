@@ -138,7 +138,7 @@ func (p *PIDZero) Run() error {
 	}()
 	p.listenForSignals()
 
-	// Start the reload manager if any runnables support reloading
+	// Start a single reload manager if any runnable is reloadable
 	for _, r := range p.runnables {
 		if _, ok := r.(Reloadable); ok {
 			p.wg.Add(1)
@@ -147,7 +147,7 @@ func (p *PIDZero) Run() error {
 		}
 	}
 
-	// Start the shutdown manager if any runnables support the Stateable interface
+	// Start a single state monitor if any runnable reports state
 	for _, r := range p.runnables {
 		if _, ok := r.(Stateable); ok {
 			p.wg.Add(1)
@@ -156,7 +156,7 @@ func (p *PIDZero) Run() error {
 		}
 	}
 
-	// Start the shutdown manager if any runnables support the ShutdownSender interface
+	// Start a single shutdown manager if any runnable can trigger shutdown
 	for _, r := range p.runnables {
 		if _, ok := r.(ShutdownSender); ok {
 			p.wg.Add(1)
