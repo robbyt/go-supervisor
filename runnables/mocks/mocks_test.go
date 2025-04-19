@@ -15,19 +15,23 @@ import (
 func TestInterfaceGuards(t *testing.T) {
 	// Create mock instances
 	mockRunnable := mocks.NewMockRunnable()
-	mockRunnableWithReload := mocks.NewMockRunnableWithReload()
+	mockRunnableWithState := mocks.NewMockRunnableWithStatable()
+	mockRunnableWithReload := mocks.NewMockRunnableWithReloadSender()
 
 	// Type assertions to verify mock types implement required interfaces
 	var (
-		// Basic Runnable should implement all three base interfaces
+		// Basic Runnable should implement the base Runnable interface
 		_ supervisor.Runnable   = mockRunnable
 		_ supervisor.Reloadable = mockRunnable
-		_ supervisor.Stateable  = mockRunnable
 
-		// MockRunnableWithReload should implement all interfaces including ReloadSender
+		// MockRunnableWithState should implement the base Runnable interface + Stateable
+		_ supervisor.Runnable   = mockRunnableWithState
+		_ supervisor.Reloadable = mockRunnableWithState
+		_ supervisor.Stateable  = mockRunnableWithState
+
+		// MockRunnableWithReload should implement the base Runnable interface + ReloadSender
 		_ supervisor.Runnable     = mockRunnableWithReload
 		_ supervisor.Reloadable   = mockRunnableWithReload
-		_ supervisor.Stateable    = mockRunnableWithReload
 		_ supervisor.ReloadSender = mockRunnableWithReload
 	)
 
