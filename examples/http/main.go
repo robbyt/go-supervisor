@@ -32,15 +32,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		fmt.Fprintf(w, "Status: OK\n")
 	}
 
-	// Add a metrics handler that shows server state
-	metricsHandler := func(w http.ResponseWriter, r *http.Request) {
-		// In a real implementation, this would include actual metrics
-		// like request count, response times, etc.
-		fmt.Fprintf(w, "# HELP server_state Current state of the HTTP server\n")
-		fmt.Fprintf(w, "# TYPE server_state gauge\n")
-		fmt.Fprintf(w, "server_state{name=\"http_server\"} 1 # running\n")
-	}
-
 	wildcardHandler := func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "You requested: %s\n", r.URL.Path)
 	}
@@ -80,24 +71,13 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	// Add metrics endpoint with middleware
-	metricsRoute, err := httpserver.NewRouteWithMiddleware(
-		"metrics",
-		"/metrics",
-		metricsHandler,
-		commonMw...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics route: %w", err)
-	}
-
 	// API routes need their middlewares passed explicitly with the updated function
 	apiRoute, err := httpserver.NewWildcardRoute("/api", wildcardHandler, commonMw...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wildcard route: %w", err)
 	}
 
-	return httpserver.Routes{*indexRoute, *statusRoute, *metricsRoute, *apiRoute}, nil
+	return httpserver.Routes{*indexRoute, *statusRoute, *apiRoute}, nil
 }
 
 // RunServer initializes and runs the HTTP server with supervisor
