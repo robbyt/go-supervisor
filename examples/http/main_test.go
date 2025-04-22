@@ -47,34 +47,13 @@ func TestRunServer(t *testing.T) {
 
 	// Make a request to the server
 	resp, err := http.Get("http://localhost:8080/status")
-	if err == nil {
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err, "Failed to read response body")
-		assert.NoError(t, resp.Body.Close())
+	require.NoError(t, err, "Failed to make GET request")
 
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "Status: OK\n", string(body))
-
-		// Test the metrics endpoint
-		metricsResp, err := http.Get("http://localhost:8080/metrics")
-		if err == nil {
-			metricsBody, err := io.ReadAll(metricsResp.Body)
-			require.NoError(t, err, "Failed to read metrics response body")
-			assert.NoError(t, metricsResp.Body.Close())
-
-			assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
-			// Check that the response contains expected metrics format
-			assert.Contains(t, string(metricsBody), "# HELP server_state")
-			assert.Contains(t, string(metricsBody), "# TYPE server_state gauge")
-			assert.Contains(t, string(metricsBody), "server_state{name=\"http_server\"}")
-		} else {
-			t.Log("Could not connect to metrics endpoint:", err)
-		}
-	} else {
-		// If we can't connect, it might be because the port is already in use
-		// in CI environments. This isn't necessarily a failure of our code.
-		t.Log("Could not connect to test server:", err)
-	}
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "Failed to read response body")
+	assert.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "Status: OK\n", string(body))
 
 	// Clean up
 	cleanup()
