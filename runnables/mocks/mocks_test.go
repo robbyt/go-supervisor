@@ -48,7 +48,7 @@ func TestInterfaceGuards(t *testing.T) {
 }
 
 // testHelperInheritedMethods checks that a mock properly inherits all base Runnable behavior
-func testHelperInheritedMethods(t *testing.T, mockRunnable interface{}, displayName string) {
+func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName string) {
 	t.Helper()
 
 	// Add expectations based on the type of mock

@@ -103,7 +103,7 @@ func (m *Runnable) String() string {
 	return "Runnable"
 }
 
-// MockRunnableWithState extends Runnable to also implement the ReloadSender interface.
+// MockRunnableWithStatable extends Runnable to also implement the Stateable interface.
 type MockRunnableWithStatable struct {
 	*Runnable
 	DelayGetState time.Duration // Delay before GetState and GetStateChan return
