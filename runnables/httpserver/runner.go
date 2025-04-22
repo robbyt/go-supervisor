@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,10 +49,18 @@ func WithConfigCallback(callback func() (*Config, error)) Option {
 	}
 }
 
+// WithName sets the name of the Runner instance.
+func WithName(name string) Option {
+	return func(r *Runner) {
+		r.name = name
+	}
+}
+
 // Runner implements a configurable HTTP server that supports graceful shutdown,
 // dynamic reconfiguration, and state monitoring. It meets the Runnable, Reloadable,
 // and Stateable interfaces from the supervisor package.
 type Runner struct {
+	name           string
 	config         atomic.Pointer[Config]
 	configCallback func() (*Config, error)
 	bootLock       sync.Mutex
@@ -80,6 +89,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Runner{
+		name:         "",
 		config:       atomic.Pointer[Config]{},
 		serverErrors: make(chan error, 1),
 		ctx:          ctx,
@@ -115,11 +125,18 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 // String returns a string representation of the HTTPServer instance
 func (r *Runner) String() string {
-	cfg := r.getConfig()
-	if cfg == nil {
-		return "HTTPServer<nil>"
+	args := make([]string, 0)
+	if r.name != "" {
+		args = append(args, "name: "+r.name)
 	}
-	return fmt.Sprintf("HTTPServer{listening: %s}", cfg.ListenAddr)
+	if cfg := r.getConfig(); cfg != nil {
+		args = append(args, "listening: "+cfg.ListenAddr)
+	}
+	if len(args) == 0 {
+		return "HTTPServer<>"
+	}
+
+	return fmt.Sprintf("HTTPServer{%s}", strings.Join(args, ", "))
 }
 
 // Run starts the HTTP server and listens for incoming requests
