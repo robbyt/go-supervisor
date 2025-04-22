@@ -6,6 +6,7 @@ import (
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,10 +20,14 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -61,14 +66,20 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Reload").Maybe()
+		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Reload").Maybe()
+		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable3 := mocks.NewMockRunnable()
 		mockRunnable3.On("String").Return("runnable3").Maybe()
 		mockRunnable3.On("Reload").Maybe()
+		mockRunnable3.On("Stop").Maybe()
+		mockRunnable3.On("Run", mock.Anything).Return(nil).Maybe()
 
 		// Create initial entries
 		initialEntries := []RunnableEntry[*mocks.Runnable]{
@@ -125,10 +136,14 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 		// Initial configs
 		initialConfig1 := map[string]string{"key": "value1"}
@@ -196,10 +211,14 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 		// Create config
 		config := map[string]string{"key": "value"}

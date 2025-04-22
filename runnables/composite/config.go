@@ -8,13 +8,14 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
-// RunnableType is a constraint that ensures a type implements the Runnable interface
-type RunnableType interface {
+// runnable is a local alias to ensure the sub-runnables implement the
+// supervisor.Runnable interface.
+type runnable interface {
 	supervisor.Runnable
 }
 
 // RunnableEntry associates a runnable with its configuration
-type RunnableEntry[T RunnableType] struct {
+type RunnableEntry[T runnable] struct {
 	// Runnable is the component to be managed
 	Runnable T
 
@@ -23,7 +24,7 @@ type RunnableEntry[T RunnableType] struct {
 }
 
 // Config represents the configuration for a CompositeRunner
-type Config[T RunnableType] struct {
+type Config[T runnable] struct {
 	// Name is a human-readable identifier for this composite runner
 	Name string
 
@@ -32,7 +33,7 @@ type Config[T RunnableType] struct {
 }
 
 // NewConfig creates a new Config instance for a CompositeRunner
-func NewConfig[T RunnableType](
+func NewConfig[T runnable](
 	name string,
 	entries []RunnableEntry[T],
 ) (*Config[T], error) {
@@ -47,7 +48,7 @@ func NewConfig[T RunnableType](
 }
 
 // NewConfigFromRunnables creates a Config from a list of runnables, all using the same config
-func NewConfigFromRunnables[T RunnableType](
+func NewConfigFromRunnables[T runnable](
 	name string,
 	runnables []T,
 	sharedConfig any,

@@ -12,6 +12,8 @@ The Composite Runner is a component that allows multiple instances of the same R
 - Thread-safe operations with RWMutex protection
 - Independent state tracking through FSM
 - Automatic error propagation from child runnables
+- Coordinated startup and shutdown of multiple components
+- Dynamic membership changes during reloads
 
 ## Usage
 
@@ -122,3 +124,47 @@ for name, state := range states {
     fmt.Printf("Runnable %s is in state %s\n", name, state)
 }
 ```
+
+## Implementation Details
+
+### State Management
+
+The CompositeRunner uses an internal finite state machine (FSM) to track its lifecycle:
+
+- **New** → Initial state
+- **Booting** → Starting child runnables
+- **Running** → All child runnables are active
+- **Reloading** → Processing configuration updates
+- **Stopping** → Gracefully shutting down child runnables
+- **Stopped** → All child runnables have been stopped
+- **Error** → An unrecoverable error has occurred
+
+State transitions are enforced by the FSM (e.g., cannot go from Booting directly to Reloading).
+
+### Asynchronous Boot Process
+
+The `boot()` method starts each child runnable in its own goroutine but doesn't wait for them to be fully "ready" - it only waits for the goroutines to be launched. This allows for faster initialization of large component groups.
+
+Each child runnable's errors are communicated back to the parent through a shared error channel.
+
+### Reload Implementation
+
+The `Reload()` method supports dynamic membership changes:
+
+1. If membership hasn't changed (same set of runnables):
+   - Updates configuration and calls child `ReloadWithConfig()` methods
+   - No stopping/starting of components
+
+2. If membership has changed (added/removed runnables):
+   - Stops all existing runnables
+   - Updates configuration
+   - Restarts all runnables from the new configuration
+
+### Handling Concurrency
+
+The CompositeRunner uses multiple synchronization mechanisms:
+- `configMu` (RWMutex) - Protects configuration access
+- `runnablesMu` (Mutex) - Protects runnable operations
+- Atomic operations - For safe state access
+- WaitGroups - To coordinate startup and shutdown
+- Go channels - For error propagation and cancellation

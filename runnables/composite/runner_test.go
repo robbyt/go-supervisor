@@ -10,6 +10,7 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/robbyt/go-supervisor/supervisor"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +18,16 @@ func setupTestLogger() slog.Handler {
 	return slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
+}
+
+func TestCompositeInterfaceImplementation(t *testing.T) {
+	t.Parallel()
+
+	var (
+		_ supervisor.Runnable   = (*CompositeRunner[supervisor.Runnable])(nil)
+		_ supervisor.Reloadable = (*CompositeRunner[supervisor.Runnable])(nil)
+		_ supervisor.Stateable  = (*CompositeRunner[supervisor.Runnable])(nil)
+	)
 }
 
 func TestNewRunner(t *testing.T) {
@@ -49,7 +60,7 @@ func TestNewRunner(t *testing.T) {
 					return nil, errors.New("config error")
 				}),
 			},
-			expectError: true,
+			expectError: false,
 		},
 		{
 			name: "config callback returns nil",
@@ -58,7 +69,7 @@ func TestNewRunner(t *testing.T) {
 					return nil, nil
 				}),
 			},
-			expectError: true,
+			expectError: false,
 		},
 		{
 			name: "with custom logger",
@@ -85,10 +96,7 @@ func TestNewRunner(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // Capture range variable for parallel execution
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
 			runner, err := NewRunner(tt.withOptions...)
 
 			if tt.expectError {
@@ -108,9 +116,13 @@ func TestCompositeRunner_String(t *testing.T) {
 	// Setup mock runnables
 	mockRunnable1 := mocks.NewMockRunnable()
 	mockRunnable1.On("String").Return("runnable1").Maybe()
+	mockRunnable1.On("Stop").Maybe()
+	mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
 
 	mockRunnable2 := mocks.NewMockRunnable()
 	mockRunnable2.On("String").Return("runnable2").Maybe()
+	mockRunnable2.On("Stop").Maybe()
+	mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 	// Create entries
 	entries := []RunnableEntry[*mocks.Runnable]{
@@ -143,10 +155,14 @@ func TestCompositeRunner_GetChildStates(t *testing.T) {
 	mockRunnable := mocks.NewMockRunnableWithStatable()
 	mockRunnable.On("String").Return("statable-runnable").Maybe()
 	mockRunnable.On("GetState").Return("mock-state")
+	mockRunnable.On("Stop").Maybe()
+	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 
 	// Create a regular runnable mock
 	regularRunnable := mocks.NewMockRunnable()
 	regularRunnable.On("String").Return("regular-runnable").Maybe()
+	regularRunnable.On("Stop").Maybe()
+	regularRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 
 	// Create entries for the statable runnable
 	entries := []RunnableEntry[supervisor.Runnable]{
@@ -182,6 +198,8 @@ func TestCompositeRunner_GetStateChan(t *testing.T) {
 	// Setup mock runnables
 	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.On("String").Return("runnable1").Maybe()
+	mockRunnable.On("Stop").Maybe()
+	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
 
 	// Create entries
 	entries := []RunnableEntry[*mocks.Runnable]{

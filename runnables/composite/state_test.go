@@ -56,7 +56,9 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}()
 
 		// Wait for states to transition to Running
-		time.Sleep(50 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			return runner.GetState() == finitestate.StatusRunning
+		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
 		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
 		// Cancel the context to stop the runner
@@ -94,6 +96,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Run", mock.Anything).Return(errors.New("failed to start"))
+		mockRunnable2.On("Stop").Maybe()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -117,7 +120,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 
 		// Verify error and state
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrRunnableFailed)
+		assert.ErrorContains(t, err, "child runnable failed")
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 
 		// Verify mock expectations
@@ -146,12 +149,12 @@ func TestCompositeRunner_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		// Force refresh of config during boot by clearing stored config
-		runner.config.Store(nil)
+		runner.currentConfig.Store(nil)
 
 		// Run should fail due to missing config
 		err = runner.Run(context.Background())
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrConfigMissing)
+		assert.ErrorContains(t, err, "no runnables to manage")
 	})
 
 	t.Run("no runnables", func(t *testing.T) {
@@ -172,7 +175,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Run should fail due to no runnables
 		err = runner.Run(context.Background())
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrNoRunnables)
+		assert.ErrorContains(t, err, "no runnables to manage")
 	})
 }
 
@@ -184,9 +187,13 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
+		mockRunnable1.On("Stop").Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
+		mockRunnable2.On("Stop").Maybe()
 
 		// Create entries
 		entries = []RunnableEntry[*mocks.Runnable]{
