@@ -193,10 +193,7 @@ func TestString(t *testing.T) {
 			return NewConfig(listenPort, 0, hConfig)
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		server, err := NewRunner(WithContext(ctx), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithContext(t.Context()), WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 
 		// Test string representation before starting
@@ -221,6 +218,32 @@ func TestString(t *testing.T) {
 		<-done
 	})
 
+	t.Run("with config and name", func(t *testing.T) {
+		// Use a unique port
+		listenPort := getAvailablePort(t, 8700)
+		handler := func(w http.ResponseWriter, r *http.Request) {}
+		route, err := NewRoute("v1", "/", handler)
+		require.NoError(t, err)
+		hConfig := Routes{*route}
+
+		// Create the Config and HTTPServer instance
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(listenPort, 0, hConfig)
+		}
+		testName := "TestServer"
+		server, err := NewRunner(
+			WithContext(t.Context()),
+			WithConfigCallback(cfgCallback),
+			WithName(testName),
+		)
+		require.NoError(t, err)
+		assert.Equal(
+			t,
+			fmt.Sprintf("HTTPServer{name: %s, listening: %s}", testName, listenPort),
+			server.String(),
+		)
+	})
+
 	t.Run("with nil config", func(t *testing.T) {
 		// This is testing just the nil handling in String()
 		// We'll test the method directly with a mock implementation
@@ -236,7 +259,7 @@ func TestString(t *testing.T) {
 		stub.logger = slog.Default().WithGroup("httpserver.Runner")
 
 		// Test string representation with nil config
-		assert.Equal(t, "HTTPServer<nil>", stub.String())
+		assert.Equal(t, "HTTPServer<>", stub.String())
 	})
 }
 
@@ -294,8 +317,6 @@ func TestBootFailure(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Config callback returns nil", func(t *testing.T) {
-		t.Parallel()
-
 		callback := func() (*Config, error) { return nil, nil }
 		runner, err := NewRunner(
 			WithContext(context.Background()),
@@ -308,8 +329,6 @@ func TestBootFailure(t *testing.T) {
 	})
 
 	t.Run("Config callback returns error", func(t *testing.T) {
-		t.Parallel()
-
 		callback := func() (*Config, error) { return nil, errors.New("failed to load config") }
 		runner, err := NewRunner(
 			WithContext(context.Background()),
@@ -322,8 +341,6 @@ func TestBootFailure(t *testing.T) {
 	})
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {
-		t.Parallel()
-
 		handler := func(w http.ResponseWriter, r *http.Request) {}
 		route, err := NewRoute("v1", "/", handler)
 		require.NoError(t, err)
