@@ -544,13 +544,13 @@ func TestWorker_Reload(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test that Reload logs correctly but doesn't modify state
-	originalConfig := worker.GetConfig()
+	originalConfig := worker.getConfig()
 
 	// Call Reload and check logs
 	worker.Reload()
 
 	// Verify config is unchanged
-	assert.Equal(t, originalConfig, worker.GetConfig(), "Config should be unchanged by Reload call")
+	assert.Equal(t, originalConfig, worker.getConfig(), "Config should be unchanged by Reload call")
 
 	// Check logs for expected message
 	assert.Contains(t, logBuf.String(), "Reload called, but no action taken",
@@ -665,7 +665,7 @@ func TestWorker_ProcessReload_UnchangedInterval(t *testing.T) {
 	worker.processReload(&newConfig)
 
 	// Check that job name was updated
-	updatedConfig := worker.GetConfig()
+	updatedConfig := worker.getConfig()
 	assert.Equal(t, newConfig.JobName, updatedConfig.JobName, "Job name should be updated")
 	assert.Equal(
 		t,
@@ -696,7 +696,7 @@ func TestWorker_ProcessReload_InvalidConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	// Remember the initial config state for comparison
-	initialState := worker.GetConfig()
+	initialState := worker.getConfig()
 
 	// Create an invalid config (zero interval)
 	invalidConfig := WorkerConfig{Interval: 0, JobName: "invalid-job"}
@@ -705,7 +705,7 @@ func TestWorker_ProcessReload_InvalidConfig(t *testing.T) {
 	worker.processReload(&invalidConfig)
 
 	// Config should remain unchanged after an invalid config
-	currentConfig := worker.GetConfig()
+	currentConfig := worker.getConfig()
 	assert.Equal(t, initialState, currentConfig, "Config should not change after invalid config")
 
 	// Verify the worker name wasn't updated

@@ -82,7 +82,7 @@ func NewWorker(config WorkerConfig, logger *slog.Logger) (*Worker, error) {
 
 // String returns the worker's name and interval safely.
 func (w *Worker) String() string {
-	return fmt.Sprintf("Worker{config: %s}", w.GetConfig())
+	return fmt.Sprintf("Worker{config: %s}", w.getConfig())
 }
 
 // Run starts the worker's main loop.
@@ -94,7 +94,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.cancel = cancel // Store cancel function for Stop()
 	w.mu.Unlock()
 
-	cfg := w.GetConfig()
+	cfg := w.getConfig()
 	logger.Info("Starting worker", "cfg", cfg.JobName)
 
 	w.startTicker(runCtx, cfg.Interval)
@@ -102,13 +102,13 @@ func (w *Worker) Run(ctx context.Context) error {
 		if w.tickerCancel != nil {
 			w.tickerCancel() // Stop the ticker goroutine
 		}
-		logger.Info("Worker stopped", "name", w.GetConfig().JobName)
+		logger.Info("Worker stopped", "name", w.getConfig().JobName)
 	}()
 
 	for {
 		select {
 		case <-runCtx.Done():
-			logger.Debug("Worker context cancelled, shutting down", "name", w.GetConfig().JobName)
+			logger.Debug("Worker context cancelled, shutting down", "name", w.getConfig().JobName)
 			return nil // Normal exit
 
 		case <-w.tickChan:
@@ -122,7 +122,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // Stop signals the worker to gracefully shut down by cancelling its context.
 func (w *Worker) Stop() {
-	w.logger.WithGroup("Stop").Info("Stopping worker...", "name", w.GetConfig().JobName)
+	w.logger.WithGroup("Stop").Info("Stopping worker...", "name", w.getConfig().JobName)
 	if w.cancel != nil {
 		w.cancel() // Signal the Run loop to exit via context cancellation
 	}
@@ -181,7 +181,7 @@ func (w *Worker) ReloadWithConfig(config any) {
 		)
 		return
 	}
-	logger.Debug("ReloadWithConfig called", "cfg", w.GetConfig())
+	logger.Debug("ReloadWithConfig called", "cfg", w.getConfig())
 
 	// Validate the received config immediately
 	if err := cfg.validate(); err != nil {
@@ -218,8 +218,8 @@ func (w *Worker) ReloadWithConfig(config any) {
 	}
 }
 
-// GetConfig returns the worker's current configuration safely.
-func (w *Worker) GetConfig() WorkerConfig {
+// getConfig returns the worker's current configuration safely.
+func (w *Worker) getConfig() WorkerConfig {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.config
@@ -243,7 +243,7 @@ func (w *Worker) setConfig(newConfig WorkerConfig) (oldCfg WorkerConfig) {
 // processReload is a helper function to process the new configuration.
 func (w *Worker) processReload(newConfig *WorkerConfig) {
 	logger := w.logger.WithGroup("handleReload").With("newConfig", newConfig)
-	currentCfg := w.GetConfig()
+	currentCfg := w.getConfig()
 	if err := newConfig.validate(); err != nil {
 		logger.Error(
 			"Received invalid configuration, discarding",
