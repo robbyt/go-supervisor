@@ -1,170 +1,126 @@
 # Composite Runner
 
-The Composite Runner is a component that allows multiple instances of the same Runnable type to be managed as a single unit. It implements the core `Runnable` interface as well as the `Reloadable` and `Stateable` interfaces from the go-supervisor package.
+The Composite Runner manages multiple runnables of the same type as a single unit. It implements the `Runnable`, `Reloadable`, and `Stateable` interfaces, allowing it to be used directly with the go-supervisor package.
 
 ## Features
 
-- Manage multiple runnables of the same type as a single unit
-- Each runnable has its own configuration for targeted reloads
-- Generic implementation ensures type safety
-- Support for both standard Reload() and enhanced ReloadWithConfig(config) patterns
-- Proper lifecycle management (start front-to-back, stop back-to-front)
-- Thread-safe operations with RWMutex protection
-- Independent state tracking through FSM
-- Automatic error propagation from child runnables
-- Coordinated startup and shutdown of multiple components
-- Dynamic membership changes during reloads
+- Manage multiple runnables as a single unit
+- Each runnable can have its own configuration
+- Type-safe, generic implementation
+- Supports both `Reload()` and `ReloadWithConfig(config)`
+- Proper lifecycle management (start in order, stop in reverse)
+- Error propagation from child runnables
+- Dynamic membership changes during reloads (go-supervisor does not support dynamic membership changes, but the CompositeRunner does)
 
-## Usage
-
-### Basic Usage
+## Quick Start Example
 
 ```go
 // Create runnable entries with their configs
 entries := []composite.RunnableEntry[*myapp.SomeRunnable]{
-    {
-        Runnable: runnable1,
-        Config:   map[string]any{"timeout": 10 * time.Second},
-    },
-    {
-        Runnable: runnable2,
-        Config:   map[string]any{"maxConnections": 100},
-    },
+    {Runnable: runnable1, Config: map[string]any{"timeout": 10 * time.Second}},
+    {Runnable: runnable2, Config: map[string]any{"maxConnections": 100}},
 }
 
-// Create a configuration callback
+// Define a config callback
 configCallback := func() (*composite.Config[*myapp.SomeRunnable], error) {
     return composite.NewConfig("MyRunnableGroup", entries)
 }
 
-// Create a new composite runner
+// Create a composite runner
 runner, err := composite.NewRunner(
     composite.WithConfigCallback(configCallback),
-    composite.WithLogHandler(customLogHandler),
 )
 if err != nil {
-    // Handle error
+    log.Fatalf("Failed to create runner: %v", err)
 }
 
-// Use the runner with a supervisor
-super, err := supervisor.New(
-    supervisor.WithRunnables(runner),
-)
+// Use with supervisor
+super, err := supervisor.New(supervisor.WithRunnables(runner))
 if err != nil {
-    // Handle error
+    log.Fatalf("Failed to create supervisor: %v", err)
 }
 
-// Run the supervisor
 if err := super.Run(); err != nil {
-    // Handle error
+    log.Fatalf("Supervisor failed: %v", err)
 }
 ```
 
-### Alternative Usage with Shared Configuration
+### Shared Configuration Example
 
-If all runnables use the same configuration, you can use the helper function:
+If all runnables use the same configuration:
 
 ```go
-// Create a list of runnables
 runnables := []*myapp.SomeRunnable{runnable1, runnable2, runnable3}
-
-// Create a configuration callback using the helper function
 configCallback := func() (*composite.Config[*myapp.SomeRunnable], error) {
     return composite.NewConfigFromRunnables(
         "MyRunnableGroup",
         runnables,
-        map[string]any{"timeout": 30 * time.Second}
+        map[string]any{"timeout": 30 * time.Second},
     )
 }
-
-// Create a new composite runner
 runner, err := composite.NewRunner(
     composite.WithConfigCallback(configCallback),
 )
 ```
 
+## Configuration Callback
+
+The config callback function is central to the CompositeRunner's operation. It is called:
+- During initialization
+- On reloads
+- Whenever the runner needs the current configuration
+
+Your callback should always return the most current configuration. The runner compares configurations to determine if membership has changed during reloads.
+
 ## ReloadableWithConfig Interface
 
-For more granular control over reloading, implement the `ReloadableWithConfig` interface:
+For easier reloads, implement the `ReloadableWithConfig` interface in your sub-runnables. This interface makes it simple for the composite runnable to send config updates to sub-runnables during Reload.
 
+In your sub-runnable, implement the `ReloadWithConfig` method. This will take priority over the standard `Reload()` method.
 ```go
-// Define a runnable that supports configuration-based reloading
-type ConfigurableRunnable struct {
-    // ... fields
-}
+type ConfigurableRunnable struct {}
 
-// Implement standard Reload() method
-func (r *ConfigurableRunnable) Reload() {
-    // Default reload behavior
-}
-
-// Implement enhanced ReloadWithConfig() method
 func (r *ConfigurableRunnable) ReloadWithConfig(config any) {
-    // Type assert to expected config type
     if cfg, ok := config.(map[string]any); ok {
         if timeout, ok := cfg["timeout"].(time.Duration); ok {
             r.timeout = timeout
         }
         // ... handle other config parameters
     }
-    // Apply the new configuration
 }
 ```
 
-The Composite Runner checks if each child runnable implements this interface. If it does, `ReloadWithConfig()` is called with the runnable's specific configuration. Otherwise, it falls back to the standard `Reload()` method.
-
-## Child State Inspection
+## Monitoring Child States
 
 You can inspect the states of individual child runnables:
 
 ```go
-// Get states of all child runnables
-states := runner.GetChildStates()
+states := cRunner.GetChildStates()
 for name, state := range states {
     fmt.Printf("Runnable %s is in state %s\n", name, state)
 }
 ```
 
-## Implementation Details
+## Error Handling
 
-### State Management
+Errors from child runnables are propagated to the CompositeRunner's `Run()` method:
 
-The CompositeRunner uses an internal finite state machine (FSM) to track its lifecycle:
+```go
+if err := cRunner.Run(ctx); err != nil {
+    // This error could be from any child runnable
+    log.Fatalf("Runner failed: %v", err)
+}
+```
 
-- **New** → Initial state
-- **Booting** → Starting child runnables
-- **Running** → All child runnables are active
-- **Reloading** → Processing configuration updates
-- **Stopping** → Gracefully shutting down child runnables
-- **Stopped** → All child runnables have been stopped
-- **Error** → An unrecoverable error has occurred
+Child runnables that return `context.Canceled` or `context.DeadlineExceeded` during shutdown are not reported as errors.
 
-State transitions are enforced by the FSM (e.g., cannot go from Booting directly to Reloading).
+## Best Practices
 
-### Asynchronous Boot Process
+- **Implement String() carefully**: The CompositeRunner uses the String() method of child runnables to identify them during reloads. Ensure this method returns a consistent, unique identifier.
+- **Keep config callbacks fast**: The config callback is called frequently and should return quickly.
+- **Consider startup/shutdown order**: Components are started in order, and stopped in reverse order of their definition. Startup and shutdown is concurrent.
+- **All runnables will be restarted if membership changes**: If the membership of the composite changes, all runnables will be restarted. This is a design choice to ensure consistency across the group.
 
-The `boot()` method starts each child runnable in its own goroutine but doesn't wait for them to be fully "ready" - it only waits for the goroutines to be launched. This allows for faster initialization of large component groups.
+---
 
-Each child runnable's errors are communicated back to the parent through a shared error channel.
-
-### Reload Implementation
-
-The `Reload()` method supports dynamic membership changes:
-
-1. If membership hasn't changed (same set of runnables):
-   - Updates configuration and calls child `ReloadWithConfig()` methods
-   - No stopping/starting of components
-
-2. If membership has changed (added/removed runnables):
-   - Stops all existing runnables
-   - Updates configuration
-   - Restarts all runnables from the new configuration
-
-### Handling Concurrency
-
-The CompositeRunner uses multiple synchronization mechanisms:
-- `configMu` (RWMutex) - Protects configuration access
-- `runnablesMu` (Mutex) - Protects runnable operations
-- Atomic operations - For safe state access
-- WaitGroups - To coordinate startup and shutdown
-- Go channels - For error propagation and cancellation
+For more advanced usage and implementation details, see the source code and examples in the repository.

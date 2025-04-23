@@ -159,16 +159,6 @@ func (w *Worker) startTicker(ctx context.Context, interval time.Duration) {
 	logger.Debug("Ticker started", "interval", interval)
 }
 
-// Reload is part of the Reloadable interface. In this pattern, config updates
-// are primarily handled via ReloadWithConfig and processed asynchronously by the Run loop.
-// This Reload implementation will simply log the action. If a config is pending
-// in nextConfig, the Run loop will pick it up anyway. Draining it here could be problematic.
-func (w *Worker) Reload() {
-	w.logger.WithGroup("Reload").Info("Reload called, but no action taken")
-	// No action taken here; ReloadWithConfig handles the actual config update.
-	// This is a placeholder to satisfy the Reloadable interface.
-}
-
 // ReloadWithConfig receives a new configuration and sends it to the Run loop via a channel.
 // It handles potential backpressure by replacing the pending config if the channel is full.
 func (w *Worker) ReloadWithConfig(config any) {

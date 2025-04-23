@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
-	"github.com/robbyt/go-supervisor/supervisor"
 )
 
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
@@ -17,7 +16,6 @@ type ConfigCallback[T runnable] func() (*Config[T], error)
 
 // ReloadableWithConfig is an interface for sub-runnables that can reload with specific config
 type ReloadableWithConfig interface {
-	supervisor.Reloadable
 	ReloadWithConfig(config any)
 }
 

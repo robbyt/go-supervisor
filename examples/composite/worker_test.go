@@ -534,29 +534,6 @@ func TestWorker_ReloadWithConfig_Concurrency(t *testing.T) {
 	}, 500*time.Millisecond, pollInterval, "Tick count did not advance after concurrent reloads")
 }
 
-// TestWorker_Reload tests the basic Reload method implementation
-func TestWorker_Reload(t *testing.T) {
-	t.Parallel()
-	logger, logBuf := testLogger(t, true) // Capture logs
-
-	config := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "reload-test"}
-	worker, err := NewWorker(config, logger)
-	require.NoError(t, err)
-
-	// Test that Reload logs correctly but doesn't modify state
-	originalConfig := worker.getConfig()
-
-	// Call Reload and check logs
-	worker.Reload()
-
-	// Verify config is unchanged
-	assert.Equal(t, originalConfig, worker.getConfig(), "Config should be unchanged by Reload call")
-
-	// Check logs for expected message
-	assert.Contains(t, logBuf.String(), "Reload called, but no action taken",
-		"Reload should log that no action was taken")
-}
-
 // TestWorkerConfig_String tests the String method of WorkerConfig
 func TestWorkerConfig_String(t *testing.T) {
 	t.Parallel()
