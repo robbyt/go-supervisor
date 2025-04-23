@@ -9,25 +9,28 @@ import (
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set is started to ensure proper lifecycle management.
 func (r *CompositeRunner[T]) Reload() {
-	r.logger.Debug("Reloading composite runner...")
+	logger := r.logger.WithGroup("Reload")
+	logger.Debug("Reloading...")
+	defer func() {
+		logger.Debug("Completed.")
+	}()
 
 	// Transition to Reloading state
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		r.logger.Error("Failed to transition to Reloading", "error", err)
+		logger.Error("Failed to transition to Reloading", "error", err)
 		r.setStateError()
 		return
 	}
 
-	// Get updated config from callback
+	// Get updated config from the callback function
 	newConfig, err := r.configCallback()
 	if err != nil {
-		r.logger.Error("Failed to get updated config", "error", err)
+		logger.Error("Failed to get updated config", "error", err)
 		r.setStateError()
 		return
 	}
-
 	if newConfig == nil {
-		r.logger.Error("Config callback returned nil during reload")
+		logger.Error("Config callback returned nil during reload")
 		r.setStateError()
 		return
 	}
@@ -35,26 +38,23 @@ func (r *CompositeRunner[T]) Reload() {
 	// Get the old config to compare
 	oldConfig := r.getConfig()
 	if oldConfig == nil {
-		r.logger.Error("Failed to get current config during reload")
+		logger.Error("Failed to get current config during reload")
 		r.setStateError()
 		return
 	}
 
 	// Check if membership has changed by comparing runnable identities
-	membershipChanged := hasMembershipChanged(oldConfig, newConfig)
-
-	if membershipChanged {
-		r.logger.Debug(
+	if hasMembershipChanged(oldConfig, newConfig) {
+		logger.Debug(
 			"Membership change detected, stopping all existing runnables before updating config",
 		)
 
 		// Stop all existing runnables while we still have the old config
 		// This acquires the runnables mutex
 		if err := r.stopRunnables(); err != nil {
-			r.logger.Error(
+			logger.Error(
 				"Failed to stop existing runnables during membership change",
-				"error",
-				err,
+				"error", err,
 			)
 			r.setStateError()
 			return
@@ -69,12 +69,12 @@ func (r *CompositeRunner[T]) Reload() {
 		// Start all runnables from the new config
 		// This acquires the runnables mutex
 		if err := r.boot(); err != nil {
-			r.logger.Error("Failed to start new runnables during membership change", "error", err)
+			logger.Error("Failed to start new runnables during membership change", "error", err)
 			r.setStateError()
 			return
 		}
 
-		r.logger.Debug("Successfully restarted all runnables after membership change")
+		logger.Debug("Successfully restarted all runnables after membership change")
 	} else {
 		// No membership change, just update config and reload existing runnables
 		r.configMu.Lock()
@@ -86,29 +86,27 @@ func (r *CompositeRunner[T]) Reload() {
 		reloaded := 0
 		for _, entry := range newConfig.Entries {
 			if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
-				// If the runnable implements the ReloadableWithConfig interface, use that to pass the new config
-				r.logger.Debug("Reloading child runnable with config", "runnable", entry.Runnable)
+				// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config
+				logger.Debug("Reloading child runnable with config", "runnable", entry.Runnable)
 				reloadableWithConfig.ReloadWithConfig(entry.Config)
 				reloaded++
 			} else if reloadable, ok := any(entry.Runnable).(supervisor.Reloadable); ok {
-				// Fall back to standard Reloadable interface
-				r.logger.Debug("Reloading child runnable", "runnable", entry.Runnable)
+				// Fall back to standard Reloadable interface, assume the configCallback
+				// has somehow updated the runnable's internal state
+				logger.Debug("Reloading child runnable", "runnable", entry.Runnable)
 				reloadable.Reload()
 				reloaded++
 			}
 		}
-
-		r.logger.Debug("Reloaded runnables without membership change", "runnablesReloaded", reloaded)
+		logger.Debug("Reloaded runnables without membership change", "runnablesReloaded", reloaded)
 	}
 
 	// Transition back to Running
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-		r.logger.Error("Failed to transition to Running", "error", err)
+		logger.Error("Failed to transition to Running", "error", err)
 		r.setStateError()
 		return
 	}
-
-	r.logger.Debug("Reload completed successfully", "membershipChanged", membershipChanged)
 }
 
 // hasMembershipChanged checks if the set of runnables has changed between configurations
