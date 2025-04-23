@@ -1,35 +1,71 @@
 # Composite Runner Example
 
-This example demonstrates how to use the CompositeRunner to manage multiple Worker instances as a single unit. It showcases:
+This example demonstrates how to use the CompositeRunner to manage multiple Worker instances as a single logical unit. It provides a complete implementation you can use as a reference for your own applications.
 
-1. Creating a custom Worker type that implements the required interfaces
-2. Setting up a CompositeRunner with multiple Worker instances 
-3. Handling configuration updates through the ReloadWithConfig interface
-4. Implementing a clean and simple configCallback function
-5. Properly handling ticker-based periodic tasks with dynamic configuration
+## What This Example Shows
+
+1. Creating a Worker type that implements both `Runnable` and `ReloadableWithConfig` interfaces
+2. Managing multiple Worker instances with a Composite Runner 
+3. Handling dynamic configuration updates through the `ReloadWithConfig` method
+4. Implementing a thread-safe periodic task with proper context cancellation
+5. Coordinating multiple workers' lifecycles through a common supervisor
 
 ## Key Components
 
-### Worker
+### Worker Implementation
 
-The `Worker` type is a simple implementation of a background job that:
+The `Worker` type (`worker.go`) demonstrates:
 
-- Implements the `Runnable` interface with `Run()` and `Stop()`
-- Implements the `ReloadableWithConfig` interface to receive new configurations
-- Performs periodic work based on a configurable interval
-- Uses mutexes to safely handle concurrent access to shared resources
-- Handles dynamic ticker interval updates without stopping the worker
-- Uses a channel-based approach for reliable tick management
+```go
+// Worker implements both Runnable and ReloadableWithConfig
+type Worker struct {
+    name       string
+    mu         sync.RWMutex
+    config     WorkerConfig
+    nextConfig chan WorkerConfig
+    // ... other fields
+}
 
-### CompositeRunner
+// Run starts the worker's main loop
+func (w *Worker) Run(ctx context.Context) error {
+    // Implementation handles context cancellation and config updates
+}
 
-The example demonstrates how to:
+// Stop signals the worker to gracefully shut down
+func (w *Worker) Stop() {
+    // Implementation ensures clean shutdown
+}
 
-- Create a type-safe CompositeRunner for Worker instances
-- Use a simple configCallback function to generate new configurations
-- Associate workers with their configurations
-- Handle hot reload of configurations without service interruption
-- Manage the lifecycle of multiple workers as a single entity
+// ReloadWithConfig receives configuration updates
+func (w *Worker) ReloadWithConfig(config any) {
+    // Implementation handles type conversion and validation
+}
+```
+
+### Composite Configuration
+
+The example (`main.go`) demonstrates creating a composite runner:
+
+```go
+// Create workers with initial configuration
+worker1, err := NewWorker(WorkerConfig{...})
+worker2, err := NewWorker(WorkerConfig{...})
+
+// Define config callback that returns configuration for both workers
+configCallback := func() (*composite.Config[*Worker], error) {
+    newEntries := []composite.RunnableEntry[*Worker]{
+        {Runnable: worker1, Config: WorkerConfig{...}},
+        {Runnable: worker2, Config: WorkerConfig{...}},
+    }
+    return composite.NewConfig("worker-composite", newEntries)
+}
+
+// Create composite runner with our callback
+runner, err := composite.NewRunner(
+    composite.WithContext[*Worker](ctx),
+    composite.WithConfigCallback(configCallback),
+)
+```
 
 ## Running the Example
 
@@ -37,23 +73,16 @@ The example demonstrates how to:
 go run .
 ```
 
-The example will:
+When you run the example:
 
-1. Start two Worker instances with different configurations (2s and 5s intervals)
-2. Log each worker's activity
-3. Allow for configuration reloads through the supervisor
-4. Run until you press Ctrl+C to stop
+1. Two Worker instances start with different interval configurations (5s and 10s)
+2. Each worker performs periodic tasks at its configured interval
+3. You can send a SIGHUP signal to trigger configuration reload (random intervals)
+4. Workers smoothly transition to new intervals without stopping
+5. Press Ctrl+C to trigger graceful shutdown
 
-## Testing
+## Key Patterns Demonstrated
 
-The tests demonstrate how to verify:
-
-- That Workers handle configuration reloads properly
-- That Workers execute correctly with thread safety
-- That the CompositeRunner handles membership changes properly
-
-Run the tests with race detection:
-
-```bash
-go test -race -v
-```
+- **Graceful Shutdown**: Proper context cancellation and resource cleanup
+- **Configuration Management**: Thread-safe handling of configuration updates
+- **Dynamic Reconfiguration**: Changing intervals without restarting workers
