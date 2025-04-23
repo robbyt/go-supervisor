@@ -1,6 +1,9 @@
 package composite
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
@@ -51,59 +54,17 @@ func (r *Runner[T]) Reload() {
 	// Check if membership has changed by comparing runnable identities
 	if hasMembershipChanged(oldConfig, newConfig) {
 		logger.Debug(
-			"Membership change detected, stopping all existing runnables before updating config",
+			"Membership change detected, stopping all existing runnables before updating membership and config",
 		)
-
-		// Stop all existing runnables while we still have the old config
-		// This acquires the runnables mutex
-		if err := r.stopRunnables(); err != nil {
-			logger.Error(
-				"Failed to stop existing runnables during membership change",
-				"error", err,
-			)
+		if err := r.reloadMembershipChanged(newConfig); err != nil {
+			logger.Error("Failed to reload runnables due to membership change", "error", err)
 			r.setStateError()
 			return
 		}
-
-		// Now update the stored config after stopping old runnables
-		// Lock the config mutex for writing
-		r.configMu.Lock()
-		r.setConfig(newConfig)
-		r.configMu.Unlock()
-
-		// Start all runnables from the new config
-		// This acquires the runnables mutex
-		if err := r.boot(r.runCtx); err != nil {
-			logger.Error("Failed to start new runnables during membership change", "error", err)
-			r.setStateError()
-			return
-		}
-
-		logger.Debug("Successfully restarted all runnables after membership change")
+		logger.Debug("Reloaded runnables due to membership change")
 	} else {
-		// No membership change, just update config and reload existing runnables
-		r.configMu.Lock()
-		r.setConfig(newConfig)
-		r.configMu.Unlock()
-
-		// Reload configs of existing runnables
-		// No need to lock the runnables mutex as we're not changing membership
-		reloaded := 0
-		for _, entry := range newConfig.Entries {
-			if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
-				// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config
-				logger.Debug("Reloading child runnable with config", "runnable", entry.Runnable)
-				reloadableWithConfig.ReloadWithConfig(entry.Config)
-				reloaded++
-			} else if reloadable, ok := any(entry.Runnable).(supervisor.Reloadable); ok {
-				// Fall back to standard Reloadable interface, assume the configCallback
-				// has somehow updated the runnable's internal state
-				logger.Debug("Reloading child runnable", "runnable", entry.Runnable)
-				reloadable.Reload()
-				reloaded++
-			}
-		}
-		logger.Debug("Reloaded runnables without membership change", "runnablesReloaded", reloaded)
+		r.reloadConfig(logger, newConfig)
+		logger.Debug("Reloaded runnables without membership change")
 	}
 
 	// Transition back to Running
@@ -111,6 +72,51 @@ func (r *Runner[T]) Reload() {
 		logger.Error("Failed to transition to Running", "error", err)
 		r.setStateError()
 		return
+	}
+}
+
+// reloadMembershipChanged handles the case where the membership of runnables has changed.
+func (r *Runner[T]) reloadMembershipChanged(newConfig *Config[T]) error {
+	// Stop all existing runnables while we still have the old config
+	// This acquires the runnables mutex
+	if err := r.stopRunnables(); err != nil {
+		return fmt.Errorf("%w: failed to stop existing runnables during membership change", err)
+	}
+	// Now update the stored config after stopping old runnables
+	// Lock the config mutex for writing
+	r.configMu.Lock()
+	r.setConfig(newConfig)
+	r.configMu.Unlock()
+
+	// Start all runnables from the new config
+	// This acquires the runnables mutex
+	if err := r.boot(r.runCtx); err != nil {
+		return fmt.Errorf("%w: failed to start new runnables during membership change", err)
+	}
+	return nil
+}
+
+// reloadConfig handles the case where the membership of runnables has not changed.
+func (r *Runner[T]) reloadConfig(logger *slog.Logger, newConfig *Config[T]) {
+	logger = logger.WithGroup("reloadConfig")
+	// No membership change, just update config and reload existing runnables
+	r.configMu.Lock()
+	r.setConfig(newConfig)
+	r.configMu.Unlock()
+
+	// Reload configs of existing runnables
+	// No need to lock the runnables mutex as we're not changing membership
+	for _, entry := range newConfig.Entries {
+		if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
+			// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config
+			logger.Debug("Reloading child runnable with config", "runnable", entry.Runnable)
+			reloadableWithConfig.ReloadWithConfig(entry.Config)
+		} else if reloadable, ok := any(entry.Runnable).(supervisor.Reloadable); ok {
+			// Fall back to standard Reloadable interface, assume the configCallback
+			// has somehow updated the runnable's internal state
+			logger.Debug("Reloading child runnable", "runnable", entry.Runnable)
+			reloadable.Reload()
+		}
 	}
 }
 
