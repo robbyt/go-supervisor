@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	// Use paths from the user's example
 	"github.com/robbyt/go-supervisor/runnables/composite"
 	"github.com/robbyt/go-supervisor/supervisor"
-	// Use testify imports
 	"github.com/stretchr/testify/require"
 )
 
