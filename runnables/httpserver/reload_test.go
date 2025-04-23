@@ -315,11 +315,6 @@ func TestReload(t *testing.T) {
 		assert.Same(t, configBefore, configAfter, "Config should remain unchanged")
 	})
 
-	t.Run("Reload fails when stopping the server fails", func(t *testing.T) {
-		// This test is hard to make stable without more control
-		t.Skip("Skipping test - too flaky")
-	})
-
 	t.Run("Reload fails when boot fails", func(t *testing.T) {
 		// Setup mock server with custom behavior
 		initialPort := getAvailablePort(t, 8000)
