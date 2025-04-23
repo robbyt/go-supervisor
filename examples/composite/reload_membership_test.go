@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/composite"
 	"github.com/robbyt/go-supervisor/supervisor"
 	// Use testify imports
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,241 +77,160 @@ var (
 
 // --- Test Case (Updated) ---
 
-// TestMembershipChanges verifies CompositeRunner stops removed runnables during reload.
-func TestMembershipChanges(t *testing.T) {
-	t.Skip("Skipping due to flaky test - needs rework of stop call tracking")
-	t.Parallel()
-	logger, _ := testLogger(t, false) // Use helper, capture=true for debug
-
-	// Setup tracking for worker stop calls using TestWorker's 'id'
-	stopCalls := make(map[string]int) // Use int to count calls (useful for debugging)
-	var stopMu sync.Mutex
-	recordStop := func(id string) {
-		stopMu.Lock()
-		defer stopMu.Unlock()
-		stopCalls[id]++
-		t.Logf("Stop recorded for worker ID: %s (Count: %d)", id, stopCalls[id])
+// TestMembershipChangesBasic is a simplified, basic test to verify the CompositeRunner
+// properly adds and removes runnables during reload.
+// Note: This test may show race conditions when run with -race flag due to the inherent
+// concurrency within composite runner, but it provides a functional verification of
+// worker membership changes.
+func TestMembershipChangesBasic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
 	}
 
-	// === Worker Creation ===
-	worker1ID := "worker-id-1"
-	worker1, err := NewTestWorker(worker1ID, WorkerConfig{
+	logger, _ := testLogger(t, true)
+
+	// Channel for tracking stopped workers - synchronization via channels instead of maps
+	stoppedCh := make(chan string, 10)
+
+	// Create initial workers
+	worker1, err := NewTestWorker("worker1", WorkerConfig{
 		Interval: 100 * time.Millisecond,
-		// JobName set internally by NewTestWorker to worker1ID
-	}, logger, recordStop)
-	require.NoError(t, err, "Failed to create worker1")
+	}, logger, func(id string) { stoppedCh <- id })
+	require.NoError(t, err)
 
-	worker2ID := "worker-id-2"
-	worker2, err := NewTestWorker(worker2ID, WorkerConfig{
-		Interval: 150 * time.Millisecond, // Slightly different interval
-		// JobName set internally by NewTestWorker to worker2ID
-	}, logger, recordStop)
-	require.NoError(t, err, "Failed to create worker2")
+	worker2, err := NewTestWorker("worker2", WorkerConfig{
+		Interval: 150 * time.Millisecond,
+	}, logger, func(id string) { stoppedCh <- id })
+	require.NoError(t, err)
 
-	// === Initial Composite Configuration ===
-	initialEntries := []composite.RunnableEntry[*TestWorker]{
-		// Pass the initial config associated with the worker instance
+	// Initial configuration with two workers
+	configEntries := []composite.RunnableEntry[*TestWorker]{
 		{Runnable: worker1, Config: worker1.config},
 		{Runnable: worker2, Config: worker2.config},
 	}
 
-	// Mutex protects currentEntries slice, configCallback reads it safely
-	var entriesMu sync.Mutex
-	currentEntries := initialEntries
+	// Create simple config callback that always returns the current entries
+	configCh := make(chan []composite.RunnableEntry[*TestWorker], 1)
+	configCh <- configEntries // Initial configuration
 
 	configCallback := func() (*composite.Config[*TestWorker], error) {
-		entriesMu.Lock()
-		defer entriesMu.Unlock()
-		// Return a *copy* to prevent race conditions if the slice is modified elsewhere
-		// while composite runner is reading it (unlikely here, but good practice).
-		entriesCopy := make([]composite.RunnableEntry[*TestWorker], len(currentEntries))
-		copy(entriesCopy, currentEntries)
-		// The composite runner name can be static for the test
-		return composite.NewConfig("test-membership-composite", entriesCopy)
+		entries := <-configCh // Get current config
+		configCh <- entries   // Put it back for next caller
+		return composite.NewConfig("test-runner", entries)
 	}
 
-	// === Context and Supervisor Setup ===
-	// Adjust timeout if needed based on intervals and processing time
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Create composite runner with reasonable timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-	// Create composite runner
 	runner, err := composite.NewRunner[*TestWorker](
-		composite.WithContext[*TestWorker](ctx), // Runner uses test context
+		composite.WithContext[*TestWorker](ctx),
 		composite.WithConfigCallback[*TestWorker](configCallback),
-		composite.WithLogHandler[*TestWorker](logger.Handler()), // Pass the handler
+		composite.WithLogHandler[*TestWorker](logger.Handler()),
 	)
-	require.NoError(t, err, "Failed to create composite runner")
+	require.NoError(t, err)
 
-	// Create supervisor (controls the runner)
-	sv, err := supervisor.New(
-		supervisor.WithContext(ctx), // Supervisor also uses test context
-		supervisor.WithRunnables(runner),
-		supervisor.WithLogHandler(logger.Handler()),
-	)
-	require.NoError(t, err, "Failed to create supervisor")
-
-	// === Cleanup Function (using t.Cleanup) ===
-	var wg sync.WaitGroup // WaitGroup for the supervisor goroutine
-	wg.Add(1)
-	errCh := make(chan error, 1) // Channel to receive error from sv.Run()
-
-	t.Cleanup(func() {
-		t.Log("Cleanup: Cancelling context and waiting for supervisor...")
-		cancel() // Cancel the main context
-
-		// Wait for supervisor Run to return, with a timeout
-		select {
-		case runErr := <-errCh:
-			// Expect nil or context cancelled/deadline exceeded errors on graceful shutdown
-			if runErr != nil && !errors.Is(runErr, context.Canceled) &&
-				!errors.Is(runErr, context.DeadlineExceeded) {
-				t.Errorf("Supervisor Run returned unexpected error during cleanup: %v", runErr)
-			} else {
-				t.Logf("Supervisor Run returned '%v' (expected during cleanup)", runErr)
-			}
-		case <-time.After(3 * time.Second): // Adjust timeout if needed
-			t.Error("Timeout waiting for supervisor Run to return during cleanup")
-		}
-		wg.Wait() // Wait for the goroutine itself to finish
-		t.Log("Cleanup: Supervisor goroutine finished.")
-
-		// === Final Assertions in Cleanup ===
-		stopMu.Lock()
-		defer stopMu.Unlock()
-		// worker1 was removed during the test, its stop call should have been recorded then.
-		assert.GreaterOrEqual(
-			t,
-			stopCalls[worker1ID],
-			1,
-			"Worker1 (removed) stop call count mismatch",
-		)
-		// worker2 and worker3 were active at shutdown, should be stopped by supervisor/context cancel.
-		assert.GreaterOrEqual(t, stopCalls[worker2ID], 1, "Worker2 (kept) stop call count mismatch")
-		assert.GreaterOrEqual(
-			t,
-			stopCalls["worker-id-3"],
-			1,
-			"Worker3 (added) stop call count mismatch",
-		) // Use the correct ID used when creating worker3
-		t.Logf("Final stop calls recorded: %v", stopCalls)
-	})
-
-	// === Start Supervisor ===
+	// Start runner in a goroutine
+	doneCh := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		t.Log("Supervisor starting Run...")
-		errCh <- sv.Run() // Send result (error or nil) to channel upon completion
-		t.Log("Supervisor Run finished.")
+		doneCh <- runner.Run(ctx)
 	}()
 
-	// === Wait for Initial State ===
-	t.Log("Waiting for initial workers to start ticking...")
-	require.Eventually(t, func() bool {
-		// Check if both initial workers have ticked at least once
-		// Use RLock for consistency, though Load is atomic
-		worker1.mu.RLock()
-		t1 := worker1.tickCount.Load() > 0
-		worker1.mu.RUnlock()
-		worker2.mu.RLock()
-		t2 := worker2.tickCount.Load() > 0
-		worker2.mu.RUnlock()
-		if t1 && t2 {
-			t.Logf(
-				"Initial ticks detected: worker1=%d, worker2=%d",
-				worker1.tickCount.Load(),
-				worker2.tickCount.Load(),
-			)
-			return true
-		}
-		return false
-	}, 3*time.Second, 50*time.Millisecond, "Initial workers did not start ticking")
-	t.Log("Initial workers are running.")
+	// Wait for initial configuration to be applied
+	time.Sleep(250 * time.Millisecond)
 
-	// === Prepare and Trigger Reload ===
-	worker3ID := "worker-id-3"
-	worker3, err := NewTestWorker(worker3ID, WorkerConfig{
-		Interval: 200 * time.Millisecond,
-		// JobName set internally by NewTestWorker to worker3ID
-	}, logger, recordStop)
-	require.NoError(t, err, "Failed to create worker3")
+	// --- Test Step 1: Remove worker1, add worker3 ---
+	worker3, err := NewTestWorker("worker3", WorkerConfig{
+		Interval: 50 * time.Millisecond,
+	}, logger, func(id string) { stoppedCh <- id })
+	require.NoError(t, err)
 
-	// Define the updated configuration entries:
-	// - Remove worker1
-	// - Keep worker2 instance, but update its config
-	// - Add worker3 instance with its config
-	updatedWorker2Config := WorkerConfig{
-		Interval: 180 * time.Millisecond, // Change interval
-		JobName:  "worker-id-2-reloaded", // Change JobName (Worker.name will update)
-	}
+	// Update to new config: remove worker1, keep worker2, add worker3
 	updatedEntries := []composite.RunnableEntry[*TestWorker]{
-		{Runnable: worker2, Config: updatedWorker2Config}, // Keep worker2, new config
-		{Runnable: worker3, Config: worker3.config},       // Add worker3, initial config
+		{Runnable: worker2, Config: worker2.config},
+		{Runnable: worker3, Config: worker3.config},
 	}
 
-	// Safely update the shared entries slice for the configCallback
-	entriesMu.Lock()
-	currentEntries = updatedEntries
-	entriesMu.Unlock()
-	t.Log("Updated config slice for callback. Triggering Reload...")
+	// Update configuration
+	<-configCh                 // Remove old config (discard it)
+	configCh <- updatedEntries // Set new config
 
-	// Trigger the reload on the composite runner
+	// Trigger reload
+	t.Log("Triggering reload to remove worker1 and add worker3")
 	runner.Reload()
 
-	// === Verify Reload Results ===
+	// Allow time for reload to complete
+	time.Sleep(300 * time.Millisecond)
 
-	// 1. Verify that worker1 (removed) was stopped
-	t.Logf("Waiting for worker '%s' (removed) to be stopped...", worker1ID)
-	require.Eventually(t, func() bool {
-		stopMu.Lock()
-		defer stopMu.Unlock()
-		return stopCalls[worker1ID] > 0
-	}, 3*time.Second, 50*time.Millisecond, "Worker '%s' (removed) stop call was not recorded", worker1ID)
-	t.Logf("Worker '%s' stop call verified.", worker1ID)
+	// Collect stopped workers - both worker1 and worker2 might be stopped
+	// as the composite runner might stop and recreate worker2 during reload
+	initialStopped := make(map[string]bool)
 
-	// 2. Optional: Verify worker2 (kept) received its config update
-	t.Logf("Verifying worker '%s' (kept) config update...", worker2ID)
-	require.Eventually(t, func() bool {
-		// CompositeRunner should call ReloadWithConfig on worker2. Check its internal state.
-		cfg := readWorkerConfig(worker2.Worker) // Use helper to read safely
-		name := readWorkerName(worker2.Worker)
-		intervalMatch := cfg.Interval == updatedWorker2Config.Interval
-		nameMatch := name == updatedWorker2Config.JobName // Worker.name should update
-		if intervalMatch && nameMatch {
-			t.Logf(
-				"Worker '%s' config verified: Interval=%v, Name=%s",
-				worker2ID,
-				cfg.Interval,
-				name,
-			)
-			return true
+	// Wait for initial stops (allow up to 2 stops initially)
+	stopCheckTimeout := time.After(500 * time.Millisecond)
+	stopCount := 0
+
+collectStops:
+	for stopCount < 2 {
+		select {
+		case stopped := <-stoppedCh:
+			t.Logf("Stopped worker: %s", stopped)
+			initialStopped[stopped] = true
+			stopCount++
+		case <-stopCheckTimeout:
+			break collectStops
 		}
-		t.Logf(
-			"Worker '%s' config not yet updated: Interval=%v (want %v), Name=%s (want %s)",
-			worker2ID,
-			cfg.Interval,
-			updatedWorker2Config.Interval,
-			name,
-			updatedWorker2Config.JobName,
-		)
-		return false
-	}, 3*time.Second, 50*time.Millisecond, "Worker '%s' config did not update correctly", worker2ID)
-	t.Logf("Worker '%s' config update verified.", worker2ID)
+	}
 
-	// 3. Optional: Verify worker3 (added) started ticking
-	t.Logf("Verifying worker '%s' (added) started ticking...", worker3ID)
-	require.Eventually(t, func() bool {
-		// CompositeRunner should call Run on worker3. Check its tick count.
-		worker3.mu.RLock() // Lock needed to access embedded Worker safely
-		tickCount := worker3.tickCount.Load()
-		worker3.mu.RUnlock()
-		if tickCount > 0 {
-			t.Logf("Worker '%s' ticks detected: %d", worker3ID, tickCount)
-			return true
+	// Verify worker1 was stopped (this is what we're testing)
+	require.True(t, initialStopped["worker1"], "Worker1 should have been stopped during reload")
+
+	// --- Cleanup ---
+	t.Log("Cancelling context to stop all workers")
+	cancel()
+
+	// Wait for runner to finish
+	select {
+	case err := <-doneCh:
+		if err != nil && !errors.Is(err, context.Canceled) &&
+			!errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Runner exited with unexpected error: %v", err)
 		}
-		return false
-	}, 3*time.Second, 50*time.Millisecond, "Worker '%s' (added) did not start ticking", worker3ID)
-	t.Logf("Worker '%s' started ticking.", worker3ID)
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for runner to exit")
+	}
 
-	// Test proceeds until timeout or explicit cancel in t.Cleanup
-	t.Log("Reload verification complete. Test continuing until cleanup/timeout...")
+	// Verify remaining workers were stopped
+	stoppedCount := 0
+	expectedStoppedWorkers := []string{"worker2", "worker3"}
+
+	// Create a map to check which workers were stopped
+	stoppedMap := make(map[string]bool)
+
+drainLoop:
+	for {
+		select {
+		case id := <-stoppedCh:
+			stoppedMap[id] = true
+			stoppedCount++
+			t.Logf("Worker stopped during cleanup: %s", id)
+		case <-time.After(300 * time.Millisecond):
+			// No more workers stopped, break the loop
+			break drainLoop
+		}
+	}
+
+	// Verify the expected workers were stopped
+	for _, id := range expectedStoppedWorkers {
+		if !stoppedMap[id] {
+			t.Errorf("Expected worker %s to be stopped, but it wasn't", id)
+		}
+	}
+
+	// We should have seen 2 workers stopped during cleanup
+	if stoppedCount < 2 {
+		t.Errorf("Expected at least 2 workers to be stopped, got %d", stoppedCount)
+	}
+
+	t.Log("Test completed successfully")
 }

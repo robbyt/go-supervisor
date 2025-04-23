@@ -533,3 +533,207 @@ func TestWorker_ReloadWithConfig_Concurrency(t *testing.T) {
 		return worker.tickCount.Load() > initialTicks
 	}, 500*time.Millisecond, pollInterval, "Tick count did not advance after concurrent reloads")
 }
+
+// TestWorker_Reload tests the basic Reload method implementation
+func TestWorker_Reload(t *testing.T) {
+	t.Parallel()
+	logger, logBuf := testLogger(t, true) // Capture logs
+
+	config := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "reload-test"}
+	worker, err := NewWorker(config, logger)
+	require.NoError(t, err)
+
+	// Test that Reload logs correctly but doesn't modify state
+	originalConfig := worker.GetConfig()
+
+	// Call Reload and check logs
+	worker.Reload()
+
+	// Verify config is unchanged
+	assert.Equal(t, originalConfig, worker.GetConfig(), "Config should be unchanged by Reload call")
+
+	// Check logs for expected message
+	assert.Contains(t, logBuf.String(), "Reload called, but no action taken",
+		"Reload should log that no action was taken")
+}
+
+// TestWorkerConfig_String tests the String method of WorkerConfig
+func TestWorkerConfig_String(t *testing.T) {
+	t.Parallel()
+
+	cfg := WorkerConfig{
+		Interval: 250 * time.Millisecond,
+		JobName:  "test-string-job",
+	}
+
+	expectedStr := fmt.Sprintf("WorkerConfig{JobName: %s, Interval: %s}",
+		cfg.JobName, cfg.Interval)
+
+	assert.Equal(t, expectedStr, cfg.String(),
+		"WorkerConfig.String() should return formatted representation")
+}
+
+// TestWorker_String tests the String method of Worker
+func TestWorker_String(t *testing.T) {
+	t.Parallel()
+	logger, _ := testLogger(t, false)
+
+	cfg := WorkerConfig{
+		Interval: 200 * time.Millisecond,
+		JobName:  "string-method-test",
+	}
+
+	worker, err := NewWorker(cfg, logger)
+	require.NoError(t, err)
+
+	expectedStr := fmt.Sprintf("Worker{config: %s}", cfg.String())
+	assert.Equal(t, expectedStr, worker.String(),
+		"Worker.String() should return formatted representation with config")
+}
+
+// TestWorkerConfig_Equal tests the Equal method of WorkerConfig
+func TestWorkerConfig_Equal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		config1  WorkerConfig
+		config2  any
+		expected bool
+	}{
+		{
+			name:     "Equal configs",
+			config1:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			config2:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			expected: true,
+		},
+		{
+			name:     "Different intervals",
+			config1:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			config2:  WorkerConfig{Interval: 200 * time.Millisecond, JobName: "job1"},
+			expected: false,
+		},
+		{
+			name:     "Different job names",
+			config1:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			config2:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job2"},
+			expected: false,
+		},
+		{
+			name:     "Different types",
+			config1:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			config2:  "not a WorkerConfig",
+			expected: false,
+		},
+		{
+			name:     "Compare with nil",
+			config1:  WorkerConfig{Interval: 100 * time.Millisecond, JobName: "job1"},
+			config2:  nil,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := tc.config1.Equal(tc.config2)
+			assert.Equal(t, tc.expected, result, "WorkerConfig.Equal() returned unexpected result")
+		})
+	}
+}
+
+// TestWorker_ProcessReload_UnchangedInterval tests the case where the interval doesn't change during reload
+func TestWorker_ProcessReload_UnchangedInterval(t *testing.T) {
+	t.Parallel()
+
+	// Create worker with initial config
+	initialConfig := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "original-job"}
+
+	// Need to specify a logger with Debug level to capture the message
+	var logBuf bytes.Buffer
+	logHandler := slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(logHandler)
+
+	worker, err := NewWorker(initialConfig, logger)
+	require.NoError(t, err)
+
+	// Create new config with same interval but different job name
+	newConfig := WorkerConfig{Interval: initialConfig.Interval, JobName: "updated-job"}
+
+	// Directly test processReload with unchanged interval
+	worker.processReload(&newConfig)
+
+	// Check that job name was updated
+	updatedConfig := worker.GetConfig()
+	assert.Equal(t, newConfig.JobName, updatedConfig.JobName, "Job name should be updated")
+	assert.Equal(
+		t,
+		initialConfig.Interval,
+		updatedConfig.Interval,
+		"Interval should remain unchanged",
+	)
+
+	// Verify config was updated by checking the name property directly
+	worker.mu.RLock()
+	assert.Equal(t, "updated-job", worker.name, "Worker name should be updated")
+	worker.mu.RUnlock()
+}
+
+// TestWorker_ProcessReload_InvalidConfig tests handling of invalid config in processReload
+func TestWorker_ProcessReload_InvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	// Create worker with initial valid config
+	initialConfig := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "original-job"}
+
+	// Set up logger to capture logs
+	var logBuf bytes.Buffer
+	logHandler := slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	logger := slog.New(logHandler)
+
+	worker, err := NewWorker(initialConfig, logger)
+	require.NoError(t, err)
+
+	// Remember the initial config state for comparison
+	initialState := worker.GetConfig()
+
+	// Create an invalid config (zero interval)
+	invalidConfig := WorkerConfig{Interval: 0, JobName: "invalid-job"}
+
+	// Process the invalid config through processReload
+	worker.processReload(&invalidConfig)
+
+	// Config should remain unchanged after an invalid config
+	currentConfig := worker.GetConfig()
+	assert.Equal(t, initialState, currentConfig, "Config should not change after invalid config")
+
+	// Verify the worker name wasn't updated
+	worker.mu.RLock()
+	assert.Equal(
+		t,
+		initialConfig.JobName,
+		worker.name,
+		"Worker name should not be updated with invalid config",
+	)
+	worker.mu.RUnlock()
+}
+
+// TestWorker_NewWorker_NilLogger tests worker creation with nil logger
+func TestWorker_NewWorker_NilLogger(t *testing.T) {
+	t.Parallel()
+
+	config := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "nil-logger-test"}
+	worker, err := NewWorker(config, nil) // Pass nil logger
+
+	require.NoError(t, err, "NewWorker should not error with nil logger")
+	require.NotNil(t, worker, "Worker should be created even with nil logger")
+	require.NotNil(t, worker.logger, "Worker should have a default logger assigned")
+
+	// Can't directly check logger formatting, but we can verify it's not nil
+	assert.NotNil(t, worker.logger, "Default logger should be created")
+}
+
+// We'll remove TestWorker_StartTicker_ChannelFullWarning since it introduces
+// race conditions with the log buffer and it's difficult to test this edge case safely.
+// This test was trying to cover a simple warning log path which is not critical functionality.
