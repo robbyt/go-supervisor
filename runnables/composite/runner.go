@@ -14,14 +14,9 @@ import (
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
 type ConfigCallback[T runnable] func() (*Config[T], error)
 
-// ReloadableWithConfig is an interface for sub-runnables that can reload with specific config
-type ReloadableWithConfig interface {
-	ReloadWithConfig(config any)
-}
-
-// CompositeRunner implements a component that manages multiple runnables of the same type
+// Runner implements a component that manages multiple runnables of the same type
 // as a single unit. It satisfies the Runnable, Reloadable, and Stateable interfaces.
-type CompositeRunner[T runnable] struct {
+type Runner[T runnable] struct {
 	configMu       sync.RWMutex // Protects config access
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
@@ -35,11 +30,11 @@ type CompositeRunner[T runnable] struct {
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided options.
-func NewRunner[T runnable](opts ...Option[T]) (*CompositeRunner[T], error) {
+func NewRunner[T runnable](opts ...Option[T]) (*Runner[T], error) {
 	// Setup defaults
 	logger := slog.Default().WithGroup("composite.Runner")
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &CompositeRunner[T]{
+	r := &Runner[T]{
 		currentConfig: atomic.Pointer[Config[T]]{},
 		serverErrors:  make(chan error, 1),
 		ctx:           ctx,
@@ -73,7 +68,7 @@ func NewRunner[T runnable](opts ...Option[T]) (*CompositeRunner[T], error) {
 }
 
 // String returns a string representation of the CompositeRunner instance.
-func (r *CompositeRunner[T]) String() string {
+func (r *Runner[T]) String() string {
 	cfg := r.getConfig()
 	if cfg == nil {
 		return "CompositeRunner<nil>"
@@ -83,7 +78,7 @@ func (r *CompositeRunner[T]) String() string {
 
 // Run starts all child runnables in order (first to last) and monitors for completion or errors.
 // This method blocks until all child runnables are stopped or an error occurs.
-func (r *CompositeRunner[T]) Run(ctx context.Context) error {
+func (r *Runner[T]) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -93,7 +88,7 @@ func (r *CompositeRunner[T]) Run(ctx context.Context) error {
 	}
 
 	// Start all child runnables
-	if err := r.boot(); err != nil {
+	if err := r.boot(ctx); err != nil {
 		r.setStateError()
 		return fmt.Errorf("failed to start child runnables: %w", err)
 	}
@@ -142,7 +137,7 @@ func (r *CompositeRunner[T]) Run(ctx context.Context) error {
 }
 
 // Stop will cancel the parent context, causing all child runnables to stop.
-func (r *CompositeRunner[T]) Stop() {
+func (r *Runner[T]) Stop() {
 	// Only transition to Stopping if we're currently Running
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusRunning, finitestate.StatusStopping); err != nil {
 		// This error is expected if we're already stopping, so only log at debug level
@@ -152,7 +147,7 @@ func (r *CompositeRunner[T]) Stop() {
 }
 
 // boot starts all child runnables in the order they're defined.
-func (r *CompositeRunner[T]) boot() error {
+func (r *Runner[T]) boot(ctx context.Context) error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
@@ -173,50 +168,44 @@ func (r *CompositeRunner[T]) boot() error {
 
 	for i, entry := range cfg.Entries {
 		runnable := entry.Runnable
-		index := i // Capture loop variable
-
-		r.logger.Debug("Launching child runnable goroutine", "index", index, "runnable", runnable)
-
+		index := i // Capture loop variables
 		// Start the runnable in its own goroutine
 		go func(e T, idx int) {
-			r.logger.Debug("Executing Run() for child runnable", "index", idx, "runnable", e)
+			logger := r.logger.WithGroup("childRunnable").With("index", idx, "runnable", e)
+			logger.Debug("Executing Run() for child runnable")
 
 			// Signal that the goroutine has started BEFORE calling Run
 			// This allows boot() to return and the CompositeRunner to transition to Running
 			startWg.Done()
 
-			// Run the runnable; it blocks until stopped or error.
-			// Use r.ctx which is the main context for the CompositeRunner lifetime.
-			if err := e.Run(r.ctx); err != nil {
-				// Filter out expected context cancellation errors on shutdown
-				if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-					r.logger.Error(
-						"Child runnable returned error",
-						"index",
-						idx,
-						"runnable",
-						e,
-						"error",
-						err,
-					)
-					// Send non-cancellation errors to the main error channel
-					// Use non-blocking send in case channel is full or Run exited
-					select {
-					case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
-					default:
-						r.logger.Warn(
-							"Failed to send child runnable error to main channel (full or closed?)",
-							"index",
-							idx,
-							"error",
-							err,
-						)
-					}
-				} else {
-					r.logger.Debug("Child runnable stopped gracefully", "index", idx, "runnable", e, "reason", err)
-				}
-			} else {
-				r.logger.Debug("Child runnable completed Run() without error", "index", idx, "runnable", e)
+			// Run the runnable; it blocks here until stopped or returns an error.
+			// Creates a sub-context for this runnable, preventing it from cancelling the parent context.
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
+			err := e.Run(ctx)
+			if err == nil {
+				r.logger.Debug("Child runnable completed Run() without error")
+				return
+			}
+
+			// Filter out expected context cancellation errors on shutdown
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				r.logger.Debug("Child runnable stopped gracefully", "reason", err)
+				return
+			}
+
+			logger.Error("Child runnable returned unexpected error", "error", err)
+			// Send non-cancellation errors to the main error channel
+			// Use non-blocking send in case channel is full or Run exited
+			select {
+			case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
+			default:
+				r.logger.Warn(
+					"Failed to send child runnable error to main channel (full or closed?)",
+					"error",
+					err,
+				)
 			}
 		}(runnable, index)
 	}
@@ -232,7 +221,7 @@ func (r *CompositeRunner[T]) boot() error {
 }
 
 // stopRunnables stops all child runnables in reverse order (last to first).
-func (r *CompositeRunner[T]) stopRunnables() error {
+func (r *Runner[T]) stopRunnables() error {
 	// Lock the runnables mutex to protect operations
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
@@ -264,13 +253,13 @@ func (r *CompositeRunner[T]) stopRunnables() error {
 
 // setConfig atomically updates the current configuration.
 // Caller must hold configMu write lock
-func (r *CompositeRunner[T]) setConfig(config *Config[T]) {
+func (r *Runner[T]) setConfig(config *Config[T]) {
 	r.currentConfig.Store(config)
 	r.logger.Debug("Config updated", "config", config)
 }
 
 // getConfig returns the current configuration, loading it via the callback if necessary.
-func (r *CompositeRunner[T]) getConfig() *Config[T] {
+func (r *Runner[T]) getConfig() *Config[T] {
 	// First try to get config without locking
 	config := r.currentConfig.Load()
 	if config != nil {

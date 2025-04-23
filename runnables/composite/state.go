@@ -8,17 +8,17 @@ import (
 )
 
 // GetState returns the current state of the CompositeRunner.
-func (r *CompositeRunner[T]) GetState() string {
+func (r *Runner[T]) GetState() string {
 	return r.fsm.GetState()
 }
 
 // GetStateChan returns a channel that will receive state updates.
-func (r *CompositeRunner[T]) GetStateChan(ctx context.Context) <-chan string {
+func (r *Runner[T]) GetStateChan(ctx context.Context) <-chan string {
 	return r.fsm.GetStateChan(ctx)
 }
 
 // setStateError marks the FSM as being in the error state.
-func (r *CompositeRunner[T]) setStateError() {
+func (r *Runner[T]) setStateError() {
 	err := r.fsm.SetState(finitestate.StatusError)
 	if err != nil {
 		r.logger.Error("Failed to transition to Error state", "error", err)
@@ -26,7 +26,7 @@ func (r *CompositeRunner[T]) setStateError() {
 }
 
 // GetChildStates returns a map of child runnable names to their states.
-func (r *CompositeRunner[T]) GetChildStates() map[string]string {
+func (r *Runner[T]) GetChildStates() map[string]string {
 	// No need for runnables lock, just reading config and querying state
 	// which doesn't modify any internal state
 

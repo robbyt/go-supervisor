@@ -24,9 +24,9 @@ func TestCompositeInterfaceImplementation(t *testing.T) {
 	t.Parallel()
 
 	var (
-		_ supervisor.Runnable   = (*CompositeRunner[supervisor.Runnable])(nil)
-		_ supervisor.Reloadable = (*CompositeRunner[supervisor.Runnable])(nil)
-		_ supervisor.Stateable  = (*CompositeRunner[supervisor.Runnable])(nil)
+		_ supervisor.Runnable   = (*Runner[supervisor.Runnable])(nil)
+		_ supervisor.Reloadable = (*Runner[supervisor.Runnable])(nil)
+		_ supervisor.Stateable  = (*Runner[supervisor.Runnable])(nil)
 	)
 }
 

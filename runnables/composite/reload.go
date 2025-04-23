@@ -5,10 +5,15 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
+// ReloadableWithConfig is an interface for sub-runnables that can reload with specific config
+type ReloadableWithConfig interface {
+	ReloadWithConfig(config any)
+}
+
 // Reload updates the configuration and handles runnables appropriately.
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set is started to ensure proper lifecycle management.
-func (r *CompositeRunner[T]) Reload() {
+func (r *Runner[T]) Reload() {
 	logger := r.logger.WithGroup("Reload")
 	logger.Debug("Reloading...")
 	defer func() {
@@ -68,7 +73,8 @@ func (r *CompositeRunner[T]) Reload() {
 
 		// Start all runnables from the new config
 		// This acquires the runnables mutex
-		if err := r.boot(); err != nil {
+		// Note: this uses the parent context of the runner instead of the context sent to `Run()`
+		if err := r.boot(r.ctx); err != nil {
 			logger.Error("Failed to start new runnables during membership change", "error", err)
 			r.setStateError()
 			return
