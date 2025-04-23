@@ -73,8 +73,7 @@ func (r *Runner[T]) Reload() {
 
 		// Start all runnables from the new config
 		// This acquires the runnables mutex
-		// Note: this uses the parent context of the runner instead of the context sent to `Run()`
-		if err := r.boot(r.ctx); err != nil {
+		if err := r.boot(r.runCtx); err != nil {
 			logger.Error("Failed to start new runnables during membership change", "error", err)
 			r.setStateError()
 			return

@@ -21,9 +21,11 @@ type Runner[T runnable] struct {
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
-	runnablesMu  sync.Mutex // Protects runnable operations (start/stop)
-	fsm          finitestate.Machine
-	ctx          context.Context
+	runnablesMu sync.Mutex // Protects runnable operations (start/stop)
+	fsm         finitestate.Machine
+
+	runCtx       context.Context // set by Run() to track THIS instance run context
+	parentCtx    context.Context // set by NewRunner() to track the parent context
 	cancel       context.CancelFunc
 	serverErrors chan error
 	logger       *slog.Logger
@@ -33,11 +35,11 @@ type Runner[T runnable] struct {
 func NewRunner[T runnable](opts ...Option[T]) (*Runner[T], error) {
 	// Setup defaults
 	logger := slog.Default().WithGroup("composite.Runner")
-	ctx, cancel := context.WithCancel(context.Background())
+	parentCtx, cancel := context.WithCancel(context.Background())
 	r := &Runner[T]{
 		currentConfig: atomic.Pointer[Config[T]]{},
 		serverErrors:  make(chan error, 1),
-		ctx:           ctx,
+		parentCtx:     parentCtx,
 		cancel:        cancel,
 		logger:        logger,
 	}
@@ -82,6 +84,11 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	r.runnablesMu.Lock()
+	// store the Run context in the runner so that Reload() can use it later
+	r.runCtx = runCtx
+	r.runnablesMu.Unlock()
+
 	// Transition from New to Booting
 	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
 		return fmt.Errorf("failed to transition to Booting state: %w", err)
@@ -103,7 +110,7 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	select {
 	case <-runCtx.Done():
 		r.logger.Debug("Local context canceled")
-	case <-r.ctx.Done():
+	case <-r.parentCtx.Done():
 		r.logger.Debug("Parent context canceled")
 	case err := <-r.serverErrors:
 		r.setStateError()

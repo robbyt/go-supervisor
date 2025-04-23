@@ -22,7 +22,7 @@ func WithLogHandler[T runnable](handler slog.Handler) Option[T] {
 func WithContext[T runnable](ctx context.Context) Option[T] {
 	return func(c *Runner[T]) {
 		if ctx != nil {
-			c.ctx, c.cancel = context.WithCancel(ctx)
+			c.parentCtx, c.cancel = context.WithCancel(ctx)
 		}
 	}
 }
