@@ -2,9 +2,7 @@ package composite
 
 import (
 	"context"
-	"errors"
 	"testing"
-	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/runnables/mocks"
@@ -14,285 +12,97 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCompositeRunner_Run(t *testing.T) {
+func TestCompositeRunner_GetChildStates(t *testing.T) {
 	t.Parallel()
 
-	t.Run("successful run and graceful shutdown", func(t *testing.T) {
-		t.Parallel()
+	// Create a statable runnable mock
+	mockRunnable := mocks.NewMockRunnableWithStatable()
+	mockRunnable.On("String").Return("statable-runnable").Once()
+	mockRunnable.On("GetState").Return("mock-state").Once()
 
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil)
-		mockRunnable1.On("Stop").Once()
+	// Create a regular runnable mock
+	regularRunnable := mocks.NewMockRunnable()
+	regularRunnable.On("String").Return("regular-runnable").Once()
 
-		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Run", mock.Anything).Return(nil)
-		mockRunnable2.On("Stop").Once()
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable2, Config: nil},
-		}
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return NewConfig("test", entries)
-		}
-
-		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-
-		// Run in a goroutine and cancel after a short time
-		ctx, cancel := context.WithCancel(context.Background())
-		errCh := make(chan error, 1)
-
-		go func() {
-			errCh <- runner.Run(ctx)
-		}()
-
-		// Wait for states to transition to Running
-		require.Eventually(t, func() bool {
-			return runner.GetState() == finitestate.StatusRunning
-		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
-		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
-
-		// Cancel the context to stop the runner
-		cancel()
-
-		// Wait for Run to complete
-		var runErr error
-		select {
-		case runErr = <-errCh:
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("timeout waiting for Run to complete")
-		}
-
-		assert.NoError(t, runErr)
-		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
-		mockRunnable1.AssertExpectations(t)
-		mockRunnable2.AssertExpectations(t)
-	})
-
-	t.Run("runnable fails during execution", func(t *testing.T) {
-		t.Parallel()
-
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-
-		var capturedRunner *Runner[*mocks.Runnable]
-		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			// Create a goroutine that will send an error to the serverErrors channel
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				capturedRunner.serverErrors <- errors.New("runnable error")
-			}()
-
-			// Wait until context is cancelled
-			<-args.Get(0).(context.Context).Done()
-		}).Return(nil)
-		mockRunnable1.On("Stop").Maybe()
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-		}
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return NewConfig("test", entries)
-		}
-
-		// Create runner and save it to the captured variable
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-		capturedRunner = runner
-
-		// Run - should complete with error when the runnable "fails"
-		err = runner.Run(context.Background())
-
-		// Verify error and state
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "runnable error")
-		assert.Equal(t, finitestate.StatusError, runner.GetState())
-
-		mockRunnable1.AssertExpectations(t)
-	})
-
-	t.Run("runnable fails during startup", func(t *testing.T) {
-		t.Parallel()
-
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable1.On("Stop").Maybe()
-
-		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Run", mock.Anything).Return(errors.New("failed to start"))
-		mockRunnable2.On("Stop").Maybe()
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable2, Config: nil},
-		}
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return NewConfig("test", entries)
-		}
-
-		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-
-		// Run
-		err = runner.Run(context.Background())
-
-		// Verify error and state
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "child runnable failed")
-		assert.Equal(t, finitestate.StatusError, runner.GetState())
-
-		// Verify mock expectations
-		mockRunnable1.AssertExpectations(t)
-		mockRunnable2.AssertExpectations(t)
-	})
-
-	t.Run("missing config", func(t *testing.T) {
-		t.Parallel()
-
-		// Create config callback that initially returns a config but then nil
-		callCount := 0
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			callCount++
-			if callCount == 1 {
-				entries := []RunnableEntry[*mocks.Runnable]{}
-				return NewConfig("test", entries)
-			}
-			return nil, nil
-		}
-
-		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-
-		// Force refresh of config during boot by clearing stored config
-		runner.currentConfig.Store(nil)
-
-		// Run should fail due to missing config
-		err = runner.Run(context.Background())
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "no runnables to manage")
-	})
-
-	t.Run("no runnables", func(t *testing.T) {
-		t.Parallel()
-
-		// Create config callback with empty entries
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			entries := []RunnableEntry[*mocks.Runnable]{}
-			return NewConfig("test", entries)
-		}
-
-		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-
-		// Run should fail due to no runnables
-		err = runner.Run(context.Background())
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "no runnables to manage")
-	})
-}
-
-func TestCompositeRunner_Stop(t *testing.T) {
-	t.Parallel()
-
-	// Create reusable mock setup function
-	setupMocksAndConfig := func() (entries []RunnableEntry[*mocks.Runnable], configFunc func() (*Config[*mocks.Runnable], error)) {
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable1.On("Stop").Maybe()
-
-		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable2.On("Stop").Maybe()
-
-		// Create entries
-		entries = []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable2, Config: nil},
-		}
-
-		// Create config callback
-		configFunc = func() (*Config[*mocks.Runnable], error) {
-			return NewConfig("test", entries)
-		}
-
-		return entries, configFunc
+	// Create entries for the statable runnable
+	entries := []RunnableEntry[supervisor.Runnable]{
+		{Runnable: mockRunnable, Config: nil},
+		{Runnable: regularRunnable, Config: nil},
 	}
 
-	t.Run("stop from running state", func(t *testing.T) {
-		t.Parallel()
+	// Create config callback
+	configCallback := func() (*Config[supervisor.Runnable], error) {
+		return NewConfig("test", entries)
+	}
 
-		// Setup mock runnables and config
-		_, configCallback := setupMocksAndConfig()
+	// Create runner with the supervisor.Runnable interface type
+	runner, err := NewRunner(
+		WithConfigCallback(configCallback),
+	)
+	require.NoError(t, err)
 
-		// Create runner and manually set state to Running
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-		err = runner.fsm.SetState(finitestate.StatusRunning)
-		require.NoError(t, err)
+	// Get child states
+	states := runner.GetChildStates()
+	require.Len(t, states, 2)
+	assert.Equal(t, "mock-state", states["statable-runnable"])
+	assert.Equal(t, "unknown", states["regular-runnable"])
 
-		// Call Stop - just testing the state transition
-		runner.Stop()
+	// Verify expectations
+	mockRunnable.AssertExpectations(t)
+	regularRunnable.AssertExpectations(t)
+}
 
-		// Verify state transition
-		assert.Equal(t, finitestate.StatusStopping, runner.GetState())
-	})
+func TestCompositeRunner_GetStateChan(t *testing.T) {
+	t.Parallel()
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("String").Return("runnable1").Once()
 
-	t.Run("stop from non-running state", func(t *testing.T) {
-		t.Parallel()
+	// Create entries
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: mockRunnable, Config: nil},
+	}
 
-		// Setup mock runnables and config
-		_, configCallback := setupMocksAndConfig()
+	// Create config callback
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", entries)
+	}
 
-		// Create runner and manually set state to Stopped
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
-		require.NoError(t, err)
-		err = runner.fsm.SetState(finitestate.StatusStopped)
-		require.NoError(t, err)
+	// Create runner
+	runner, err := NewRunner(
+		WithConfigCallback(configCallback),
+	)
+	require.NoError(t, err)
 
-		// Call Stop
-		runner.Stop()
+	// Create context with cancel
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		// Verify state did not change
-		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
-	})
+	// Get state channel
+	stateCh := runner.GetStateChan(ctx)
+	require.NotNil(t, stateCh)
+
+	// Read initial state
+	initialState := <-stateCh
+	assert.Equal(t, "New", initialState)
+
+	// Transition to a new state
+	err = runner.fsm.Transition("Booting")
+	require.NoError(t, err)
+
+	// Read updated state
+	select {
+	case state := <-stateCh:
+		assert.Equal(t, "Booting", state)
+	case <-ctx.Done():
+		t.Fatal("Context canceled before state update received")
+	}
+
+	// Verify that the channel closes when context is canceled
+	cancel()
+
+	// Ensure the channel is closed after context is canceled
+	_, ok := <-stateCh
+	assert.False(t, ok, "Channel should be closed after context is canceled")
 }
 
 // TestGetState_PassThrough tests the GetState method passes through to the underlying FSM

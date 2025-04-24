@@ -155,6 +155,7 @@ func (r *Runner[T]) Stop() {
 
 // boot starts all child runnables in the order they're defined.
 func (r *Runner[T]) boot(ctx context.Context) error {
+	logger := r.logger.WithGroup("boot")
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
@@ -167,64 +168,52 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		return fmt.Errorf("%w: no runnables to manage", ErrNoRunnables)
 	}
 
-	r.logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
+	logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
 
 	// Use a temporary WaitGroup to ensure all goroutines are launched.
 	var startWg sync.WaitGroup
 	startWg.Add(len(cfg.Entries))
-
 	for i, entry := range cfg.Entries {
-		runnable := entry.Runnable
-		index := i // Capture loop variables
-		// Start the runnable in its own goroutine
-		go func(e T, idx int) {
-			logger := r.logger.WithGroup("childRunnable").With("index", idx, "runnable", e)
-			logger.Debug("Executing Run() for child runnable")
-
-			// Signal that the goroutine has started BEFORE calling Run
-			// This allows boot() to return and the CompositeRunner to transition to Running
+		go func() {
 			startWg.Done()
+			r.startRunnable(ctx, entry.Runnable, i)
+		}()
+	}
+	startWg.Wait()
+	logger.Debug("All child runnable goroutines launched")
+	return nil
+}
 
-			// Run the runnable; it blocks here until stopped or returns an error.
-			// Creates a sub-context for this runnable, preventing it from cancelling the parent context.
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
+// startRunnable is a blocking call that starts a child runnable.
+func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
+	logger := r.logger.WithGroup("childRunnable").With("index", idx, "runnable", subRunnable)
+	logger.Debug("Executing Run() for child runnable")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-			err := e.Run(ctx)
-			if err == nil {
-				r.logger.Debug("Child runnable completed Run() without error")
-				return
-			}
-
-			// Filter out expected context cancellation errors on shutdown
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				r.logger.Debug("Child runnable stopped gracefully", "reason", err)
-				return
-			}
-
-			logger.Error("Child runnable returned unexpected error", "error", err)
-			// Send non-cancellation errors to the main error channel
-			// Use non-blocking send in case channel is full or Run exited
-			select {
-			case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
-			default:
-				r.logger.Warn(
-					"Failed to send child runnable error to main channel (full or closed?)",
-					"error",
-					err,
-				)
-			}
-		}(runnable, index)
+	// block here while the sub-runnable is running
+	err := subRunnable.Run(ctx)
+	if err == nil {
+		logger.Warn(
+			"Child Run method returned, and context was not canceled. The sub-runnable Run should be block!",
+		)
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// Filter out expected context cancellation errors on shutdown
+		logger.Debug("Child runnable stopped gracefully", "reason", err)
+		return
 	}
 
-	// Wait for all goroutines to at least *start* their execution.
-	// Note: This doesn't guarantee they are fully "ready".
-	startWg.Wait()
-
-	r.logger.Debug("All child runnable goroutines launched")
-	// boot itself succeeds once goroutines are launched.
-	// Runtime errors are handled asynchronously via r.serverErrors.
-	return nil
+	logger.Error("Child runnable returned unexpected error", "error", err)
+	select {
+	case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
+	default:
+		logger.Warn(
+			"Failed to send child runnable error to main channel (full or closed?)",
+			"error", err,
+		)
+	}
 }
 
 // stopRunnables stops all child runnables in reverse order (last to first).
