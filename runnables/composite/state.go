@@ -17,6 +17,11 @@ func (r *Runner[T]) GetStateChan(ctx context.Context) <-chan string {
 	return r.fsm.GetStateChan(ctx)
 }
 
+// IsRunning returns true if the CompositeRunner is currently running.
+func (r *Runner[T]) IsRunning() bool {
+	return r.fsm.GetState() == finitestate.StatusRunning
+}
+
 // setStateError marks the FSM as being in the error state.
 func (r *Runner[T]) setStateError() {
 	err := r.fsm.SetState(finitestate.StatusError)
