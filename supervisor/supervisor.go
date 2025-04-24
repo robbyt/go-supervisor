@@ -18,12 +18,19 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
+)
+
+const (
+	DefaultStartupTimeout = 2 * time.Minute       // Default max timeout for startup
+	DefaultStartupInitial = 50 * time.Millisecond // Initial wait time for startup
 )
 
 // PIDZero manages multiple "runnables" and handles OS signals for HUP or graceful shutdown.
@@ -41,7 +48,11 @@ type PIDZero struct {
 	stateMap           sync.Map
 	stateSubscribers   sync.Map
 	subscriberMutex    sync.Mutex
-	logger             *slog.Logger
+
+	startupTimeout time.Duration
+	startupInitial time.Duration
+
+	logger *slog.Logger
 }
 
 // Option represents a functional option for configuring PIDZero.
@@ -87,6 +98,24 @@ func WithRunnables(runnables ...Runnable) Option {
 	}
 }
 
+// WithStartupTimeout sets the startup timeout for the PIDZero instance.
+func WithStartupTimeout(timeout time.Duration) Option {
+	return func(p *PIDZero) {
+		if timeout > 0 {
+			p.startupTimeout = timeout
+		}
+	}
+}
+
+// WithStartupInitial sets the initial startup delay for the PIDZero instance.
+func WithStartupInitial(initial time.Duration) Option {
+	return func(p *PIDZero) {
+		if initial > 0 {
+			p.startupInitial = initial
+		}
+	}
+}
+
 // New creates a new PIDZero instance with the provided options.
 func New(opts ...Option) (*PIDZero, error) {
 	// Load the default logger and append the Supervisor group
@@ -109,6 +138,8 @@ func New(opts ...Option) (*PIDZero, error) {
 		cancel:           cancel,
 		subscribeSignals: defaultSignals,
 		reloadListener:   make(chan struct{}),
+		startupTimeout:   DefaultStartupTimeout,
+		startupInitial:   DefaultStartupInitial,
 		logger:           logger,
 	}
 
@@ -168,11 +199,71 @@ func (p *PIDZero) Run() error {
 	// Start each service in sequence
 	for _, r := range p.runnables {
 		p.wg.Add(1)
-		go p.startRunnable(r)
+		go p.startRunnable(r) // start this runnable in a separate goroutine
+
+		// if this Runnable implements the Stateable block here until IsRunning()
+		if stateable, ok := r.(Stateable); ok {
+			err := p.blockUntilRunnableReady(stateable)
+			if err != nil {
+				p.logger.Error("Failed to start runnable", "runnable", r, "error", err)
+				p.Shutdown()
+				return err // exit Run loop
+			}
+		} else {
+			p.logger.Debug("Runnable does not implement Stateable, continuing", "runnable", r)
+		}
 	}
 
-	// Begin reaping process
+	// Begin reaping process to monitor signals and errors
 	return p.reap()
+}
+
+// blockUntilRunnableReady blocks until the runnable is in a running state.
+// This requires implementing the Stateable interface so the runnable can be monitored.
+func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
+	startupCtx, cancel := context.WithTimeout(p.ctx, p.startupTimeout)
+	defer cancel()
+
+	timeout := p.startupInitial
+	ticker := time.NewTicker(timeout)
+	defer ticker.Stop()
+
+	logger := p.logger.With("runnable", r)
+	time.Sleep(timeout) // Initial delay before checking the runnable state
+
+	for {
+		if r.IsRunning() {
+			logger.Debug("Runnable is running")
+			return nil
+		}
+
+		logger.Debug(
+			"Waiting for runnable to start",
+			"retryIn",
+			timeout,
+			"deadline",
+			p.startupTimeout,
+		)
+		select {
+		case err := <-p.errorChan:
+			// error received from `startRunnable`- put it back in the channel for reap() to process it later
+			p.errorChan <- err
+			return fmt.Errorf("runnable failed to start: %w", err)
+		case <-startupCtx.Done():
+			return fmt.Errorf("timeout waiting for runnable to start: %w", startupCtx.Err())
+		case <-p.ctx.Done():
+			logger.Debug("Context canceled, stopping runnables")
+			return nil
+		case <-ticker.C:
+			// continue waiting, adding an exponential backoff
+			if r.IsRunning() {
+				logger.Debug("Runnable is running")
+				return nil
+			}
+			timeout = timeout * 2
+			ticker.Reset(timeout)
+		}
+	}
 }
 
 // Shutdown gracefully shuts down all runnables and cleans up resources.
@@ -230,12 +321,36 @@ func (p *PIDZero) startRunnable(r Runnable) {
 		p.logger.Debug("Initial state", "runnable", r, "state", initialState)
 	}
 
-	if err := r.Run(p.ctx); err != nil {
-		p.logger.Error("Unable to start", "runnable", r, "error", err)
-		if stateable, ok := r.(Stateable); ok {
-			p.logger.Error("Service failed", "runnable", r, "state", stateable.GetState())
-		}
-		p.errorChan <- err
+	// Create a child context for this runnable to prevent cross-cancellation issues
+	runCtx, cancel := context.WithCancel(p.ctx)
+	defer cancel()
+
+	// Run the runnable with the child context
+	err := r.Run(runCtx)
+	logger := p.logger.With("runnable", r)
+	if err == nil {
+		logger.Debug("Runnable completed without error")
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// Filter out expected cancellation errors
+		logger.Debug("Runnable stopped gracefully", "reason", err)
+		return
+	}
+
+	// Unexpected error - log and send to the errorChan
+	logger = logger.With("error", err)
+	if stateable, ok := r.(Stateable); ok {
+		logger.Error("Service failed", "state", stateable.GetState())
+	} else {
+		logger.Error("Service failed")
+	}
+
+	select {
+	case p.errorChan <- fmt.Errorf("failed to start runnable: %w", err):
+		// Error sent successfully
+	default:
+		logger.Warn("Unable to send error to errorChan (full or closed?)")
 	}
 }
 

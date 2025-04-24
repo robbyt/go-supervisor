@@ -124,6 +124,13 @@ func (m *MockRunnableWithStatable) GetStateChan(ctx context.Context) <-chan stri
 	return args.Get(0).(chan string)
 }
 
+// IsRunning mocks the IsRunning method of the Stateable interface.
+// It returns true if the service is currently running, as configured in test expectations.
+func (m *MockRunnableWithStatable) IsRunning() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
+
 // NewMockRunnableWithStatable creates a new MockRunnableWithStatable with default delays.
 func NewMockRunnableWithStatable() *MockRunnableWithStatable {
 	return &MockRunnableWithStatable{
