@@ -180,37 +180,35 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		}()
 	}
 	startWg.Wait()
-	logger.Debug("All child runnable goroutines launched")
+	logger.Debug("All child runnables launched")
 	return nil
 }
 
 // startRunnable is a blocking call that starts a child runnable.
 func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
-	logger := r.logger.WithGroup("childRunnable").With("index", idx, "runnable", subRunnable)
-	logger.Debug("Executing Run() for child runnable")
+	logger := r.logger.WithGroup("child").With("index", idx, "runnable", subRunnable)
+	logger.Debug("Executing Run()")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// block here while the sub-runnable is running
 	err := subRunnable.Run(ctx)
 	if err == nil {
-		logger.Warn(
-			"Child Run method returned, and context was not canceled. The sub-runnable Run should be block!",
-		)
+		// The child Run method returned without returning context cancel error.
 		return
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		// Filter out expected context cancellation errors on shutdown
-		logger.Debug("Child runnable stopped gracefully", "reason", err)
+		logger.Debug("Stopped gracefully", "reason", err)
 		return
 	}
 
-	logger.Error("Child runnable returned unexpected error", "error", err)
+	logger.Error("Returned unexpected error", "error", err)
 	select {
 	case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
 	default:
 		logger.Warn(
-			"Failed to send child runnable error to main channel (full or closed?)",
+			"Failed to send error to serverErrors channel (is it full or closed?)",
 			"error", err,
 		)
 	}
