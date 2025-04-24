@@ -2,38 +2,14 @@ package supervisor
 
 import (
 	"context"
+	"maps"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
-
-// Helper for implementing a test Runnable/Stateable
-type testStateable struct {
-	name       string
-	stateChan  chan string
-	stateValue string
-}
-
-func (ts *testStateable) Run(ctx context.Context) error {
-	return nil
-}
-
-func (ts *testStateable) Stop() {
-	// Empty implementation
-}
-
-func (ts *testStateable) GetState() string {
-	return ts.stateValue
-}
-
-func (ts *testStateable) GetStateChan(ctx context.Context) <-chan string {
-	return ts.stateChan
-}
-
-func (ts *testStateable) String() string {
-	return ts.name
-}
 
 // TestStateDeduplication tests that the startStateMonitor implementation
 // properly filters out duplicate state changes when it receives the same state
@@ -47,13 +23,10 @@ func TestStateDeduplication(t *testing.T) {
 
 	// Create a channel for sending state updates
 	stateChan := make(chan string, 10)
-
-	// Create our test runnable that implements Stateable
-	runnable := &testStateable{
-		name:       "test-runnable",
-		stateChan:  stateChan,
-		stateValue: "initial", // Initial state value
-	}
+	runnable := mocks.NewMockRunnableWithStatable()
+	runnable.On("String").Return("test-runnable")
+	runnable.On("GetStateChan", mock.Anything).Return(stateChan)
+	runnable.On("GetState").Return("initial")
 
 	// Create a new supervisor with our test runnable
 	pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
@@ -77,9 +50,7 @@ func TestStateDeduplication(t *testing.T) {
 				}
 				// Copy the map to avoid issues with concurrent modification
 				copy := make(StateMap)
-				for k, v := range stateMap {
-					copy[k] = v
-				}
+				maps.Copy(copy, stateMap)
 				broadcasts = append(broadcasts, copy)
 				t.Logf("Received broadcast: %+v", copy)
 			case <-ctx.Done():
@@ -109,7 +80,7 @@ func TestStateDeduplication(t *testing.T) {
 
 	// First state change
 	t.Log("Sending 'running' state")
-	runnable.stateValue = "running" // Update internal state first
+	runnable.On("GetState").Return("running")
 	stateChan <- "running"
 
 	// Send duplicate states - should be ignored
@@ -121,7 +92,7 @@ func TestStateDeduplication(t *testing.T) {
 
 	// Second state change
 	t.Log("Sending 'stopped' state")
-	runnable.stateValue = "stopped" // Update internal state first
+	runnable.On("GetState").Return("stopped")
 	stateChan <- "stopped"
 
 	// Another duplicate - should be ignored
@@ -130,7 +101,7 @@ func TestStateDeduplication(t *testing.T) {
 
 	// Third state change
 	t.Log("Sending 'error' state")
-	runnable.stateValue = "error" // Update internal state first
+	runnable.On("GetState").Return("error")
 	stateChan <- "error"
 	time.Sleep(100 * time.Millisecond)
 
