@@ -246,6 +246,15 @@ func TestMockRunnableWithStatable(t *testing.T) {
 		mockRunnable.AssertExpectations(t)
 	})
 
+	t.Run("IsRunning method", func(t *testing.T) {
+		// Create a mock
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("IsRunning", mock.Anything).Return(true)
+		r := mockRunnable.IsRunning()
+		assert.True(t, r)
+		mockRunnable.AssertExpectations(t)
+	})
+
 	t.Run("inherits from base Runnable", func(t *testing.T) {
 		testHelperInheritedMethods(t, mocks.NewMockRunnableWithStatable(), "StatefulService")
 	})

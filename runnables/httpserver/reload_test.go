@@ -177,8 +177,14 @@ func TestReload(t *testing.T) {
 		defer stateCancel()
 		stateChan := server.GetStateChan(stateCtx)
 
-		// Wait for the server to complete its state transition
-		waitForState(t, stateChan, []string{finitestate.StatusReloading, finitestate.StatusRunning})
+		require.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan:
+				return finitestate.StatusReloading == state || finitestate.StatusRunning == state
+			default:
+				return false
+			}
+		}, 2*time.Second, 10*time.Millisecond)
 
 		// Verify that the state hasn't changed
 		stateAfter := server.GetState()
@@ -358,34 +364,29 @@ func TestReload(t *testing.T) {
 			err := server.Run(context.Background())
 			done <- err
 		}()
+
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusRunning
+		}, 2*time.Second, 10*time.Millisecond, "Server should transition to StatusRunning state after boot")
+		require.Equal(t, finitestate.StatusRunning, server.GetState(), "Server should be running")
+
+		// setup a failure
+		reloadCalled = true
+		server.Reload()
+
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusError
+		}, 2*time.Second, 10*time.Millisecond, "Server should transition to Error state after failed boot")
+
+		assert.Equal(t,
+			finitestate.StatusError, server.GetState(),
+			"Server should be in Error state",
+		)
+
 		t.Cleanup(func() {
 			server.Stop()
 			<-done
 		})
-
-		// Wait for server to be in Running state
-		time.Sleep(100 * time.Millisecond)
-		require.Equal(t, finitestate.StatusRunning, server.GetState(), "Server should be running")
-
-		// Setup state monitoring
-		stateCtx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		stateChan := server.GetStateChan(stateCtx)
-
-		// Trigger reload with invalid config
-		reloadCalled = true
-		server.Reload()
-
-		// Wait for the state to change to Error
-		waitForState(t, stateChan, []string{finitestate.StatusError})
-
-		// Verify the server is in Error state
-		assert.Equal(
-			t,
-			finitestate.StatusError,
-			server.GetState(),
-			"Server should be in Error state",
-		)
 	})
 }
 
@@ -447,8 +448,14 @@ func TestRapidReload(t *testing.T) {
 		// Don't wait between reloads to test rapid changes
 	}
 
-	// Wait for the final state to be running
-	waitForState(t, stateChan, []string{finitestate.StatusRunning})
+	require.Eventually(t, func() bool {
+		select {
+		case state := <-stateChan:
+			return finitestate.StatusRunning == state
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Verify server is still operational
 	resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
