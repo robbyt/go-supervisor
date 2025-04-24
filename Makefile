@@ -16,7 +16,7 @@ help: Makefile
 ## test: Run tests with race detection and coverage
 .PHONY: test
 test:
-	go test -race -cover $(PACKAGES)
+	go test -timeout 3m -race -cover $(PACKAGES)
 
 ## bench: Run performance benchmarks
 .PHONY: bench
