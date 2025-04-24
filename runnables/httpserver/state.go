@@ -36,3 +36,8 @@ func (r *Runner) GetState() string {
 func (r *Runner) GetStateChan(ctx context.Context) <-chan string {
 	return r.fsm.GetStateChan(ctx)
 }
+
+// IsRunning returns true if the HTTP server is currently running.
+func (r *Runner) IsRunning() bool {
+	return r.fsm.GetState() == finitestate.StatusRunning
+}

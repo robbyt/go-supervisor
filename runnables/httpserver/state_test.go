@@ -135,74 +135,6 @@ func TestGetStateChan(t *testing.T) {
 	assert.False(t, ok, "Channel should be closed after context cancellation")
 }
 
-// waitForState waits for any of the expected states to be reached.
-// It will keep reading from the channel until one of the expected states is seen
-// or until the context is canceled.
-func waitForState(t *testing.T, stateChan <-chan string, expectedStates []string) {
-	t.Helper()
-
-	// First check if the current state already matches
-	currentState := ""
-	select {
-	case state := <-stateChan:
-		currentState = state
-	default:
-		// No state available in channel yet
-	}
-
-	if currentState != "" {
-		for _, expectedState := range expectedStates {
-			if currentState == expectedState {
-				return // Already in expected state
-			}
-		}
-	}
-
-	// Deadline to prevent test from hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Before failing, check the object's current state directly
-			objState := ""
-			select {
-			case objState = <-stateChan:
-				// Got a state
-			case <-time.After(100 * time.Millisecond):
-				// Timeout getting state
-			}
-
-			t.Fatalf("Timed out waiting for states %v, current state: %s", expectedStates, objState)
-		case state, ok := <-stateChan:
-			if !ok {
-				t.Fatalf("State channel closed while waiting for states %v", expectedStates)
-			}
-
-			for _, expectedState := range expectedStates {
-				if state == expectedState {
-					// Found expected state
-					return
-				}
-			}
-			// Continue waiting if state doesn't match any expected states
-		}
-	}
-}
-
-// waitForServerState waits for the server to reach the expected state
-// nolint:unused
-func waitForServerState(t *testing.T, server *Runner, expectedState string) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	stateChan := server.GetStateChan(ctx)
-	waitForState(t, stateChan, []string{expectedState})
-}
-
 // TestWaitForState verifies the waitForState helper function
 func TestWaitForState(t *testing.T) {
 	t.Parallel()
@@ -215,31 +147,37 @@ func TestWaitForState(t *testing.T) {
 
 	stateChan := server.GetStateChan(ctx)
 
-	// Set the state after a short delay
+	// Set the state to Running after a short delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		err := server.fsm.SetState(finitestate.StatusRunning)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}()
 
-	// Wait for the state change
-	waitForState(t, stateChan, []string{finitestate.StatusRunning})
+	require.Eventually(t, func() bool {
+		select {
+		case state := <-stateChan:
+			return finitestate.StatusRunning == state
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, finitestate.StatusRunning, server.GetState())
 
-	// Verify the current state
-	assert.Equal(t, finitestate.StatusRunning, server.GetState())
-
-	// Test waiting for multiple possible states
+	// Set the state to Stopping after a short delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		err := server.fsm.SetState(finitestate.StatusStopping)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}()
 
-	// Should return when any of the expected states is reached
-	waitForState(
-		t,
-		stateChan,
-		[]string{finitestate.StatusStopped, finitestate.StatusStopping, finitestate.StatusError},
-	)
-	assert.Equal(t, finitestate.StatusStopping, server.GetState())
+	require.Eventually(t, func() bool {
+		select {
+		case state := <-stateChan:
+			return finitestate.StatusStopping == state
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, finitestate.StatusStopping, server.GetState())
 }

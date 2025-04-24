@@ -47,6 +47,9 @@ type Stateable interface {
 
 	// GetStateChan returns a channel that will receive the current state of the service.
 	GetStateChan(context.Context) <-chan string
+
+	// IsRunning returns true if the service is currently running.
+	IsRunning() bool
 }
 
 // ReloadSender represents a service that can trigger reloads.
