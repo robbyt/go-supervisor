@@ -9,11 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	// Assuming this path is correct for your project setup
 	"github.com/robbyt/go-supervisor/runnables/composite"
+	"github.com/robbyt/go-supervisor/supervisor"
 )
 
-// WorkerConfig holds configuration for a worker runnable
+// WorkerConfig is the configuration structure for the Worker, used for initial config and for
+// dynamic updates via ReloadWithConfig at runtime.
 type WorkerConfig struct {
 	Interval time.Duration `json:"interval"`
 	JobName  string        `json:"job_name"`
@@ -23,7 +24,14 @@ func (wc WorkerConfig) String() string {
 	return fmt.Sprintf("WorkerConfig{JobName: %s, Interval: %s}", wc.JobName, wc.Interval)
 }
 
-// validate checks if a WorkerConfig is valid.
+func (wc WorkerConfig) Equal(other any) bool {
+	otherConfig, ok := other.(WorkerConfig)
+	if !ok {
+		return false
+	}
+	return wc.Interval == otherConfig.Interval && wc.JobName == otherConfig.JobName
+}
+
 func (wc WorkerConfig) validate() error {
 	if wc.Interval <= 0 {
 		return fmt.Errorf("interval must be positive, got %v", wc.Interval)
@@ -32,14 +40,6 @@ func (wc WorkerConfig) validate() error {
 		return errors.New("job name must not be empty")
 	}
 	return nil
-}
-
-func (wc WorkerConfig) Equal(other any) bool {
-	otherConfig, ok := other.(WorkerConfig)
-	if !ok {
-		return false
-	}
-	return wc.Interval == otherConfig.Interval && wc.JobName == otherConfig.JobName
 }
 
 // Worker is a simplified example of a runnable that does background work
@@ -58,11 +58,13 @@ type Worker struct {
 	logger       *slog.Logger
 }
 
-// Ensure Worker implements the composite.ReloadableWithConfig interface
-var _ composite.ReloadableWithConfig = (*Worker)(nil)
+// Ensure Worker implements these interfaces
+var (
+	_ supervisor.Runnable            = (*Worker)(nil)
+	_ composite.ReloadableWithConfig = (*Worker)(nil)
+)
 
-// NewWorker creates a new Worker with the given config
-// Returns an error if the initial config is invalid.
+// NewWorker creates a new Worker instance with the initial config.
 func NewWorker(config WorkerConfig, logger *slog.Logger) (*Worker, error) {
 	if err := config.validate(); err != nil {
 		return nil, fmt.Errorf("invalid initial configuration: %w", err)
@@ -100,7 +102,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.startTicker(runCtx, cfg.Interval)
 	defer func() {
 		if w.tickerCancel != nil {
-			w.tickerCancel() // Stop the ticker goroutine
+			w.tickerCancel() // Stop the goroutine started in `startTicker`
 		}
 		logger.Info("Worker stopped", "name", w.getConfig().JobName)
 	}()
@@ -159,8 +161,9 @@ func (w *Worker) startTicker(ctx context.Context, interval time.Duration) {
 	logger.Debug("Ticker started", "interval", interval)
 }
 
-// ReloadWithConfig receives a new configuration and sends it to the Run loop via a channel.
-// It handles potential backpressure by replacing the pending config if the channel is full.
+// ReloadWithConfig receives a new config from the composite Runnable, and sends it to the Run
+// loop via a channel. It handles potential backpressure by replacing a pending config with the
+// latest received if the channel is full.
 func (w *Worker) ReloadWithConfig(config any) {
 	logger := w.logger.WithGroup("ReloadWithConfig")
 	cfg, ok := config.(WorkerConfig)
@@ -175,7 +178,7 @@ func (w *Worker) ReloadWithConfig(config any) {
 
 	// Validate the received config immediately
 	if err := cfg.validate(); err != nil {
-		w.logger.Error(
+		logger.Error(
 			"Invalid configuration received in ReloadWithConfig, discarding",
 			"error", err,
 			"config", cfg,
@@ -266,9 +269,8 @@ func (w *Worker) processReload(newConfig *WorkerConfig) {
 // processTick performs the actual work on each tick.
 func (w *Worker) processTick() {
 	w.mu.RLock()
-	// Read necessary config under read lock
 	cfg := w.config
-	currentName := w.name // Read name under lock too
+	currentName := w.name
 	w.mu.RUnlock()
 
 	// Simulate work - Replace with your actual task

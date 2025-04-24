@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -71,109 +70,40 @@ func TestRunServer(t *testing.T) {
 func TestRunServerInvalidPort(t *testing.T) {
 	t.Parallel()
 
-	// Create a modified version of RunServer with a custom listen address
-	runServerWithCustomPort := func(ctx context.Context, logHandler slog.Handler, listenAddr string) (*supervisor.PIDZero, func(), error) {
-		rootLogger := slog.New(logHandler)
-
-		// Create HTTP handlers functions (same as RunServer)
-		handlerLogger := rootLogger.WithGroup("httpserver")
-		indexHandler := func(w http.ResponseWriter, r *http.Request) {
-			handlerLogger.Info("Handling index request", "path", r.URL.Path)
-			_, err := io.WriteString(w, "Welcome to the go-supervisor example HTTP server!\n")
-			if err != nil {
-				handlerLogger.Error("Failed to write response", "error", err)
-			}
-		}
-
-		statusHandler := func(w http.ResponseWriter, r *http.Request) {
-			handlerLogger.Info("Handling status request", "path", r.URL.Path)
-			_, err := io.WriteString(w, "Status: OK\n")
-			if err != nil {
-				handlerLogger.Error("Failed to write response", "error", err)
-			}
-		}
-
-		wildcardHandler := func(w http.ResponseWriter, r *http.Request) {
-			handlerLogger.Info("Handling wildcard request", "path", r.URL.Path)
-			_, err := io.WriteString(w, "You requested: "+r.URL.Path+"\n")
-			if err != nil {
-				handlerLogger.Error("Failed to write response", "error", err)
-			}
-		}
-
-		// Create routes (same as RunServer)
-		indexRoute, err := httpserver.NewRoute("index", "/", indexHandler)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create index route: %w", err)
-		}
-
-		statusRoute, err := httpserver.NewRoute("status", "/status", statusHandler)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create status route: %w", err)
-		}
-
-		apiRoute, err := httpserver.NewWildcardRoute("/api", wildcardHandler)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create wildcard route: %w", err)
-		}
-
-		routes := httpserver.Routes{*indexRoute, *statusRoute, *apiRoute}
-
-		// Create a config callback function with CUSTOM listen address
-		configCallback := func() (*httpserver.Config, error) {
-			return httpserver.NewConfig(listenAddr, DrainTimeout, routes)
-		}
-
-		// Create the HTTP server runner
-		customCtx, customCancel := context.WithCancel(ctx)
-
-		runner, err := httpserver.NewRunner(
-			httpserver.WithContext(customCtx),
-			httpserver.WithConfigCallback(configCallback),
-			httpserver.WithLogHandler(logHandler.WithGroup("httpserver")))
-		if err != nil {
-			customCancel()
-			return nil, nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
-		}
-
-		// Create supervisor
-		sv, err := supervisor.New(
-			supervisor.WithContext(ctx),
-			supervisor.WithRunnables(runner),
-			supervisor.WithLogHandler(logHandler))
-		if err != nil {
-			customCancel()
-			return nil, nil, fmt.Errorf("failed to create supervisor: %w", err)
-		}
-
-		// Create a cleanup function
-		cleanup := func() {
-			rootLogger.Info("Cleaning up resources")
-			customCancel()
-		}
-
-		return sv, cleanup, nil
-	}
-
 	// Create a test logger that discards output
-	testHandler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})
+	logHandler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})
 
-	// Create a context
-	ctx := context.Background()
+	// Create a context with timeout for the test
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Run with invalid port - should fail
-	sv, cleanup, err := runServerWithCustomPort(ctx, testHandler, ":-1")
-	if err == nil {
-		// If it somehow didn't fail at creation, it will fail when we run it
-		if cleanup != nil {
-			defer cleanup()
-		}
-		if sv != nil {
-			err = sv.Run()
-			assert.Error(t, err, "Run should fail with invalid port")
-		}
-	} else {
-		// Expected case - creation should fail with invalid port
-		assert.Contains(t, err.Error(), "invalid")
+	// Build routes - reuse the same routes from the main app
+	routes, err := buildRoutes(logHandler)
+	require.NoError(t, err, "Failed to build routes")
+
+	// Create a config callback that uses an invalid port
+	configCallback := func() (*httpserver.Config, error) {
+		return httpserver.NewConfig(":-1", DrainTimeout, routes)
 	}
+
+	// Create HTTP server runner with invalid port
+	runner, err := httpserver.NewRunner(
+		httpserver.WithContext(ctx),
+		httpserver.WithConfigCallback(configCallback),
+		httpserver.WithLogHandler(logHandler.WithGroup("httpserver")),
+	)
+	require.NoError(t, err, "Should be able to create runner even with invalid config")
+
+	// Create supervisor with a reasonable timeout
+	sv, err := supervisor.New(
+		supervisor.WithContext(ctx),
+		supervisor.WithRunnables(runner),
+		supervisor.WithLogHandler(logHandler),
+	)
+	require.NoError(t, err, "Failed to create supervisor")
+
+	// Run the supervisor - should fail because of invalid port
+	err = sv.Run()
+	assert.Error(t, err, "Run should fail with invalid port")
+	assert.Contains(t, err.Error(), "invalid port")
 }
