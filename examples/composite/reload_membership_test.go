@@ -1,69 +1,78 @@
-package main // Assuming test is in the same package
+package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/composite"
 	"github.com/robbyt/go-supervisor/supervisor"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// --- TestWorker Definition (Updated) ---
 
 // TestWorker wraps Worker to track Stop calls via a callback, using a stable ID.
 type TestWorker struct {
 	*Worker                 // Embed the actual Worker implementation by pointer
 	id      string          // Use a separate ID field, distinct from Worker.name which can change
 	onStop  func(id string) // Callback uses the distinct ID
+	t       *testing.T      // Store the testing.T pointer
 }
 
 // NewTestWorker creates a TestWorker instance.
 func NewTestWorker(
-	id string, // Use 'id' for the TestWorker's identifier
+	t *testing.T,
 	config WorkerConfig,
 	logger *slog.Logger,
 	onStop func(id string),
-) (*TestWorker, error) { // Return error
-	// Ensure the JobName in the initial config matches the stable ID.
-	// The CompositeRunner might update this later via ReloadWithConfig.
-	config.JobName = id
-
-	// Create the underlying Worker
+) (*TestWorker, error) {
+	t.Helper()
 	worker, err := NewWorker(config, logger) // Handle error from NewWorker
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embedded worker for %s: %w", id, err)
+		return nil, fmt.Errorf("failed to create embedded worker for %s: %w", config.JobName, err)
 	}
-
 	return &TestWorker{
 		Worker: worker,
-		id:     id, // Store the distinct ID
+		id:     config.JobName,
 		onStop: onStop,
+		t:      t, // Store the testing.T pointer
 	}, nil
 }
 
 // Override Stop to call the onStop callback with the TestWorker's ID
 // before calling the embedded Worker's Stop method.
-func (tw *TestWorker) Stop() {
+func (w *TestWorker) Stop() {
+	// Add defensive nil checks
+	if w == nil {
+		return
+	}
+
+	// Use the testing.T if available
+	if w.t != nil {
+		w.t.Helper()
+	}
+
 	// Add debug log message to help trace calls
-	fmt.Printf("TestWorker Stop called for ID: %s\n", tw.id)
+	if w.id != "" {
+		fmt.Printf("TestWorker Stop called for ID: %s\n", w.id)
+	}
 
 	// Call the callback first, using the TestWorker's stable 'id'.
-	if tw.onStop != nil {
-		tw.onStop(tw.id)
-	} else {
-		fmt.Printf("WARNING: TestWorker %s has nil onStop callback\n", tw.id)
+	if w.onStop != nil && w.id != "" {
+		w.onStop(w.id)
+	} else if w.id != "" {
+		fmt.Printf("WARNING: TestWorker %s has nil onStop callback\n", w.id)
 	}
 
 	// Delegate to the embedded Worker's Stop method.
-	if tw.Worker != nil {
-		tw.Worker.Stop()
-	} else {
-		fmt.Printf("WARNING: TestWorker %s has nil Worker\n", tw.id)
+	if w.Worker != nil {
+		w.Worker.Stop()
+	} else if w.id != "" {
+		fmt.Printf("WARNING: TestWorker %s has nil Worker\n", w.id)
 	}
 }
 
@@ -73,13 +82,8 @@ var (
 	_ composite.ReloadableWithConfig = (*TestWorker)(nil)
 )
 
-// --- Test Case (Updated) ---
-
 // TestMembershipChangesBasic is a simplified, basic test to verify the CompositeRunner
 // properly adds and removes runnables during reload.
-// Note: This test may show race conditions when run with -race flag due to the inherent
-// concurrency within composite runner, but it provides a functional verification of
-// worker membership changes.
 func TestMembershipChangesBasic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test in short mode")
@@ -87,18 +91,36 @@ func TestMembershipChangesBasic(t *testing.T) {
 
 	logger, _ := testLogger(t, true)
 
-	// Channel for tracking stopped workers - synchronization via channels instead of maps
+	// Channel for tracking stopped workers
 	stoppedCh := make(chan string, 10)
+	stoppedWorkers := make(map[string]bool)
 
-	// Create initial workers
-	worker1, err := NewTestWorker("worker1", WorkerConfig{
-		Interval: 100 * time.Millisecond,
-	}, logger, func(id string) { stoppedCh <- id })
+	// Mutex to protect access to stoppedWorkers map from multiple goroutines
+	var stoppedMu sync.Mutex
+
+	// Create a callback that records stopped workers
+	onStopCallback := func(id string) {
+		stoppedMu.Lock()
+		defer stoppedMu.Unlock()
+		stoppedWorkers[id] = true
+		stoppedCh <- id // Keep the channel functionality for later checks
+		t.Logf("Worker stopped: %s", id)
+	}
+
+	worker1, err := NewTestWorker(t,
+		WorkerConfig{
+			JobName:  "worker1",
+			Interval: 100 * time.Millisecond,
+		},
+		logger, onStopCallback)
 	require.NoError(t, err)
 
-	worker2, err := NewTestWorker("worker2", WorkerConfig{
-		Interval: 150 * time.Millisecond,
-	}, logger, func(id string) { stoppedCh <- id })
+	worker2, err := NewTestWorker(t,
+		WorkerConfig{
+			JobName:  "worker2",
+			Interval: 150 * time.Millisecond,
+		},
+		logger, onStopCallback)
 	require.NoError(t, err)
 
 	// Initial configuration with two workers
@@ -138,9 +160,12 @@ func TestMembershipChangesBasic(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 
 	// --- Test Step 1: Remove worker1, add worker3 ---
-	worker3, err := NewTestWorker("worker3", WorkerConfig{
-		Interval: 50 * time.Millisecond,
-	}, logger, func(id string) { stoppedCh <- id })
+	worker3, err := NewTestWorker(t,
+		WorkerConfig{
+			JobName:  "worker3",
+			Interval: 50 * time.Millisecond,
+		},
+		logger, onStopCallback)
 	require.NoError(t, err)
 
 	// Update to new config: remove worker1, keep worker2, add worker3
@@ -157,31 +182,12 @@ func TestMembershipChangesBasic(t *testing.T) {
 	t.Log("Triggering reload to remove worker1 and add worker3")
 	runner.Reload()
 
-	// Allow time for reload to complete
-	time.Sleep(300 * time.Millisecond)
-
-	// Collect stopped workers - both worker1 and worker2 might be stopped
-	// as the composite runner might stop and recreate worker2 during reload
-	initialStopped := make(map[string]bool)
-
-	// Wait for initial stops (allow up to 2 stops initially)
-	stopCheckTimeout := time.After(500 * time.Millisecond)
-	stopCount := 0
-
-collectStops:
-	for stopCount < 2 {
-		select {
-		case stopped := <-stoppedCh:
-			t.Logf("Stopped worker: %s", stopped)
-			initialStopped[stopped] = true
-			stopCount++
-		case <-stopCheckTimeout:
-			break collectStops
-		}
-	}
-
-	// Verify worker1 was stopped (this is what we're testing)
-	require.True(t, initialStopped["worker1"], "Worker1 should have been stopped during reload")
+	// Use assert.Eventually to check that worker1 was stopped
+	assert.Eventually(t, func() bool {
+		stoppedMu.Lock()
+		defer stoppedMu.Unlock()
+		return stoppedWorkers["worker1"]
+	}, 1*time.Second, 10*time.Millisecond, "Worker1 should be stopped during reload")
 
 	// --- Cleanup ---
 	t.Log("Cancelling context to stop all workers")
@@ -198,37 +204,15 @@ collectStops:
 		t.Error("Timeout waiting for runner to exit")
 	}
 
-	// Verify remaining workers were stopped
-	stoppedCount := 0
-	expectedStoppedWorkers := []string{"worker2", "worker3"}
+	// Use assert.Eventually to verify the remaining workers are stopped
+	assert.Eventually(t, func() bool {
+		stoppedMu.Lock()
+		defer stoppedMu.Unlock()
+		return stoppedWorkers["worker2"] && stoppedWorkers["worker3"]
+	}, 1*time.Second, 10*time.Millisecond, "All workers should be stopped during cleanup")
 
-	// Create a map to check which workers were stopped
-	stoppedMap := make(map[string]bool)
-
-drainLoop:
-	for {
-		select {
-		case id := <-stoppedCh:
-			stoppedMap[id] = true
-			stoppedCount++
-			t.Logf("Worker stopped during cleanup: %s", id)
-		case <-time.After(300 * time.Millisecond):
-			// No more workers stopped, break the loop
-			break drainLoop
-		}
-	}
-
-	// Verify the expected workers were stopped
-	for _, id := range expectedStoppedWorkers {
-		if !stoppedMap[id] {
-			t.Errorf("Expected worker %s to be stopped, but it wasn't", id)
-		}
-	}
-
-	// We should have seen 2 workers stopped during cleanup
-	if stoppedCount < 2 {
-		t.Errorf("Expected at least 2 workers to be stopped, got %d", stoppedCount)
-	}
-
-	t.Log("Test completed successfully")
+	// Log final state for debugging
+	stoppedMu.Lock()
+	t.Logf("Final stopped workers: %v", stoppedWorkers)
+	stoppedMu.Unlock()
 }
