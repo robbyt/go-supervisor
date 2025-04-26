@@ -48,9 +48,11 @@ func main() {
         return httpserver.NewConfig(":8080", 5*time.Second, routes)
     }
     
-    // Create HTTP server runner
-    ctx := context.Background()
-    runner, _ := httpserver.NewRunner(ctx, configCallback)
+    // Create HTTP server runner (use functional options pattern)
+    runner, _ := httpserver.NewRunner(
+        httpserver.WithContext(context.Background()),
+        httpserver.WithConfigCallback(configCallback),
+    )
     
     // Add to supervisor
     super := supervisor.New([]supervisor.Runnable{runner})
@@ -125,7 +127,7 @@ func MyAdvancedMiddleware(next http.HandlerFunc) http.HandlerFunc {
         statusCode := rw.Status()
         bytesWritten := rw.BytesWritten()
         
-        // Use this information as needed
+        // ...
     }
 }
 ```
@@ -162,6 +164,25 @@ go func() {
 }()
 ```
 
+## Configuration Options
+
+The HTTP server runner uses a functional options pattern - see godoc for complete documentation of each option. Common usage patterns:
+
+```go
+// Dynamic configuration with a callback function (supports hot reloading)
+runner, _ := httpserver.NewRunner(
+    httpserver.WithContext(context.Background()),
+    httpserver.WithConfigCallback(configCallback),
+)
+
+// Static configuration (simpler when hot reloading isn't needed)
+config, _ := httpserver.NewConfig(":8080", 5*time.Second, routes)
+runner, _ := httpserver.NewRunner(
+    httpserver.WithContext(context.Background()),
+    httpserver.WithConfig(config),
+)
+```
+
 ## Full Example
 
-See `examples/http/main.go` for a complete example including middleware and metrics endpoints.
+See `examples/http/main.go` for a complete example.
