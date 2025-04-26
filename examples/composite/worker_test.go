@@ -41,15 +41,15 @@ func testLogger(t *testing.T, capture bool) (*slog.Logger, *bytes.Buffer) { //no
 
 // readWorkerConfig safely reads the current config from the worker.
 func readWorkerConfig(w *Worker) WorkerConfig {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.config // Return a copy
 }
 
 // readWorkerName safely reads the current name from the worker.
 func readWorkerName(w *Worker) string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.name
 }
 
@@ -652,9 +652,9 @@ func TestWorker_ProcessReload_UnchangedInterval(t *testing.T) {
 	)
 
 	// Verify config was updated by checking the name property directly
-	worker.mu.RLock()
+	worker.mu.Lock()
 	assert.Equal(t, "updated-job", worker.name, "Worker name should be updated")
-	worker.mu.RUnlock()
+	worker.mu.Unlock()
 }
 
 // TestWorker_ProcessReload_InvalidConfig tests handling of invalid config in processReload
@@ -686,14 +686,14 @@ func TestWorker_ProcessReload_InvalidConfig(t *testing.T) {
 	assert.Equal(t, initialState, currentConfig, "Config should not change after invalid config")
 
 	// Verify the worker name wasn't updated
-	worker.mu.RLock()
+	worker.mu.Lock()
 	assert.Equal(
 		t,
 		initialConfig.JobName,
 		worker.name,
 		"Worker name should not be updated with invalid config",
 	)
-	worker.mu.RUnlock()
+	worker.mu.Unlock()
 }
 
 // TestWorker_NewWorker_NilLogger tests worker creation with nil logger
