@@ -103,7 +103,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		ctx := context.Background()
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*mocks.Runnable](ctx),
 			WithLogHandler[*mocks.Runnable](handler),
 		)
@@ -191,7 +191,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Create runner and set state to Running
 		ctx := t.Context()
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*mocks.Runnable](ctx),
 		)
 		require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Create runner and set state to Running
 		ctx := t.Context()
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*mocks.Runnable](ctx),
 		)
 		require.NoError(t, err)
@@ -400,7 +400,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Create runner
 		ctx := t.Context()
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*mocks.Runnable](ctx),
 		)
 		require.NoError(t, err)
@@ -493,7 +493,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Create runner with proper context
 		ctx := t.Context()
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*MockReloadableWithConfig](ctx),
 		)
 		require.NoError(t, err)
@@ -597,9 +597,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock that will fail transition
@@ -630,9 +628,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -665,9 +661,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -712,9 +706,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Manually set current config (skipping initial load)
@@ -799,9 +791,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Manually set current config (skipping initial load)
@@ -865,9 +855,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Manually set current config (skipping initial load)
@@ -910,9 +898,7 @@ func TestGetConfig_NilCase(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Clear the config cache
@@ -930,9 +916,7 @@ func TestGetConfig_NilCase(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Clear the config cache
@@ -954,11 +938,11 @@ func TestSetStateError(t *testing.T) {
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil)
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-				return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
-			}),
-		)
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+		}
+
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -977,11 +961,10 @@ func TestSetStateError(t *testing.T) {
 		mockFSM.On("SetState", finitestate.StatusError).Return(errors.New("set state error"))
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-				return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
-			}),
-		)
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+		}
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -1006,9 +989,7 @@ func TestGetChildStates(t *testing.T) {
 			return nil, errors.New("config error")
 		}
 
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Call GetChildStates
@@ -1044,11 +1025,11 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-				return config, nil
-			}),
-		)
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return config, nil
+		}
+
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
@@ -1085,13 +1066,10 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(
-				func() (*Config[*MockReloadableWithConfig], error) {
-					return config, nil
-				},
-			),
-		)
+		configCallback := func() (*Config[*MockReloadableWithConfig], error) {
+			return config, nil
+		}
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
@@ -1131,18 +1109,16 @@ func TestReloadConfig(t *testing.T) {
 
 		// Create runners
 		runner1, err := NewRunner(
-			WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
+			func() (*Config[*mocks.Runnable], error) {
 				return config1, nil
-			}),
+			},
 		)
 		require.NoError(t, err)
 
 		runner2, err := NewRunner(
-			WithConfigCallback(
-				func() (*Config[*MockReloadableWithConfig], error) {
-					return config2, nil
-				},
-			),
+			func() (*Config[*MockReloadableWithConfig], error) {
+				return config2, nil
+			},
 		)
 		require.NoError(t, err)
 
@@ -1214,10 +1190,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback, WithContext[*mocks.Runnable](ctx))
 		require.NoError(t, err)
 
 		// Make sure initial config is loaded
@@ -1253,9 +1226,9 @@ func TestReloadMembershipChanged(t *testing.T) {
 	t.Run("handles stopRunnables error", func(t *testing.T) {
 		// Setup a runner with no initial config
 		runner, err := NewRunner(
-			WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
+			func() (*Config[*mocks.Runnable], error) {
 				return nil, nil
-			}),
+			},
 		)
 		require.NoError(t, err)
 
@@ -1307,8 +1280,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+		runner, err := NewRunner(configCallback,
 			WithContext[*mocks.Runnable](ctx),
 		)
 		require.NoError(t, err)
@@ -1478,8 +1450,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		}
 
 		ctx := context.Background() // Use a clean context instead of t.Context()
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+		runner, err := NewRunner(configCallback,
 			WithContext[*mocks.Runnable](ctx),
 		)
 		require.NoError(t, err)

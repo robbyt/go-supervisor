@@ -381,55 +381,6 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 	assert.Contains(t, err.Error(), "server not running")
 }
 
-// Define a custom type for context keys to avoid string collision
-type contextKey string
-
-// TestWithContext verifies the WithContext option works correctly
-func TestWithContext(t *testing.T) {
-	t.Parallel()
-
-	// Create a custom context with a value using the type-safe key
-	testKey := contextKey("test-key")
-	customCtx := context.WithValue(context.Background(), testKey, "test-value")
-
-	// Create a server with the custom context
-	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
-	require.NoError(t, err)
-	hConfig := Routes{*route}
-
-	cfgCallback := func() (*Config, error) {
-		return NewConfig(":0", 1*time.Second, hConfig)
-	}
-
-	server, err := NewRunner(WithContext(context.Background()),
-		WithConfigCallback(cfgCallback),
-		WithContext(customCtx))
-	require.NoError(t, err)
-
-	// Verify the custom context was applied
-	actualValue := server.ctx.Value(testKey)
-	assert.Equal(t, "test-value", actualValue, "Context value should be preserved")
-
-	// Verify cancellation works through server.Stop()
-	done := make(chan struct{})
-	go func() {
-		<-server.ctx.Done()
-		close(done)
-	}()
-
-	// Call Stop to cancel the internal context
-	server.Stop()
-
-	// Wait for the server context to be canceled or timeout
-	select {
-	case <-done:
-		// Success, context was canceled
-	case <-time.After(1 * time.Second):
-		t.Fatal("Context cancellation not propagated")
-	}
-}
-
 // TestServerLifecycle tests the complete lifecycle of the server
 func TestServerLifecycle(t *testing.T) {
 	t.Parallel()

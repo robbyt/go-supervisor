@@ -26,22 +26,33 @@ type Runner[T runnable] struct {
 
 	runCtx       context.Context // set by Run() to track THIS instance run context
 	parentCtx    context.Context // set by NewRunner() to track the parent context
-	cancel       context.CancelFunc
+	parentCancel context.CancelFunc
 	serverErrors chan error
 	logger       *slog.Logger
 }
 
-// NewRunner creates a new CompositeRunner instance with the provided options.
-func NewRunner[T runnable](opts ...Option[T]) (*Runner[T], error) {
+// NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
+// Parameters:
+//   - configCallback: Required. A function that returns the initial configuration and is called during any reload operations.
+//   - opts: Optional. A variadic list of Option functions to customize the Runner behavior.
+//
+// The configCallback must not be nil and will be invoked by Run() to load the initial configuration.
+func NewRunner[T runnable](
+	configCallback ConfigCallback[T],
+	opts ...Option[T],
+) (*Runner[T], error) {
 	// Setup defaults
 	logger := slog.Default().WithGroup("composite.Runner")
-	parentCtx, cancel := context.WithCancel(context.Background())
+	parentCtx, parentCancel := context.WithCancel(context.Background())
 	r := &Runner[T]{
-		currentConfig: atomic.Pointer[Config[T]]{},
-		serverErrors:  make(chan error, 1),
-		parentCtx:     parentCtx,
-		cancel:        cancel,
-		logger:        logger,
+		currentConfig:  atomic.Pointer[Config[T]]{},
+		configCallback: configCallback,
+
+		runCtx:       context.Background(), // will be replaced in Run()
+		parentCtx:    parentCtx,
+		parentCancel: parentCancel,
+		serverErrors: make(chan error, 1),
+		logger:       logger,
 	}
 
 	// Apply options, to override defaults if provided
@@ -52,19 +63,19 @@ func NewRunner[T runnable](opts ...Option[T]) (*Runner[T], error) {
 	// Validate requirements
 	if r.configCallback == nil {
 		return nil, fmt.Errorf(
-			"%w: config callback is required (use WithConfigCallback)",
+			"%w: config callback is required",
 			ErrCompositeRunnable,
 		)
 	}
 
-	// Create FSM
-	machine, err := finitestate.New(
+	// Create FSM after the optional logger has been configured
+	fsm, err := finitestate.New(
 		r.logger.WithGroup("fsm").Handler(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
 	}
-	r.fsm = machine
+	r.fsm = fsm
 
 	return r, nil
 }
@@ -150,7 +161,7 @@ func (r *Runner[T]) Stop() {
 		// This error is expected if we're already stopping, so only log at debug level
 		r.logger.Debug("Not transitioning to Stopping state", "error", err)
 	}
-	r.cancel()
+	r.parentCancel()
 }
 
 // boot starts all child runnables in the order they're defined.

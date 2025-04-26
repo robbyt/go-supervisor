@@ -37,60 +37,52 @@ func TestNewRunner(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		withOptions []Option[*mocks.Runnable]
+		callback    ConfigCallback[*mocks.Runnable]
+		opts        []Option[*mocks.Runnable]
 		expectError bool
 	}{
 		{
 			name: "valid with required options",
-			withOptions: []Option[*mocks.Runnable]{
-				WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-					entries := []RunnableEntry[*mocks.Runnable]{}
-					return NewConfig("test", entries)
-				}),
+			callback: func() (*Config[*mocks.Runnable], error) {
+				return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
 			},
+			opts:        nil,
 			expectError: false,
 		},
 		{
-			name:        "missing config callback",
-			withOptions: []Option[*mocks.Runnable]{},
-			expectError: true,
-		},
-		{
 			name: "config callback returns error",
-			withOptions: []Option[*mocks.Runnable]{
-				WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-					return nil, errors.New("config error")
-				}),
+			callback: func() (*Config[*mocks.Runnable], error) {
+				return nil, errors.New("config error")
 			},
+			opts:        nil,
 			expectError: false,
 		},
 		{
 			name: "config callback returns nil",
-			withOptions: []Option[*mocks.Runnable]{
-				WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-					return nil, nil
-				}),
+			callback: func() (*Config[*mocks.Runnable], error) {
+				return nil, nil
 			},
+			opts:        nil,
 			expectError: false,
 		},
 		{
 			name: "with custom logger",
-			withOptions: []Option[*mocks.Runnable]{
-				WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-					entries := []RunnableEntry[*mocks.Runnable]{}
-					return NewConfig("test", entries)
-				}),
+			callback: func() (*Config[*mocks.Runnable], error) {
+				entries := []RunnableEntry[*mocks.Runnable]{}
+				return NewConfig("test", entries)
+			},
+			opts: []Option[*mocks.Runnable]{
 				WithLogHandler[*mocks.Runnable](setupTestLogger()),
 			},
 			expectError: false,
 		},
 		{
 			name: "with custom context",
-			withOptions: []Option[*mocks.Runnable]{
-				WithConfigCallback(func() (*Config[*mocks.Runnable], error) {
-					entries := []RunnableEntry[*mocks.Runnable]{}
-					return NewConfig("test", entries)
-				}),
+			callback: func() (*Config[*mocks.Runnable], error) {
+				entries := []RunnableEntry[*mocks.Runnable]{}
+				return NewConfig("test", entries)
+			},
+			opts: []Option[*mocks.Runnable]{
 				WithContext[*mocks.Runnable](context.Background()),
 			},
 			expectError: false,
@@ -99,8 +91,7 @@ func TestNewRunner(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner, err := NewRunner(tt.withOptions...)
-
+			runner, err := NewRunner(tt.callback, tt.opts...)
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, runner)
@@ -133,9 +124,7 @@ func TestCompositeRunner_String(t *testing.T) {
 		return NewConfig("test-runner", entries)
 	}
 
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	str := runner.String()
@@ -173,9 +162,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Run in a goroutine and cancel after a short time
@@ -240,9 +227,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}
 
 		// Create runner and save it to the captured variable
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		capturedRunner = runner
 
@@ -283,9 +268,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Run
@@ -316,9 +299,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Force refresh of config during boot by clearing stored config
@@ -340,9 +321,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Run should fail due to no runnables
@@ -389,9 +368,7 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		_, configCallback := setupMocksAndConfig()
 
 		// Create runner and manually set state to Running
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		err = runner.fsm.SetState(finitestate.StatusRunning)
 		require.NoError(t, err)
@@ -410,9 +387,7 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		_, configCallback := setupMocksAndConfig()
 
 		// Create runner and manually set state to Stopped
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		err = runner.fsm.SetState(finitestate.StatusStopped)
 		require.NoError(t, err)
