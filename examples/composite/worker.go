@@ -266,9 +266,8 @@ func (w *Worker) processReload(newConfig *WorkerConfig) {
 	}
 	logger.Info(
 		"Interval changed, resetting ticker",
-		"name", newConfig.JobName,
-		"oldInterval", oldCfg.Interval,
-		"newInterval", newConfig.Interval,
+		"old", oldCfg,
+		"new", newConfig,
 	)
 	w.mu.Lock()
 	runCtx := w.ctx
