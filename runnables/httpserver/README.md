@@ -48,18 +48,24 @@ func main() {
         return httpserver.NewConfig(":8080", 5*time.Second, routes)
     }
     
-    // Create HTTP server runner (use functional options pattern)
-    runner, _ := httpserver.NewRunner(
-        httpserver.WithContext(context.Background()),
+    // Create HTTP server runner
+    hRunner, _ := httpserver.NewRunner(
         httpserver.WithConfigCallback(configCallback),
     )
     
-    // Add to supervisor
-    super := supervisor.New([]supervisor.Runnable{runner})
+    // create a supervisor instance and add the runner
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    super, _ := supervisor.New(
+        supervisor.WithRunnables(hRunner), // Remove the spread operator '...'
+        supervisor.WithContext(ctx),
+    )
     
-    // Boot and run
-    super.Boot()
-    super.Exec()
+    // blocks until the supervisor receives a signal
+    if err := super.Run(); err != nil {
+        // Handle error appropriately
+        panic(err)
+    }
 }
 ```
 
@@ -134,7 +140,15 @@ func MyAdvancedMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 ## Configuration Reloading
 
-The HTTP server supports hot reloading of configuration, allowing you to update routes without restarting:
+The HTTP server runnable implements the `supervisor.Reloadable` interface. The `go-supervisor`
+instance managing this runnable will automatically trigger its `Reload()` method when the
+supervisor receives a `SIGHUP` signal.
+
+When `Reload()` is called (either by the supervisor via a HUP signal or programmatically), the
+runner calls the configuration callback function to fetch the latest configuration. If the
+configuration has changed, the underlying HTTP server may be gracefully shut down if ports changed,
+or the routes will be reloaded if the configuration is the same.
+
 
 ```go
 // Trigger a reload
