@@ -76,8 +76,8 @@ func main() {
 
 	// Create composite runner
 	runner, err := composite.NewRunner(
+		configCallback,
 		composite.WithContext[*Worker](ctx),
-		composite.WithConfigCallback(configCallback),
 	)
 	if err != nil {
 		logger.Error("Failed to create composite runner", "error", err)

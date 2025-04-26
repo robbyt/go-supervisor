@@ -44,9 +44,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -88,7 +86,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		defer parentCancel()
 
 		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
+			configCallback,
 			WithContext[*mocks.Runnable](parentCtx),
 		)
 		require.NoError(t, err)
@@ -150,9 +148,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Run in goroutine with a context we can cancel
@@ -201,9 +197,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -251,9 +245,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock
@@ -301,9 +293,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		}
 
 		// Create runner
-		runner, err := NewRunner(
-			WithConfigCallback(configCallback),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Replace FSM with our mock

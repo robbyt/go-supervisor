@@ -36,9 +36,7 @@ func TestCompositeRunner_GetChildStates(t *testing.T) {
 	}
 
 	// Create runner with the supervisor.Runnable interface type
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	// Get child states
@@ -68,9 +66,7 @@ func TestCompositeRunner_GetStateChan(t *testing.T) {
 	}
 
 	// Create runner
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	// Create context with cancel
@@ -113,13 +109,11 @@ func TestGetState_PassThrough(t *testing.T) {
 	mockFSM := new(MockStateMachine)
 	mockFSM.On("GetState").Return(finitestate.StatusRunning)
 
-	// Create a runner
-	runner, err := NewRunner(
-		WithConfigCallback[*mocks.Runnable](func() (*Config[*mocks.Runnable], error) {
-			entries := []RunnableEntry[*mocks.Runnable]{}
-			return NewConfig("test", entries)
-		}),
-	)
+	// Create a runner with callback
+	cb := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+	}
+	runner, err := NewRunner(cb)
 	require.NoError(t, err)
 
 	// Replace the FSM with our mock
@@ -146,12 +140,11 @@ func TestGetStateChan_PassThrough(t *testing.T) {
 	mockFSM.On("GetStateChan", mock.Anything).Return(stateCh)
 
 	// Create a runner
-	runner, err := NewRunner(
-		WithConfigCallback[*mocks.Runnable](func() (*Config[*mocks.Runnable], error) {
-			entries := []RunnableEntry[*mocks.Runnable]{}
-			return NewConfig("test", entries)
-		}),
-	)
+	cb := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+	}
+
+	runner, err := NewRunner(cb)
 	require.NoError(t, err)
 
 	// Replace the FSM with our mock
@@ -199,9 +192,7 @@ func TestGetChildStates_WithStateables(t *testing.T) {
 	}
 
 	// Create runner
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	// Call GetChildStates
@@ -240,9 +231,7 @@ func TestCompositeRunner_GetStringWithConfig(t *testing.T) {
 	}
 
 	// Create runner
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	// Get string representation
@@ -263,9 +252,7 @@ func TestCompositeRunner_GetStringWithNilConfig(t *testing.T) {
 	}
 
 	// Create runner
-	runner, err := NewRunner(
-		WithConfigCallback(configCallback),
-	)
+	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
 
 	// Clear any cached config
