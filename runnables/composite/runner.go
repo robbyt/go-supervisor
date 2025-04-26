@@ -31,7 +31,12 @@ type Runner[T runnable] struct {
 	logger       *slog.Logger
 }
 
-// NewRunner creates a new CompositeRunner instance with the provided options.
+// NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
+// Parameters:
+//   - configCallback: Required. A function that returns the initial configuration and is called during any reload operations.
+//   - opts: Optional. A variadic list of Option functions to customize the Runner behavior.
+//
+// The configCallback must not be nil and will be invoked by Run() to load the initial configuration.
 func NewRunner[T runnable](
 	configCallback ConfigCallback[T],
 	opts ...Option[T],
@@ -58,7 +63,7 @@ func NewRunner[T runnable](
 	// Validate requirements
 	if r.configCallback == nil {
 		return nil, fmt.Errorf(
-			"%w: config callback is required (use WithConfigCallback)",
+			"%w: config callback is required",
 			ErrCompositeRunnable,
 		)
 	}
