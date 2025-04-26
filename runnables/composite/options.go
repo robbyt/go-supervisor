@@ -22,15 +22,7 @@ func WithLogHandler[T runnable](handler slog.Handler) Option[T] {
 func WithContext[T runnable](ctx context.Context) Option[T] {
 	return func(c *Runner[T]) {
 		if ctx != nil {
-			c.parentCtx, c.cancel = context.WithCancel(ctx)
+			c.parentCtx, c.parentCancel = context.WithCancel(ctx)
 		}
-	}
-}
-
-// WithConfigCallback sets the function that will be called to load or reload configuration.
-// This option is required when creating a new CompositeRunner.
-func WithConfigCallback[T runnable](callback func() (*Config[T], error)) Option[T] {
-	return func(c *Runner[T]) {
-		c.configCallback = callback
 	}
 }
