@@ -12,9 +12,6 @@ var (
 	// ErrConfigMissing is returned when the config is missing
 	ErrConfigMissing = errors.New("config is missing")
 
-	// ErrNoRunnables is returned when there are no runnables to manage
-	ErrNoRunnables = errors.New("no runnables to manage")
-
 	// ErrOldConfig is returned when the config hasn't changed during a reload
 	ErrOldConfig = errors.New("configuration unchanged")
 )

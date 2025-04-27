@@ -1252,16 +1252,88 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.ErrorIs(t, err, ErrConfigMissing)
 	})
 
-	t.Run("handles boot error", func(t *testing.T) {
-		// Setup mock runnables for old config
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Stop").Maybe()
+	t.Run("handles empty entries", func(t *testing.T) {
+		t.Parallel()
 
-		// Create initial entries with no runnables
+		// Create a mock runnable for the test
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("runnable1").Maybe()
+		mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
+		mockRunnable.On("Stop").Maybe()
+
+		// Track config callback calls
+		configCallCount := 0
+
+		// Create a config callback that initially returns empty entries
+		// and later returns entries with a runnable
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			configCallCount++
+			if configCallCount == 1 {
+				// First call returns empty entries (now valid with our change)
+				return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+			}
+			// Later call returns a config with an actual runnable
+			entries := []RunnableEntry[*mocks.Runnable]{
+				{Runnable: mockRunnable, Config: nil},
+			}
+			return NewConfig("test", entries)
+		}
+
+		// Create runner
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		// Run the runner - should now succeed with empty entries
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Run in a goroutine to avoid blocking
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runner.Run(ctx)
+		}()
+
+		// Wait for the runner to start
+		require.Eventually(t, func() bool {
+			return runner.GetState() == finitestate.StatusRunning
+		}, 1*time.Second, 10*time.Millisecond, "Runner should transition to Running state")
+
+		// Verify we're running with empty entries
+		initialConfig := runner.getConfig()
+		require.NotNil(t, initialConfig)
+		assert.Empty(t, initialConfig.Entries, "Initial config should have empty entries")
+
+		// Now reload to get the config with the runnable
+		runner.Reload()
+
+		// Wait for reload to complete
+		time.Sleep(50 * time.Millisecond)
+
+		// Verify the config was updated with the new runnable
+		updatedConfig := runner.getConfig()
+		require.NotNil(t, updatedConfig)
+		require.Len(t, updatedConfig.Entries, 1, "Updated config should have 1 entry")
+		assert.Same(t, mockRunnable, updatedConfig.Entries[0].Runnable)
+
+		// Clean shutdown
+		cancel()
+
+		// Wait for runner to complete
+		select {
+		case err := <-errCh:
+			require.NoError(t, err)
+		case <-time.After(1 * time.Second):
+			t.Fatal("Timeout waiting for runner to stop")
+		}
+	})
+
+	// Remove the duplicate "handles boot error" test case and replace with a test
+	// that properly handles new empty entries behavior
+	t.Run("no error with empty entries", func(t *testing.T) {
+		// Setup mock runnables for old config - empty
 		oldEntries := []RunnableEntry[*mocks.Runnable]{}
 
-		// Create new entries with no runnables to force boot error
+		// Create new entries - also empty
 		newEntries := []RunnableEntry[*mocks.Runnable]{}
 
 		initialConfig, err := NewConfig("test", oldEntries)
@@ -1274,7 +1346,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create callback that initially returns oldEntries
+		// Create callback that returns the config
 		configCallback := func() (*Config[*mocks.Runnable], error) {
 			return initialConfig, nil
 		}
@@ -1289,18 +1361,20 @@ func TestReloadMembershipChanged(t *testing.T) {
 		runner.currentConfig.Store(initialConfig)
 
 		// Set runCtx (normally done by Run)
-		runCtx := t.Context()
+		runCtx, runCancel := context.WithCancel(context.Background())
+		defer runCancel()
 		runner.runnablesMu.Lock()
 		runner.runCtx = runCtx
 		runner.runnablesMu.Unlock()
 
-		// Call reloadMembershipChanged directly
-		// This should fail because the new config has no entries
+		// Call reloadMembershipChanged directly - should no longer error with empty entries
 		err = runner.reloadMembershipChanged(newConfig)
+		require.NoError(t, err)
 
-		// Verify error (ErrNoRunnables is returned by boot when no runnables exist)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrNoRunnables)
+		// Verify config was updated
+		updatedConfig := runner.getConfig()
+		require.NotNil(t, updatedConfig)
+		assert.Equal(t, 0, len(updatedConfig.Entries), "Config should have empty entries")
 	})
 }
 
