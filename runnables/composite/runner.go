@@ -175,8 +175,10 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		return fmt.Errorf("%w: configuration is unavailable", ErrConfigMissing)
 	}
 
+	// If there are no entries, just log and return successfully instead of error
 	if len(cfg.Entries) == 0 {
-		return fmt.Errorf("%w: no runnables to manage", ErrNoRunnables)
+		logger.Debug("No runnables to manage, waiting for reload to add entries")
+		return nil
 	}
 
 	logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
@@ -184,11 +186,11 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	// Use a temporary WaitGroup to ensure all goroutines are launched.
 	var startWg sync.WaitGroup
 	startWg.Add(len(cfg.Entries))
-	for i, entry := range cfg.Entries {
-		go func() {
+	for i, e := range cfg.Entries {
+		go func(idx int, entry RunnableEntry[T]) {
 			startWg.Done()
-			r.startRunnable(ctx, entry.Runnable, i)
-		}()
+			r.startRunnable(ctx, entry.Runnable, idx)
+		}(i, e)
 	}
 	startWg.Wait()
 	logger.Debug("All child runnables launched")
