@@ -1180,9 +1180,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		newConfig, err := NewConfig("test", newEntries)
 		require.NoError(t, err)
 
-		// Create runner with context to use during boot
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 
 		// Create callback that initially returns oldEntries
 		configCallback := func() (*Config[*mocks.Runnable], error) {
@@ -1215,7 +1213,6 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Equal(t, mockRunnable3, updatedConfig.Entries[0].Runnable)
 		assert.Equal(t, mockRunnable4, updatedConfig.Entries[1].Runnable)
 
-		// Verify mock expectations - disable t.Parallel() and wait a moment to make test more reliable
 		time.Sleep(50 * time.Millisecond)
 		mockRunnable1.AssertExpectations(t)
 		mockRunnable2.AssertExpectations(t)
@@ -1283,9 +1280,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Run the runner - should now succeed with empty entries
+		// setup a new context for the runner that will be cancelled in bit
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
 		// Run in a goroutine to avoid blocking
 		errCh := make(chan error, 1)
@@ -1342,9 +1338,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		newConfig, err := NewConfig("test", newEntries)
 		require.NoError(t, err)
 
-		// Create context for the runner
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		// context for the runner
+		ctx := t.Context()
 
 		// Create callback that returns the config
 		configCallback := func() (*Config[*mocks.Runnable], error) {
@@ -1463,42 +1458,38 @@ func TestHasMembershipChanged(t *testing.T) {
 	})
 
 	t.Run("reload with complete membership changes", func(t *testing.T) {
-		// Disable parallel to avoid interactions with other tests
-		// t.Parallel() - removing this to avoid test interactions
-
-		// Setup initial runnables with consistent expectations
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Stop").Return(nil).Maybe() // Use Maybe() for more resilience
+		mockRunnable1.On("Stop").Return(nil).Once()
 		mockRunnable1.On("Reload").Maybe()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe() // Make sure Run blocks on context
+		}).Return(context.Canceled).Maybe()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Stop").Return(nil).Maybe() // Use Maybe() for more resilience
+		mockRunnable2.On("Stop").Return(nil).Once()
 		mockRunnable2.On("Reload").Maybe()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe() // Make sure Run blocks on context
+		}).Return(context.Canceled).Maybe()
 
 		// Setup completely new runnables for reload with consistent expectations
 		mockRunnable3 := mocks.NewMockRunnable()
 		mockRunnable3.On("String").Return("runnable3").Maybe()
-		mockRunnable3.On("Stop").Return(nil).Maybe() // Add expectation for Stop
+		mockRunnable3.On("Stop").Return(nil).Once()
 		mockRunnable3.On("Reload").Maybe()
 		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe() // Make Run block on context
+		}).Return(context.Canceled).Maybe()
 
 		mockRunnable4 := mocks.NewMockRunnable()
 		mockRunnable4.On("String").Return("runnable4").Maybe()
-		mockRunnable4.On("Stop").Return(nil).Maybe() // Add expectation for Stop
+		mockRunnable4.On("Stop").Return(nil).Once()
 		mockRunnable4.On("Reload").Maybe()
 		mockRunnable4.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe() // Make Run block on context
+		}).Return(context.Canceled).Maybe()
 
 		// Create initial entries
 		initialEntries := []RunnableEntry[*mocks.Runnable]{
@@ -1529,9 +1520,8 @@ func TestHasMembershipChanged(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Use a cancelable context and ensure cleanup with defer
 		runCtx, cancel := context.WithCancel(ctx)
-		defer cancel() // Ensure context is always canceled at the end of test
+		defer cancel()
 
 		errCh := make(chan error, 1)
 		go func() {
