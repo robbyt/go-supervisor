@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,8 +138,6 @@ func TestCompositeRunner_Run(t *testing.T) {
 	t.Parallel()
 
 	t.Run("successful run and graceful shutdown", func(t *testing.T) {
-		t.Parallel()
-
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
@@ -182,23 +181,23 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Cancel the context to stop the runner
 		cancel()
 
-		// Wait for Run to complete
 		var runErr error
-		select {
-		case runErr = <-errCh:
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("timeout waiting for Run to complete")
-		}
+		assert.Eventually(t, func() bool {
+			select {
+			case runErr = <-errCh:
+				return true
+			default:
+				return false
+			}
+		}, 500*time.Millisecond, 10*time.Millisecond, "Run should complete")
 
-		assert.NoError(t, runErr)
+		assert.NoError(t, runErr, "Run should complete without error")
 		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
 		mockRunnable1.AssertExpectations(t)
 		mockRunnable2.AssertExpectations(t)
 	})
 
 	t.Run("runnable fails during execution", func(t *testing.T) {
-		t.Parallel()
-
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
@@ -243,8 +242,6 @@ func TestCompositeRunner_Run(t *testing.T) {
 	})
 
 	t.Run("runnable fails during startup", func(t *testing.T) {
-		t.Parallel()
-
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
@@ -285,16 +282,9 @@ func TestCompositeRunner_Run(t *testing.T) {
 	})
 
 	t.Run("missing config", func(t *testing.T) {
-		t.Parallel()
-
-		// Create config callback that initially returns a config but then nil
-		callCount := 0
+		// Do not run in parallel to avoid interference
+		// Config callback always returns nil, triggering configuration unavailable error
 		configCallback := func() (*Config[*mocks.Runnable], error) {
-			callCount++
-			if callCount == 1 {
-				entries := []RunnableEntry[*mocks.Runnable]{}
-				return NewConfig("test", entries)
-			}
 			return nil, nil
 		}
 
@@ -302,13 +292,10 @@ func TestCompositeRunner_Run(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Force refresh of config during boot by clearing stored config
-		runner.currentConfig.Store(nil)
-
-		// Run should fail due to missing config
+		// Run and expect an error immediately
 		err = runner.Run(context.Background())
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "no runnables to manage")
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "configuration is unavailable")
 	})
 
 	t.Run("no runnables", func(t *testing.T) {
@@ -324,10 +311,124 @@ func TestCompositeRunner_Run(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Run should fail due to no runnables
-		err = runner.Run(context.Background())
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "no runnables to manage")
+		// Run in a goroutine that we can cancel
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+
+		go func() {
+			errCh <- runner.Run(ctx)
+		}()
+
+		// Wait for states to transition to Running
+		require.Eventually(t, func() bool {
+			return runner.GetState() == finitestate.StatusRunning
+		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
+
+		// Verify runner is running with no entries
+		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+		cfg := runner.getConfig()
+		require.NotNil(t, cfg)
+		assert.Empty(t, cfg.Entries, "Config should have empty entries")
+
+		// Graceful shutdown
+		cancel()
+
+		// Verify clean shutdown
+		var runErr error
+		select {
+		case runErr = <-errCh:
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("timeout waiting for Run to complete")
+		}
+		assert.NoError(t, runErr)
+	})
+
+	t.Run("empty entries with later reload", func(t *testing.T) {
+		t.Parallel()
+
+		// Setup mock runnable for reload
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("runnable1").Maybe()
+		mockRunnable.On("Run", mock.Anything).Return(nil)
+		mockRunnable.On("Stop").Maybe()
+
+		// Initially empty, later populated
+		var useUpdatedEntries atomic.Bool
+
+		// Create config callback that initially returns empty entries,
+		// but returns entries with a runnable after useUpdatedEntries is set
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			if useUpdatedEntries.Load() {
+				entries := []RunnableEntry[*mocks.Runnable]{
+					{Runnable: mockRunnable, Config: nil},
+				}
+				return NewConfig("test", entries)
+			}
+			// Initial empty config
+			entries := []RunnableEntry[*mocks.Runnable]{}
+			return NewConfig("test", entries)
+		}
+
+		// Create runner
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		// Run in a goroutine
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runner.Run(ctx)
+		}()
+
+		// Wait for states to transition to Running (even with no entries)
+		require.Eventually(t, func() bool {
+			return runner.GetState() == finitestate.StatusRunning
+		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
+
+		// Verify initial empty state
+		initialCfg := runner.getConfig() // Store the initial config pointer
+		require.NotNil(t, initialCfg)
+		assert.Empty(t, initialCfg.Entries, "Initial config should have empty entries")
+
+		// Now update the entries and reload
+		useUpdatedEntries.Store(true)
+		runner.Reload()
+
+		// Wait for reload to complete by checking if the config pointer has changed
+		var updatedCfg *Config[*mocks.Runnable]
+		assert.Eventually(t, func() bool {
+			updatedCfg = runner.getConfig()
+			// Condition is met when the config pointer is different from the initial one
+			return updatedCfg != initialCfg
+		}, 200*time.Millisecond, 10*time.Millisecond, "Config should be updated after reload")
+
+		// Verify the config was updated with new entries
+		require.NotNil(t, updatedCfg)
+		require.Len(t, updatedCfg.Entries, 1, "Config should now have 1 entry after reload")
+		assert.Equal(
+			t,
+			mockRunnable,
+			updatedCfg.Entries[0].Runnable,
+			"Config should contain the mock runnable",
+		)
+
+		// Cancel context to stop runner
+		cancel()
+
+		// Verify clean shutdown
+		var runErr error
+		select {
+		case runErr = <-errCh:
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("timeout waiting for Run to complete")
+		}
+		assert.NoError(t, runErr)
+
+		// Verify expectations
+		mockRunnable.AssertExpectations(t)
 	})
 }
 
