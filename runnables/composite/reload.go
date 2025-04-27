@@ -46,9 +46,8 @@ func (r *Runner[T]) Reload() {
 	// Get the old config to compare
 	oldConfig := r.getConfig()
 	if oldConfig == nil {
-		logger.Error("Failed to get current config during reload")
-		r.setStateError()
-		return
+		logger.Warn("Failed to get current config during reload, using empty config")
+		oldConfig = &Config[T]{}
 	}
 
 	// Check if membership has changed by comparing runnable identities

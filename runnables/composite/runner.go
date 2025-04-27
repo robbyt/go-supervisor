@@ -17,7 +17,7 @@ type ConfigCallback[T runnable] func() (*Config[T], error)
 // Runner implements a component that manages multiple runnables of the same type
 // as a single unit. It satisfies the Runnable, Reloadable, and Stateable interfaces.
 type Runner[T runnable] struct {
-	configMu       sync.RWMutex // Protects config access
+	configMu       sync.Mutex // Only used for getConfig()
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
@@ -177,7 +177,7 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 
 	// If there are no entries, just log and return successfully instead of error
 	if len(cfg.Entries) == 0 {
-		logger.Debug("No runnables to manage, waiting for reload to add entries")
+		logger.Debug("No runnables found in configuration")
 		return nil
 	}
 
@@ -218,7 +218,7 @@ func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 
 	logger.Error("Returned unexpected error", "error", err)
 	select {
-	case r.serverErrors <- fmt.Errorf("failed to start child runnable %d: %w", idx, err):
+	case r.serverErrors <- fmt.Errorf("child runnable failed %d: %w", idx, err):
 	default:
 		logger.Warn(
 			"Failed to send error to serverErrors channel (is it full or closed?)",
@@ -229,7 +229,6 @@ func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 
 // stopRunnables stops all child runnables in reverse order (last to first).
 func (r *Runner[T]) stopRunnables() error {
-	// Lock the runnables mutex to protect operations
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
