@@ -117,28 +117,6 @@ func (c *Config) String() string {
 	)
 }
 
-// getMux creates and returns a new http.ServeMux with all configured routes registered.
-// Each route's Path is mapped to its Handler function.
-func (c *Config) getMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	for _, route := range c.Routes {
-		mux.HandleFunc(route.Path, route.Handler)
-	}
-	return mux
-}
-
-// createServer creates an HTTP server using the configuration's settings
-func (c *Config) createServer() HttpServer {
-	addr := c.ListenAddr
-	mux := c.getMux()
-	creator := c.ServerCreator
-	if creator == nil {
-		creator = DefaultServerCreator
-	}
-
-	return creator(addr, mux, c)
-}
-
 // Equal compares this Config with another and returns true if they are equivalent.
 func (c *Config) Equal(other *Config) bool {
 	if other == nil {
@@ -173,4 +151,26 @@ func (c *Config) Equal(other *Config) bool {
 	// Note: We don't compare ServerCreator functions as they're not directly comparable
 
 	return true
+}
+
+// getMux creates and returns a new http.ServeMux with all configured routes registered.
+// Each route's Path is mapped to its Handler function.
+func (c *Config) getMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, route := range c.Routes {
+		mux.HandleFunc(route.Path, route.Handler)
+	}
+	return mux
+}
+
+// createServer creates an HTTP server using the configuration's settings
+func (c *Config) createServer() HttpServer {
+	addr := c.ListenAddr
+	mux := c.getMux()
+	creator := c.ServerCreator
+	if creator == nil {
+		creator = DefaultServerCreator
+	}
+
+	return creator(addr, mux, c)
 }
