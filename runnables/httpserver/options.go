@@ -59,3 +59,15 @@ func WithName(name string) Option {
 		r.name = name
 	}
 }
+
+// WithServerCreator sets a custom function for creating the HTTP server.
+// This allows for complete customization of the underlying HTTP server implementation,
+// including custom timeout settings, TLS configuration, and other advanced options.
+// The provided function must return an implementation of the HttpServer interface.
+func WithServerCreator(creator ServerCreator) Option {
+	return func(r *Runner) {
+		if creator != nil {
+			r.serverCreator = creator
+		}
+	}
+}
