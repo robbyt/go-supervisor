@@ -417,9 +417,7 @@ func TestCustomServerCreator(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start the boot process to trigger server creation
-	runner.bootLock.Lock()
 	err = runner.boot()
-	runner.bootLock.Unlock()
 	require.NoError(t, err)
 
 	// Verify the server was created with our custom creator
