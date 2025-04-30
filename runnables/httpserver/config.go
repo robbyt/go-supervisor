@@ -28,12 +28,12 @@ type Config struct {
 	DrainTimeout time.Duration
 	Routes       Routes
 
-	// Server settings (previously in ServerOptions)
+	// Server settings
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
 
-	// Server creation
+	// Server creation callback function
 	ServerCreator ServerCreator
 }
 
@@ -84,12 +84,11 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		return nil, errors.New("routes cannot be empty")
 	}
 
-	// Create config with defaults
 	c := &Config{
 		ListenAddr: addr,
 		Routes:     routes,
 
-		// reasonable default values
+		// set some reasonable default values
 		DrainTimeout:  30 * time.Second,
 		ReadTimeout:   15 * time.Second,
 		WriteTimeout:  15 * time.Second,
@@ -97,7 +96,7 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		ServerCreator: DefaultServerCreator,
 	}
 
-	// Apply options
+	// Apply functional options
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -128,8 +127,8 @@ func (c *Config) getMux() *http.ServeMux {
 	return mux
 }
 
-// CreateServer creates an HTTP server using the configuration's settings
-func (c *Config) CreateServer() HttpServer {
+// createServer creates an HTTP server using the configuration's settings
+func (c *Config) createServer() HttpServer {
 	addr := c.ListenAddr
 	mux := c.getMux()
 	creator := c.ServerCreator

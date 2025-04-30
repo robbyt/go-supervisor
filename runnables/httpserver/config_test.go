@@ -263,7 +263,7 @@ func TestCreateServer(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create server and verify
-	server := config.CreateServer()
+	server := config.createServer()
 	require.NotNil(t, server, "Server should not be nil")
 
 	// Test with custom server creator
@@ -294,13 +294,13 @@ func TestCreateServer(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create server and verify
-	customServer := customConfig.CreateServer()
+	customServer := customConfig.createServer()
 	require.NotNil(t, customServer, "Server should not be nil")
 	assert.True(t, called, "Custom server creator should be called")
 
 	// Test with nil server creator - should fall back to default
 	config.ServerCreator = nil
-	server = config.CreateServer()
+	server = config.createServer()
 	require.NotNil(t, server, "Server should not be nil even with nil ServerCreator")
 }
 

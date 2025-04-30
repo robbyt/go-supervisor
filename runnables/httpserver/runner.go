@@ -194,7 +194,7 @@ func (r *Runner) boot() error {
 	}
 
 	// Use the Config's CreateServer method to create the server
-	r.server = cfg.CreateServer()
+	r.server = cfg.createServer()
 
 	r.logger.Info("Starting HTTP server", "listenOn", cfg.ListenAddr)
 	go func() {
