@@ -190,36 +190,78 @@ runner, _ := httpserver.NewRunner(
 )
 
 // Static configuration (simpler when hot reloading isn't needed)
-config, _ := httpserver.NewConfig(":8080", 5*time.Second, routes)
+config, _ := httpserver.NewConfig(
+    ":8080",            // Listen address
+    routes,              // HTTP routes
+    httpserver.WithDrainTimeout(5*time.Second), // Optional settings
+)
 runner, _ := httpserver.NewRunner(
     httpserver.WithContext(context.Background()),
     httpserver.WithConfig(config),
 )
 ```
 
-## Custom Server Configuration
+## Server Configuration with Functional Options
 
-The HTTP server runnable supports customizing the underlying HTTP server implementation. This allows you to configure advanced features like timeouts, TLS settings, and other HTTP server options.
+The HTTP server config uses the Functional Options pattern, which provides a clean and flexible way to configure server settings. The pattern allows for sensible defaults while making it easy to customize specific settings.
 
-### Using Custom Server Creator
+### Basic Configuration
 
-You can provide a custom server creation function to configure the HTTP server with specific settings:
+The `NewConfig` function now accepts an address, routes, and optional configuration options:
 
 ```go
-// Create a custom server creator with timeouts
-customServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
+// Create a config with just the required parameters (uses default timeouts)
+config, _ := httpserver.NewConfig(":8080", routes)
+
+// Create a config with custom drain timeout
+config, _ := httpserver.NewConfig(
+    ":8080",            // Listen address
+    routes,              // HTTP routes
+    httpserver.WithDrainTimeout(10*time.Second),
+)
+
+// Create a config with multiple custom settings
+config, _ := httpserver.NewConfig(
+    ":8080",
+    routes,
+    httpserver.WithDrainTimeout(10*time.Second),
+    httpserver.WithReadTimeout(30*time.Second),
+    httpserver.WithWriteTimeout(30*time.Second),
+    httpserver.WithIdleTimeout(2*time.Minute),
+)
+```
+
+### Available Configuration Options
+
+The following functional options can be used with `NewConfig`:
+
+- `WithDrainTimeout(timeout time.Duration)`: Sets the drain timeout for graceful shutdown
+- `WithReadTimeout(timeout time.Duration)`: Sets the read timeout for the HTTP server
+- `WithWriteTimeout(timeout time.Duration)`: Sets the write timeout for the HTTP server
+- `WithIdleTimeout(timeout time.Duration)`: Sets the idle connection timeout for the HTTP server
+- `WithServerCreator(creator ServerCreator)`: Sets a custom server creator function
+
+### Custom Server Creator
+
+You can provide a custom server creation function to configure advanced HTTP server settings:
+
+```go
+// Create a custom server creator
+customServerCreator := func(addr string, handler http.Handler, cfg *httpserver.Config) httpserver.HttpServer {
     return &http.Server{
         Addr:         addr,
         Handler:      handler,
-        ReadTimeout:  10 * time.Second,
-        WriteTimeout: 15 * time.Second,
-        IdleTimeout:  120 * time.Second,
+        ReadTimeout:  cfg.ReadTimeout,
+        WriteTimeout: cfg.WriteTimeout,
+        IdleTimeout:  cfg.IdleTimeout,
+        // Add any additional custom settings here
     }
 }
 
-// Use the custom server creator when creating the runner
-runner, _ := httpserver.NewRunner(
-    httpserver.WithConfigCallback(configCallback),
+// Use the custom server creator in the config
+config, _ := httpserver.NewConfig(
+    ":8080",
+    routes,
     httpserver.WithServerCreator(customServerCreator),
 )
 ```
@@ -228,10 +270,13 @@ runner, _ := httpserver.NewRunner(
 
 ```go
 // Create a server with TLS configuration
-tlsServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
+tlsServerCreator := func(addr string, handler http.Handler, cfg *httpserver.Config) httpserver.HttpServer {
     return &http.Server{
-        Addr:    addr,
-        Handler: handler,
+        Addr:         addr,
+        Handler:      handler,
+        ReadTimeout:  cfg.ReadTimeout,
+        WriteTimeout: cfg.WriteTimeout,
+        IdleTimeout:  cfg.IdleTimeout,
         TLSConfig: &tls.Config{
             MinVersion: tls.VersionTLS12,
             CurvePreferences: []tls.CurveID{

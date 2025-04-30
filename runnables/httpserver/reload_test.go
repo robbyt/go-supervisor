@@ -24,7 +24,7 @@ func TestReload(t *testing.T) {
 		routes := Routes{*route}
 
 		// First create a valid config manually
-		config, err := NewConfig(listenPort, 1*time.Second, routes)
+		config, err := NewConfig(listenPort, routes, WithDrainTimeout(1*time.Second))
 		require.NoError(t, err)
 
 		// Create a callback that will return our config
@@ -77,7 +77,7 @@ func TestReload(t *testing.T) {
 		updatedRoutes := Routes{*updatedRoute}
 
 		// Create a new configuration
-		updatedCfg, err := NewConfig(updatedPort, 2*time.Second, updatedRoutes)
+		updatedCfg, err := NewConfig(updatedPort, updatedRoutes, WithDrainTimeout(2*time.Second))
 		require.NoError(t, err)
 
 		// Force the server to Running state so we can reload

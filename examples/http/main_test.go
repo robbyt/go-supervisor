@@ -83,7 +83,7 @@ func TestRunServerInvalidPort(t *testing.T) {
 
 	// Create a config callback that uses an invalid port
 	configCallback := func() (*httpserver.Config, error) {
-		return httpserver.NewConfig(":-1", DrainTimeout, routes)
+		return httpserver.NewConfig(":-1", routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
 	// Create HTTP server runner with invalid port

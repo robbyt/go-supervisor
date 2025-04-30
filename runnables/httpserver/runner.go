@@ -24,17 +24,6 @@ type HttpServer interface {
 	Shutdown(ctx context.Context) error
 }
 
-// ServerCreator is a function type that creates an HttpServer instance
-type ServerCreator func(addr string, handler http.Handler) HttpServer
-
-// DefaultServerCreator creates a standard http.Server instance
-func DefaultServerCreator(addr string, handler http.Handler) HttpServer {
-	return &http.Server{
-		Addr:    addr,
-		Handler: handler,
-	}
-}
-
 // Runner implements a configurable HTTP server that supports graceful shutdown,
 // dynamic reconfiguration, and state monitoring. It meets the Runnable, Reloadable,
 // and Stateable interfaces from the supervisor package.
@@ -44,7 +33,6 @@ type Runner struct {
 	configCallback ConfigCallback
 	bootLock       sync.Mutex
 	server         HttpServer
-	serverCreator  ServerCreator
 	serverRunning  atomic.Bool
 	serverErrors   chan error
 	fsm            finitestate.Machine
@@ -69,13 +57,12 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Runner{
-		name:          "",
-		config:        atomic.Pointer[Config]{},
-		serverCreator: DefaultServerCreator,
-		serverErrors:  make(chan error, 1),
-		ctx:           ctx,
-		cancel:        cancel,
-		logger:        logger,
+		name:         "",
+		config:       atomic.Pointer[Config]{},
+		serverErrors: make(chan error, 1),
+		ctx:          ctx,
+		cancel:       cancel,
+		logger:       logger,
 	}
 
 	// Apply options
@@ -203,15 +190,13 @@ func (r *Runner) Stop() {
 func (r *Runner) boot() error {
 	cfg := r.getConfig()
 	if cfg == nil {
-		return errors.New("no config set")
+		return errors.New("failed to retrieve config")
 	}
 
-	addr := cfg.ListenAddr
-	mux := cfg.getMux()
+	// Use the Config's CreateServer method to create the server
+	r.server = cfg.createServer()
 
-	r.server = r.serverCreator(addr, mux)
-
-	r.logger.Info("Starting HTTP server", "listenOn", addr)
+	r.logger.Info("Starting HTTP server", "listenOn", cfg.ListenAddr)
 	go func() {
 		if !r.serverRunning.CompareAndSwap(false, true) {
 			r.serverErrors <- errors.New("HTTP server already running")
@@ -222,7 +207,7 @@ func (r *Runner) boot() error {
 			r.serverErrors <- err
 		}
 		r.serverRunning.Store(false)
-		r.logger.Debug("HTTP server stopped", "listenOn", addr)
+		r.logger.Debug("HTTP server stopped", "listenOn", cfg.ListenAddr)
 	}()
 
 	return nil
