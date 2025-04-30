@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -129,4 +130,62 @@ func TestWithConfig(t *testing.T) {
 
 	// Verify we get the same config instance (not a copy)
 	assert.Same(t, staticConfig, config, "Should return the exact same config instance")
+}
+
+// TestWithServerCreator verifies the WithServerCreator option works correctly
+func TestWithServerCreator(t *testing.T) {
+	t.Parallel()
+
+	// Create a mock server and track creation parameters
+	mockServer := new(MockHttpServer)
+	mockServer.On("ListenAndServe").Return(nil)
+	mockServer.On("Shutdown", mock.Anything).Return(nil)
+
+	var capturedAddr string
+	var capturedHandler http.Handler
+
+	// Custom server creator function that captures parameters
+	customCreator := func(addr string, handler http.Handler) HttpServer {
+		capturedAddr = addr
+		capturedHandler = handler
+		return mockServer
+	}
+
+	// Create required route and config callback for Runner
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRoute("v1", "/", handler)
+	require.NoError(t, err)
+	hConfig := Routes{*route}
+
+	testAddr := ":9876" // Use a specific port for identification
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(testAddr, 1*time.Second, hConfig)
+	}
+
+	// Create a server with the custom server creator
+	server, err := NewRunner(
+		WithContext(context.Background()),
+		WithConfigCallback(cfgCallback),
+		WithServerCreator(customCreator),
+	)
+	require.NoError(t, err)
+
+	// Verify the custom server creator was set
+	assert.NotNil(t, server.serverCreator, "Server creator should be set")
+
+	// Start the boot process to trigger server creation
+	server.bootLock.Lock()
+	err = server.boot()
+	server.bootLock.Unlock()
+	require.NoError(t, err)
+
+	// Verify the custom creator was called with correct parameters
+	assert.Equal(t, testAddr, capturedAddr, "Server creator should receive correct address")
+	assert.NotNil(t, capturedHandler, "Server creator should receive a handler")
+
+	// Verify the created server is our mock
+	assert.Same(t, mockServer, server.server, "Server should be our mock instance")
+
+	// The server is created but not started, so we don't need to stop it
+	// The FSM would be in the 'New' state, not 'Running', so stopServer would fail
 }

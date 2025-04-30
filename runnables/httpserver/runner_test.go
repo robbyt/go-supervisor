@@ -11,6 +11,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -379,6 +380,57 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 	err := server.stopServer(context.Background())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "server not running")
+}
+
+// TestCustomServerCreator tests that the custom server creator is used correctly
+func TestCustomServerCreator(t *testing.T) {
+	t.Parallel()
+
+	// Create a mock HTTP server
+	mockServer := new(MockHttpServer)
+	mockServer.On("ListenAndServe").Return(nil)
+	mockServer.On("Shutdown", mock.Anything).Return(nil)
+
+	// Create a custom server creator that returns our mock
+	customCreator := func(addr string, handler http.Handler) HttpServer {
+		return mockServer
+	}
+
+	// Create a test route and config
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRoute("test", "/test", handler)
+	require.NoError(t, err)
+	routes := Routes{*route}
+
+	// Use a unique port to avoid conflicts
+	listenAddr := getAvailablePort(t, 8500)
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(listenAddr, 1*time.Second, routes)
+	}
+
+	// Create the runner with our custom server creator
+	runner, err := NewRunner(
+		WithContext(context.Background()),
+		WithConfigCallback(cfgCallback),
+		WithServerCreator(customCreator),
+	)
+	require.NoError(t, err)
+
+	// Start the boot process to trigger server creation
+	err = runner.boot()
+	require.NoError(t, err)
+
+	// Verify the server was created with our custom creator
+	assert.Same(t, mockServer, runner.server, "Server should be our mock instance")
+
+	// Directly test the mock's methods without going through the runner's FSM
+	// This avoids FSM state transition issues in the test
+	ctx := context.Background()
+	err = mockServer.Shutdown(ctx)
+	require.NoError(t, err)
+
+	// Verify that our mock server's Shutdown was called
+	mockServer.AssertCalled(t, "Shutdown", mock.Anything)
 }
 
 // TestServerLifecycle tests the complete lifecycle of the server

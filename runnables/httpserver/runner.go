@@ -18,6 +18,23 @@ import (
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
 type ConfigCallback func() (*Config, error)
 
+// HttpServer is the interface for the HTTP server
+type HttpServer interface {
+	ListenAndServe() error
+	Shutdown(ctx context.Context) error
+}
+
+// ServerCreator is a function type that creates an HttpServer instance
+type ServerCreator func(addr string, handler http.Handler) HttpServer
+
+// DefaultServerCreator creates a standard http.Server instance
+func DefaultServerCreator(addr string, handler http.Handler) HttpServer {
+	return &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+}
+
 // Runner implements a configurable HTTP server that supports graceful shutdown,
 // dynamic reconfiguration, and state monitoring. It meets the Runnable, Reloadable,
 // and Stateable interfaces from the supervisor package.
@@ -26,10 +43,11 @@ type Runner struct {
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
 	bootLock       sync.Mutex
-	server         *http.Server
+	server         HttpServer
+	serverCreator  ServerCreator
 	serverRunning  atomic.Bool
 	serverErrors   chan error
-	fsm            finitestate.Machine // implemented by go-fsm
+	fsm            finitestate.Machine
 	ctx            context.Context
 	cancel         context.CancelFunc
 	logger         *slog.Logger
@@ -51,12 +69,13 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Runner{
-		name:         "",
-		config:       atomic.Pointer[Config]{},
-		serverErrors: make(chan error, 1),
-		ctx:          ctx,
-		cancel:       cancel,
-		logger:       logger,
+		name:          "",
+		config:        atomic.Pointer[Config]{},
+		serverCreator: DefaultServerCreator,
+		serverErrors:  make(chan error, 1),
+		ctx:           ctx,
+		cancel:        cancel,
+		logger:        logger,
 	}
 
 	// Apply options
@@ -190,10 +209,7 @@ func (r *Runner) boot() error {
 	addr := cfg.ListenAddr
 	mux := cfg.getMux()
 
-	r.server = &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
+	r.server = r.serverCreator(addr, mux)
 
 	r.logger.Info("Starting HTTP server", "listenOn", addr)
 	go func() {
@@ -202,7 +218,7 @@ func (r *Runner) boot() error {
 			return
 		}
 
-		if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
 		r.serverRunning.Store(false)
