@@ -129,3 +129,20 @@ func (r *MockRunner) reloadConfig() error {
 	r.setConfig(newConfig)
 	return nil
 }
+
+// MockHttpServer is a mock implementation of the HttpServer interface
+type MockHttpServer struct {
+	mock.Mock
+}
+
+// ListenAndServe mocks the ListenAndServe method of the HttpServer interface
+func (m *MockHttpServer) ListenAndServe() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+// Shutdown mocks the Shutdown method of the HttpServer interface
+func (m *MockHttpServer) Shutdown(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}

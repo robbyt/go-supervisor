@@ -197,6 +197,81 @@ runner, _ := httpserver.NewRunner(
 )
 ```
 
+## Custom Server Configuration
+
+The HTTP server runnable supports customizing the underlying HTTP server implementation. This allows you to configure advanced features like timeouts, TLS settings, and other HTTP server options.
+
+### Using Custom Server Creator
+
+You can provide a custom server creation function to configure the HTTP server with specific settings:
+
+```go
+// Create a custom server creator with timeouts
+customServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
+    return &http.Server{
+        Addr:         addr,
+        Handler:      handler,
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 15 * time.Second,
+        IdleTimeout:  120 * time.Second,
+    }
+}
+
+// Use the custom server creator when creating the runner
+runner, _ := httpserver.NewRunner(
+    httpserver.WithConfigCallback(configCallback),
+    httpserver.WithServerCreator(customServerCreator),
+)
+```
+
+### TLS Configuration Example
+
+```go
+// Create a server with TLS configuration
+tlsServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
+    return &http.Server{
+        Addr:    addr,
+        Handler: handler,
+        TLSConfig: &tls.Config{
+            MinVersion: tls.VersionTLS12,
+            CurvePreferences: []tls.CurveID{
+                tls.CurveP256,
+                tls.X25519,
+            },
+        },
+    }
+}
+
+// Use the TLS server creator
+runner, _ := httpserver.NewRunner(
+    httpserver.WithConfigCallback(configCallback),
+    httpserver.WithServerCreator(tlsServerCreator),
+)
+```
+
+### HTTP/2 Support Example
+
+```go
+// Create a server with HTTP/2 support
+http2ServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
+    server := &http.Server{
+        Addr:    addr,
+        Handler: handler,
+    }
+    
+    // Enable HTTP/2 support
+    http2.ConfigureServer(server, &http2.Server{})
+    
+    return server
+}
+
+// Use the HTTP/2 server creator
+runner, _ := httpserver.NewRunner(
+    httpserver.WithConfigCallback(configCallback),
+    httpserver.WithServerCreator(http2ServerCreator),
+)
+```
+
 ## Full Example
 
 See `examples/http/main.go` for a complete example.
