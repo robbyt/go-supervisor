@@ -42,7 +42,7 @@ func createTestRouteForMock(t *testing.T, path string) Route {
 func createSimpleConfigForMock(t *testing.T, addr string) *Config {
 	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/")}
-	cfg, err := NewConfig(addr, 1*time.Second, routes)
+	cfg, err := NewConfig(addr, routes, WithDrainTimeout(1*time.Second))
 	require.NoError(t, err)
 	return cfg
 }
@@ -51,7 +51,7 @@ func createSimpleConfigForMock(t *testing.T, addr string) *Config {
 func createModifiedConfigForMock(t *testing.T, addr string) *Config {
 	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/modified")}
-	cfg, err := NewConfig(addr, 2*time.Second, routes)
+	cfg, err := NewConfig(addr, routes, WithDrainTimeout(2*time.Second))
 	require.NoError(t, err)
 	return cfg
 }
@@ -263,7 +263,7 @@ func TestReloadConfig_EdgeCases(t *testing.T) {
 		}
 		route, err := NewRoute("test", "/", handler)
 		require.NoError(t, err)
-		config2, err := NewConfig(":8500", 1*time.Second, Routes{*route})
+		config2, err := NewConfig(":8500", Routes{*route}, WithDrainTimeout(1*time.Second))
 		require.NoError(t, err)
 
 		// Verify they're not the same instance but are logically equal
@@ -318,7 +318,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 		require.NoError(t, err)
 		initialRoutes := Routes{*route}
 
-		initialConfig, err := NewConfig(listenPort, 1*time.Second, initialRoutes)
+		initialConfig, err := NewConfig(listenPort, initialRoutes, WithDrainTimeout(1*time.Second))
 		require.NoError(t, err)
 
 		// Create a modified config for the reload
@@ -327,7 +327,11 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 		require.NoError(t, err)
 		modifiedRoutes := Routes{*modifiedRoute}
 
-		modifiedConfig, err := NewConfig(listenPort, 2*time.Second, modifiedRoutes)
+		modifiedConfig, err := NewConfig(
+			listenPort,
+			modifiedRoutes,
+			WithDrainTimeout(2*time.Second),
+		)
 		require.NoError(t, err)
 
 		// Create a dynamically changing config callback
