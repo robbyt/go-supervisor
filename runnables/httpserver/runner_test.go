@@ -61,7 +61,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	hConfig := Routes{*route}
 
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenPort, drainTimeout, hConfig)
+		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
 	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
@@ -131,7 +131,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	hConfig := Routes{*route}
 
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenPort, drainTimeout, hConfig)
+		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
 	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
@@ -191,7 +191,7 @@ func TestString(t *testing.T) {
 
 		// Create the Config and HTTPServer instance
 		cfgCallback := func() (*Config, error) {
-			return NewConfig(listenPort, 0, hConfig)
+			return NewConfig(listenPort, hConfig, WithDrainTimeout(0))
 		}
 
 		server, err := NewRunner(WithContext(t.Context()), WithConfigCallback(cfgCallback))
@@ -229,7 +229,7 @@ func TestString(t *testing.T) {
 
 		// Create the Config and HTTPServer instance
 		cfgCallback := func() (*Config, error) {
-			return NewConfig(listenPort, 0, hConfig)
+			return NewConfig(listenPort, hConfig, WithDrainTimeout(0))
 		}
 		testName := "TestServer"
 		server, err := NewRunner(
@@ -277,7 +277,7 @@ func TestServerErr(t *testing.T) {
 	hConfig := Routes{*route}
 
 	// Create two server configs using the same port
-	cfg1 := func() (*Config, error) { return NewConfig(port, 0, hConfig) }
+	cfg1 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
 	server1, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfg1))
 	require.NoError(t, err)
 
@@ -292,7 +292,7 @@ func TestServerErr(t *testing.T) {
 	waitForRunningState(t, server1, 2*time.Second)
 
 	// Create a second server with the same port
-	cfg2 := func() (*Config, error) { return NewConfig(port, 0, hConfig) }
+	cfg2 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
 	server2, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfg2))
 	require.NoError(t, err)
 
@@ -308,7 +308,7 @@ func TestServerErr(t *testing.T) {
 
 // TestRoutesRequired verifies that configs must include routes
 func TestRoutesRequired(t *testing.T) {
-	c, err := NewConfig(":8080", 0, Routes{})
+	c, err := NewConfig(":8080", Routes{}, WithDrainTimeout(0))
 	assert.Nil(t, c)
 	assert.Error(t, err)
 }
@@ -392,7 +392,7 @@ func TestCustomServerCreator(t *testing.T) {
 	mockServer.On("Shutdown", mock.Anything).Return(nil)
 
 	// Create a custom server creator that returns our mock
-	customCreator := func(addr string, handler http.Handler) HttpServer {
+	customCreator := func(addr string, handler http.Handler, cfg *Config) HttpServer {
 		return mockServer
 	}
 
@@ -404,15 +404,21 @@ func TestCustomServerCreator(t *testing.T) {
 
 	// Use a unique port to avoid conflicts
 	listenAddr := getAvailablePort(t, 8500)
+
+	// Create a callback that generates the config with our custom server creator
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenAddr, 1*time.Second, routes)
+		return NewConfig(
+			listenAddr,
+			routes,
+			WithDrainTimeout(1*time.Second),
+			WithServerCreator(customCreator),
+		)
 	}
 
-	// Create the runner with our custom server creator
+	// Create the runner
 	runner, err := NewRunner(
 		WithContext(context.Background()),
 		WithConfigCallback(cfgCallback),
-		WithServerCreator(customCreator),
 	)
 	require.NoError(t, err)
 
@@ -445,7 +451,7 @@ func TestServerLifecycle(t *testing.T) {
 
 	// Create the Config and HTTPServer instance
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenPort, 1*time.Second, Routes{*route})
+		return NewConfig(listenPort, Routes{*route}, WithDrainTimeout(1*time.Second))
 	}
 
 	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))

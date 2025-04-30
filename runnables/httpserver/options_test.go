@@ -31,7 +31,7 @@ func TestWithContext(t *testing.T) {
 	hConfig := Routes{*route}
 
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(":0", 1*time.Second, hConfig)
+		return NewConfig(":0", hConfig, WithDrainTimeout(1*time.Second))
 	}
 
 	server, err := NewRunner(WithContext(context.Background()),
@@ -76,7 +76,7 @@ func TestWithLogHandler(t *testing.T) {
 	hConfig := Routes{*route}
 
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(":0", 1*time.Second, hConfig)
+		return NewConfig(":0", hConfig, WithDrainTimeout(1*time.Second))
 	}
 
 	// Create a server with the custom logger
@@ -107,7 +107,7 @@ func TestWithConfig(t *testing.T) {
 	hConfig := Routes{*route}
 
 	testAddr := ":8765" // Use a specific port for identification
-	staticConfig, err := NewConfig(testAddr, 2*time.Second, hConfig)
+	staticConfig, err := NewConfig(testAddr, hConfig, WithDrainTimeout(2*time.Second))
 	require.NoError(t, err)
 
 	// Create a server with the static config
@@ -145,7 +145,7 @@ func TestWithServerCreator(t *testing.T) {
 	var capturedHandler http.Handler
 
 	// Custom server creator function that captures parameters
-	customCreator := func(addr string, handler http.Handler) HttpServer {
+	customCreator := func(addr string, handler http.Handler, cfg *Config) HttpServer {
 		capturedAddr = addr
 		capturedHandler = handler
 		return mockServer
@@ -159,19 +159,24 @@ func TestWithServerCreator(t *testing.T) {
 
 	testAddr := ":9876" // Use a specific port for identification
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(testAddr, 1*time.Second, hConfig)
+		return NewConfig(
+			testAddr,
+			hConfig,
+			WithDrainTimeout(1*time.Second),
+			WithServerCreator(customCreator),
+		)
 	}
 
-	// Create a server with the custom server creator
+	// Create a server with the config that has a custom server creator
 	server, err := NewRunner(
 		WithContext(context.Background()),
 		WithConfigCallback(cfgCallback),
-		WithServerCreator(customCreator),
 	)
 	require.NoError(t, err)
 
-	// Verify the custom server creator was set
-	assert.NotNil(t, server.serverCreator, "Server creator should be set")
+	// Get the config to verify the server creator was set
+	cfg := server.getConfig()
+	assert.NotNil(t, cfg.ServerCreator, "Server creator should be set in config")
 
 	// Start the boot process to trigger server creation
 	server.bootLock.Lock()

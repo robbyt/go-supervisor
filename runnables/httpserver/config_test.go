@@ -31,20 +31,18 @@ func (r *testResponseRecorder) WriteHeader(status int) {
 
 func TestNewConfig(t *testing.T) {
 	t.Parallel()
-	defaultDrain := 30 * time.Second
 
 	tests := []struct {
-		name          string
-		addr          string
-		drain_timeout time.Duration
-		routes        Routes
-		expectError   bool
-		expectedStr   string
+		name        string
+		addr        string
+		routes      Routes
+		opts        []ConfigOption
+		expectError bool
+		expectedStr string
 	}{
 		{
-			name:          "ValidConfig",
-			addr:          ":8080",
-			drain_timeout: defaultDrain,
+			name: "ValidConfig",
+			addr: ":8080",
 			routes: Routes{
 				{
 					name:    "v1",
@@ -52,21 +50,21 @@ func TestNewConfig(t *testing.T) {
 					Handler: func(w http.ResponseWriter, r *http.Request) {},
 				},
 			},
+			opts:        []ConfigOption{WithDrainTimeout(30 * time.Second)},
 			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=30s, routes=Routes<Name: v1, Path: /test>>",
+			expectedStr: "Config<addr=:8080, drainTimeout=30s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
 		},
 		{
-			name:          "EmptyRoutes",
-			addr:          ":8080",
-			drain_timeout: defaultDrain,
-			routes:        Routes{},
-			expectError:   true,
-			expectedStr:   "",
+			name:        "EmptyRoutes",
+			addr:        ":8080",
+			routes:      Routes{},
+			opts:        nil,
+			expectError: true,
+			expectedStr: "",
 		},
 		{
-			name:          "ZeroDrainTimeout",
-			addr:          ":8080",
-			drain_timeout: 0,
+			name: "ZeroDrainTimeout",
+			addr: ":8080",
 			routes: Routes{
 				{
 					name:    "v1",
@@ -74,13 +72,13 @@ func TestNewConfig(t *testing.T) {
 					Handler: func(w http.ResponseWriter, r *http.Request) {},
 				},
 			},
+			opts:        []ConfigOption{WithDrainTimeout(0)},
 			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=0s, routes=Routes<Name: v1, Path: /test>>",
+			expectedStr: "Config<addr=:8080, drainTimeout=0s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
 		},
 		{
-			name:          "NegativeDrainTimeout",
-			addr:          ":8080",
-			drain_timeout: -10 * time.Second,
+			name: "NegativeDrainTimeout",
+			addr: ":8080",
 			routes: Routes{
 				{
 					name:    "v1",
@@ -88,15 +86,16 @@ func TestNewConfig(t *testing.T) {
 					Handler: func(w http.ResponseWriter, r *http.Request) {},
 				},
 			},
+			opts:        []ConfigOption{WithDrainTimeout(-10 * time.Second)},
 			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=-10s, routes=Routes<Name: v1, Path: /test>>",
+			expectedStr: "Config<addr=:8080, drainTimeout=-10s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt // capture range variable
 		t.Run(tt.name, func(t *testing.T) {
-			config, err := NewConfig(tt.addr, tt.drain_timeout, tt.routes)
+			config, err := NewConfig(tt.addr, tt.routes, tt.opts...)
 			if tt.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, config)
@@ -104,7 +103,7 @@ func TestNewConfig(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, config)
 				assert.Equal(t, tt.addr, config.ListenAddr)
-				assert.Equal(t, tt.drain_timeout, config.DrainTimeout)
+				// DrainTimeout is now set via options
 				assert.Equal(t, tt.routes, config.Routes)
 				// Test Config.String()
 				assert.Equal(t, tt.expectedStr, config.String())
@@ -128,7 +127,7 @@ func TestConfigEqual(t *testing.T) {
 			Handler: handler,
 		},
 	}
-	baseConfig, err := NewConfig(":8080", 30*time.Second, baseRoutes)
+	baseConfig, err := NewConfig(":8080", baseRoutes, WithDrainTimeout(30*time.Second))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -216,7 +215,7 @@ func TestConfigGetMux(t *testing.T) {
 			},
 		}
 
-		config, err := NewConfig(":8080", 30*time.Second, routes)
+		config, err := NewConfig(":8080", routes, WithDrainTimeout(30*time.Second))
 		require.NoError(t, err)
 
 		// Get mux and create test server
@@ -261,7 +260,7 @@ func TestConfigGetMux(t *testing.T) {
 			{name: "route2", Path: "/route2", Handler: handler2},
 		}
 
-		config, err := NewConfig(":8080", 30*time.Second, routes)
+		config, err := NewConfig(":8080", routes, WithDrainTimeout(30*time.Second))
 		require.NoError(t, err)
 
 		mux := config.getMux()

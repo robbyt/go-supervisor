@@ -89,7 +89,7 @@ func RunServer(
 ) (*supervisor.PIDZero, func(), error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
-		return httpserver.NewConfig(ListenOn, DrainTimeout, routes)
+		return httpserver.NewConfig(ListenOn, routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
 	// Create the HTTP server runner with a custom context

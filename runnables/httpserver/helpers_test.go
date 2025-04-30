@@ -41,7 +41,7 @@ func createTestServer(
 	hConfig := Routes{*route}
 
 	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenPort, drainTimeout, hConfig)
+		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
 	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
