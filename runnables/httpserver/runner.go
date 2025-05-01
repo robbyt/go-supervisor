@@ -31,7 +31,7 @@ type Runner struct {
 	name           string
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
-	bootLock       sync.Mutex
+	mutex          sync.Mutex
 	server         HttpServer
 	serverRunning  atomic.Bool
 	serverErrors   chan error
@@ -118,9 +118,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	r.bootLock.Lock()
+	r.mutex.Lock()
 	err = r.boot()
-	r.bootLock.Unlock()
+	r.mutex.Unlock()
 
 	if err != nil {
 		r.setStateError()
@@ -156,9 +156,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
-	r.bootLock.Lock()
+	r.mutex.Lock()
 	err = r.stopServer(runCtx)
-	r.bootLock.Unlock()
+	r.mutex.Unlock()
 
 	if err != nil {
 		r.setStateError()

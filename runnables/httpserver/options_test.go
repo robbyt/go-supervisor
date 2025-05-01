@@ -179,9 +179,9 @@ func TestWithServerCreator(t *testing.T) {
 	assert.NotNil(t, cfg.ServerCreator, "Server creator should be set in config")
 
 	// Start the boot process to trigger server creation
-	server.bootLock.Lock()
+	server.mutex.Lock()
 	err = server.boot()
-	server.bootLock.Unlock()
+	server.mutex.Unlock()
 	require.NoError(t, err)
 
 	// Verify the custom creator was called with correct parameters
