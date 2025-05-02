@@ -15,6 +15,13 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
+// Interface guards to ensure all of these are implemented
+var (
+	_ supervisor.Runnable   = (*Runner)(nil)
+	_ supervisor.Reloadable = (*Runner)(nil)
+	_ supervisor.Stateable  = (*Runner)(nil)
+)
+
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
 type ConfigCallback func() (*Config, error)
 
@@ -33,20 +40,12 @@ type Runner struct {
 	configCallback ConfigCallback
 	mutex          sync.Mutex
 	server         HttpServer
-	serverRunning  atomic.Bool
 	serverErrors   chan error
 	fsm            finitestate.Machine
 	ctx            context.Context
 	cancel         context.CancelFunc
 	logger         *slog.Logger
 }
-
-// Interface guards to ensure all of these are implemented
-var (
-	_ supervisor.Runnable   = (*Runner)(nil)
-	_ supervisor.Reloadable = (*Runner)(nil)
-	_ supervisor.Stateable  = (*Runner)(nil)
-)
 
 // NewRunner initializes a new HTTPServer runner instance.
 func NewRunner(opts ...Option) (*Runner, error) {
@@ -193,20 +192,14 @@ func (r *Runner) boot() error {
 		return errors.New("failed to retrieve config")
 	}
 
-	// Use the Config's CreateServer method to create the server
+	// Use the Config's CreateServer callback to create the HttpServer implementation
 	r.server = cfg.createServer()
 
 	r.logger.Info("Starting HTTP server", "listenOn", cfg.ListenAddr)
 	go func() {
-		if !r.serverRunning.CompareAndSwap(false, true) {
-			r.serverErrors <- errors.New("HTTP server already running")
-			return
-		}
-
 		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
-		r.serverRunning.Store(false)
 		r.logger.Debug("HTTP server stopped", "listenOn", cfg.ListenAddr)
 	}()
 
@@ -246,11 +239,6 @@ func (r *Runner) stopServer(ctx context.Context) error {
 	if r.server == nil {
 		return errors.New("server not running")
 	}
-
-	if !r.serverRunning.Load() {
-		return errors.New("server not running")
-	}
-
 	r.logger.Debug("Stopping HTTP server")
 
 	cfg := r.getConfig()
