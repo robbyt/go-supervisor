@@ -38,9 +38,9 @@ func (r *Runner) reloadConfig() error {
 // Reload refreshes the server configuration and restarts the HTTP server if necessary.
 // This method is safe to call while the server is running and will handle graceful shutdown and restart.
 func (r *Runner) Reload() {
+	r.logger.Debug("Reloading...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	r.logger.Debug("Reloading...")
 
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
 		r.logger.Error("Failed to transition to Reloading", "error", err)
