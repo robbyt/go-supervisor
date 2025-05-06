@@ -13,6 +13,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSetStateError_FullIntegration does an end-to-end verification of setStateError
+// using a real FSM to complement the mocked tests
+func TestSetStateError_FullIntegration(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
+
+	// Set up initial conditions with FSM in Stopped state
+	err := server.fsm.SetState(finitestate.StatusStopped)
+	require.NoError(t, err)
+
+	// Call the function under test which should fall back to SetState
+	server.setStateError()
+
+	// Verify we ended up in Error state
+	assert.Equal(t, finitestate.StatusError, server.fsm.GetState())
+}
+
+// TestSetStateError_Mocked tests the error state setting functionality using mocks
 func TestSetStateError_Mocked(t *testing.T) {
 	t.Parallel()
 
@@ -142,23 +162,4 @@ func TestSetStateError_Mocked(t *testing.T) {
 		mockFSM.AssertCalled(t, "SetState", finitestate.StatusError)
 		mockFSM.AssertCalled(t, "SetState", finitestate.StatusUnknown)
 	})
-}
-
-// TestSetStateError_FullIntegration does an end-to-end verification of setStateError
-// using a real FSM to complement the mocked tests
-func TestSetStateError_FullIntegration(t *testing.T) {
-	t.Parallel()
-
-	server, _, _ := createTestServer(t,
-		func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
-
-	// Set up initial conditions with FSM in Stopped state
-	err := server.fsm.SetState(finitestate.StatusStopped)
-	require.NoError(t, err)
-
-	// Call the function under test which should fall back to SetState
-	server.setStateError()
-
-	// Verify we ended up in Error state
-	assert.Equal(t, finitestate.StatusError, server.fsm.GetState())
 }

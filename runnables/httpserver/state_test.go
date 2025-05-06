@@ -12,6 +12,101 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestGetState verifies that GetState correctly returns the FSM state
+func TestGetState(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+
+	// Test initial state
+	assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
+
+	// Test after changing state
+	err := server.fsm.SetState(finitestate.StatusRunning)
+	require.NoError(t, err)
+	assert.Equal(t, finitestate.StatusRunning, server.GetState(), "Should return Running state")
+
+	// Test after another state change
+	err = server.fsm.SetState(finitestate.StatusStopping)
+	require.NoError(t, err)
+	assert.Equal(t, finitestate.StatusStopping, server.GetState(), "Should return Stopping state")
+}
+
+// TestGetStateChan verifies that the state channel works correctly
+func TestGetStateChan(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+
+	// Create a context with timeout for safety
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Get the state channel
+	stateChan := server.GetStateChan(ctx)
+
+	// Verify we can receive state changes
+	initialState := <-stateChan
+	assert.Equal(t, finitestate.StatusNew, initialState, "Initial state should be New")
+
+	// Make a state change
+	err := server.fsm.SetState(finitestate.StatusRunning)
+	require.NoError(t, err)
+
+	// Verify the state change is received
+	newState := <-stateChan
+	assert.Equal(t, finitestate.StatusRunning, newState, "Should receive Running state")
+
+	// Test context cancellation
+	cancel()
+
+	// Wait for channel to close
+	require.Eventually(t, func() bool {
+		_, ok := <-stateChan
+		return !ok
+	}, 1*time.Second, 10*time.Millisecond, "Channel should be closed after context cancellation")
+}
+
+// TestIsRunning verifies that IsRunning returns the correct value based on the state
+func TestIsRunning(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+
+	// Test when state is not running
+	err := server.fsm.SetState(finitestate.StatusNew)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is New")
+
+	// Test when state is Booting
+	err = server.fsm.SetState(finitestate.StatusBooting)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Booting")
+
+	// Test when state is Running
+	err = server.fsm.SetState(finitestate.StatusRunning)
+	require.NoError(t, err)
+	assert.True(t, server.IsRunning(), "Should return true when state is Running")
+
+	// Test when state is Stopping
+	err = server.fsm.SetState(finitestate.StatusStopping)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Stopping")
+
+	// Test when state is Stopped
+	err = server.fsm.SetState(finitestate.StatusStopped)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Stopped")
+
+	// Test when state is Error
+	err = server.fsm.SetState(finitestate.StatusError)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Error")
+}
+
 // TestSetStateError verifies the error state setting functionality
 func TestSetStateError(t *testing.T) {
 	t.Parallel()
@@ -79,63 +174,6 @@ func TestSetStateError(t *testing.T) {
 	})
 }
 
-// TestGetState verifies that GetState correctly returns the FSM state
-func TestGetState(t *testing.T) {
-	t.Parallel()
-
-	server, _, _ := createTestServer(t,
-		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
-
-	// Test initial state
-	assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
-
-	// Test after changing state
-	err := server.fsm.SetState(finitestate.StatusRunning)
-	require.NoError(t, err)
-	assert.Equal(t, finitestate.StatusRunning, server.GetState(), "Should return Running state")
-
-	// Test after another state change
-	err = server.fsm.SetState(finitestate.StatusStopping)
-	require.NoError(t, err)
-	assert.Equal(t, finitestate.StatusStopping, server.GetState(), "Should return Stopping state")
-}
-
-// TestGetStateChan verifies that the state channel works correctly
-func TestGetStateChan(t *testing.T) {
-	t.Parallel()
-
-	server, _, _ := createTestServer(t,
-		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
-
-	// Create a context with timeout for safety
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Get the state channel
-	stateChan := server.GetStateChan(ctx)
-
-	// Verify we can receive state changes
-	initialState := <-stateChan
-	assert.Equal(t, finitestate.StatusNew, initialState, "Initial state should be New")
-
-	// Make a state change
-	err := server.fsm.SetState(finitestate.StatusRunning)
-	require.NoError(t, err)
-
-	// Verify the state change is received
-	newState := <-stateChan
-	assert.Equal(t, finitestate.StatusRunning, newState, "Should receive Running state")
-
-	// Test context cancellation
-	cancel()
-
-	// Wait for channel to close
-	require.Eventually(t, func() bool {
-		_, ok := <-stateChan
-		return !ok
-	}, 1*time.Second, 10*time.Millisecond, "Channel should be closed after context cancellation")
-}
-
 // TestWaitForState verifies the waitForState helper function
 func TestWaitForState(t *testing.T) {
 	t.Parallel()
@@ -160,42 +198,4 @@ func TestWaitForState(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return server.GetState() == finitestate.StatusStopping
 	}, 1*time.Second, 10*time.Millisecond)
-}
-
-// TestIsRunning verifies that IsRunning returns the correct value based on the state
-func TestIsRunning(t *testing.T) {
-	t.Parallel()
-
-	server, _, _ := createTestServer(t,
-		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
-
-	// Test when state is not running
-	err := server.fsm.SetState(finitestate.StatusNew)
-	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is New")
-
-	// Test when state is Booting
-	err = server.fsm.SetState(finitestate.StatusBooting)
-	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Booting")
-
-	// Test when state is Running
-	err = server.fsm.SetState(finitestate.StatusRunning)
-	require.NoError(t, err)
-	assert.True(t, server.IsRunning(), "Should return true when state is Running")
-
-	// Test when state is Stopping
-	err = server.fsm.SetState(finitestate.StatusStopping)
-	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Stopping")
-
-	// Test when state is Stopped
-	err = server.fsm.SetState(finitestate.StatusStopped)
-	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Stopped")
-
-	// Test when state is Error
-	err = server.fsm.SetState(finitestate.StatusError)
-	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Error")
 }
