@@ -181,3 +181,41 @@ func TestWaitForState(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 	require.Equal(t, finitestate.StatusStopping, server.GetState())
 }
+
+// TestIsRunning verifies that IsRunning returns the correct value based on the state
+func TestIsRunning(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+
+	// Test when state is not running
+	err := server.fsm.SetState(finitestate.StatusNew)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is New")
+
+	// Test when state is Booting
+	err = server.fsm.SetState(finitestate.StatusBooting)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Booting")
+
+	// Test when state is Running
+	err = server.fsm.SetState(finitestate.StatusRunning)
+	require.NoError(t, err)
+	assert.True(t, server.IsRunning(), "Should return true when state is Running")
+
+	// Test when state is Stopping
+	err = server.fsm.SetState(finitestate.StatusStopping)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Stopping")
+
+	// Test when state is Stopped
+	err = server.fsm.SetState(finitestate.StatusStopped)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Stopped")
+
+	// Test when state is Error
+	err = server.fsm.SetState(finitestate.StatusError)
+	require.NoError(t, err)
+	assert.False(t, server.IsRunning(), "Should return false when state is Error")
+}

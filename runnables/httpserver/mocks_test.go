@@ -70,6 +70,10 @@ type MockRunner struct {
 	storedConfig *Config
 	mockFSM      finitestate.Machine
 	callback     func() (*Config, error)
+	ctx          context.Context
+	// Custom error responses for testing
+	stopServerErr       error
+	setStateErrorCalled bool
 }
 
 // Creates a new MockRunner with mocked config storage
@@ -77,6 +81,7 @@ func NewMockRunner(configCallback func() (*Config, error), fsm finitestate.Machi
 	return &MockRunner{
 		callback: configCallback,
 		mockFSM:  fsm,
+		ctx:      context.Background(),
 	}
 }
 
@@ -128,6 +133,55 @@ func (r *MockRunner) reloadConfig() error {
 
 	r.setConfig(newConfig)
 	return nil
+}
+
+// stopServer is a mock implementation of Runner.stopServer
+func (r *MockRunner) stopServer(ctx context.Context) error {
+	return r.stopServerErr
+}
+
+// setStateError is a mock implementation of Runner.setStateError
+func (r *MockRunner) setStateError() {
+	r.setStateErrorCalled = true
+	if err := r.mockFSM.SetState(finitestate.StatusError); err != nil {
+		// In test code, we just panic on state machine errors to make failures obvious
+		panic(fmt.Sprintf("Failed to set error state: %v", err))
+	}
+}
+
+// Reload is a simplified implementation of the Runner.Reload method for testing
+func (r *MockRunner) Reload() {
+	// Attempt to transition to reloading state
+	if err := r.mockFSM.Transition(finitestate.StatusReloading); err != nil {
+		return
+	}
+
+	// Try to reload config
+	err := r.reloadConfig()
+	if err != nil {
+		if errors.Is(err, ErrOldConfig) {
+			// Config unchanged, go back to running
+			if stateErr := r.mockFSM.Transition(finitestate.StatusRunning); stateErr != nil {
+				r.setStateError()
+			}
+			return
+		}
+		r.setStateError()
+		return
+	}
+
+	// Try to stop server
+	if err := r.stopServer(r.ctx); err != nil {
+		r.setStateError()
+		return
+	}
+
+	// For testing, we'll skip the actual boot() step
+	// just transition to running state
+	if err := r.mockFSM.Transition(finitestate.StatusRunning); err != nil {
+		r.setStateError()
+		return
+	}
 }
 
 // MockHttpServer is a mock implementation of the HttpServer interface
