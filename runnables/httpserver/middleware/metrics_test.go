@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,7 +12,6 @@ import (
 func createStatusHandler(t *testing.T, status int, message string) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(1 * time.Millisecond) // Ensure we get some duration
 		w.WriteHeader(status)
 		n, err := w.Write([]byte(message))
 		assert.NoError(t, err)
