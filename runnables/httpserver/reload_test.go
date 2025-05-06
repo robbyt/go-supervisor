@@ -70,7 +70,6 @@ func TestRapidReload(t *testing.T) {
 		<-done
 	})
 
-	// Wait for the server to start
 	// Wait for server to start
 	require.Eventually(t, func() bool {
 		return server.GetState() == finitestate.StatusRunning
@@ -240,7 +239,6 @@ func TestReload(t *testing.T) {
 			close(errChan)
 		}()
 
-		// Give the server a moment to start
 		// Wait for the server to start
 		require.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
@@ -253,22 +251,10 @@ func TestReload(t *testing.T) {
 		server.Reload()
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
-		// Give the state change time to propagate
 		// Wait for state change to propagate
 		require.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
 		}, 2*time.Second, 10*time.Millisecond)
-		// Verify that the server transitioned to error state
-		// Try a few times with a short delay between attempts
-		var stateAfter string
-		for i := 0; i < 5; i++ {
-			stateAfter = server.GetState()
-			if stateAfter == finitestate.StatusError {
-				break
-			}
-			// No need to sleep in a loop, just continue
-		}
-		require.Equal(t, finitestate.StatusError, stateAfter, "Server should be in error state")
 
 		// Verify that the original handler still works (server doesn't stop on reload error)
 		resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
@@ -391,7 +377,6 @@ func TestReload(t *testing.T) {
 		// Call Reload to apply the new configuration
 		server.Reload()
 
-		// Give the reload time to complete
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
@@ -479,7 +464,6 @@ func TestReload(t *testing.T) {
 			<-done
 		})
 
-		// Give the server a moment to start
 		// Wait for the server to start
 		require.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
