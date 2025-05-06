@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -532,4 +533,179 @@ func TestApplyMiddlewares(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "applied", resp.Header.Get("X-Middleware-1"))
 	assert.Equal(t, "applied", resp.Header.Get("X-Middleware-2"))
+}
+
+func TestNewRouteWithMiddleware(t *testing.T) {
+	t.Parallel()
+
+	// Create a test handler
+	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("test response"))
+		if err != nil {
+			http.Error(w, "Failed to write response", http.StatusInternalServerError)
+			return
+		}
+	})
+
+	// Create middleware that adds headers
+	middleware1 := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Middleware-1", "applied")
+			next(w, r)
+		}
+	})
+
+	middleware2 := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Middleware-2", "applied")
+			next(w, r)
+		}
+	})
+
+	tests := []struct {
+		name        string
+		routeName   string
+		path        string
+		handler     http.HandlerFunc
+		middlewares []middleware.Middleware
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid Route with Middlewares",
+			routeName:   "test-route",
+			path:        "/test",
+			handler:     testHandler,
+			middlewares: []middleware.Middleware{middleware1, middleware2},
+			expectError: false,
+		},
+		{
+			name:        "Valid Route with No Middlewares",
+			routeName:   "test-route",
+			path:        "/test",
+			handler:     testHandler,
+			middlewares: []middleware.Middleware{},
+			expectError: false,
+		},
+		{
+			name:        "Empty Name",
+			routeName:   "",
+			path:        "/test",
+			handler:     testHandler,
+			middlewares: []middleware.Middleware{middleware1},
+			expectError: true,
+			errorMsg:    "name cannot be empty",
+		},
+		{
+			name:        "Empty Path",
+			routeName:   "test-route",
+			path:        "",
+			handler:     testHandler,
+			middlewares: []middleware.Middleware{middleware1},
+			expectError: true,
+			errorMsg:    "path cannot be empty",
+		},
+		{
+			name:        "Nil Handler",
+			routeName:   "test-route",
+			path:        "/test",
+			handler:     nil,
+			middlewares: []middleware.Middleware{middleware1},
+			expectError: true,
+			errorMsg:    "handler cannot be nil",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route, err := NewRouteWithMiddleware(
+				tt.routeName,
+				tt.path,
+				tt.handler,
+				tt.middlewares...)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, route)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, route)
+				assert.Equal(t, tt.routeName, route.name)
+				assert.Equal(t, tt.path, route.Path)
+				assert.NotNil(t, route.Handler)
+
+				// Test the handler with a sample request to verify middleware applied
+				req := httptest.NewRequest("GET", tt.path, nil)
+				w := httptest.NewRecorder()
+				route.Handler(w, req)
+				resp := w.Result()
+				defer func() { assert.NoError(t, resp.Body.Close()) }()
+
+				assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+				// Verify middlewares were applied in the correct order
+				if len(tt.middlewares) > 0 {
+					assert.Equal(t, "applied", resp.Header.Get("X-Middleware-1"))
+				}
+				if len(tt.middlewares) > 1 {
+					assert.Equal(t, "applied", resp.Header.Get("X-Middleware-2"))
+				}
+			}
+		})
+	}
+
+	// Test middleware execution order
+	t.Run("Middleware Execution Order", func(t *testing.T) {
+		t.Parallel()
+
+		var executionOrder []string
+
+		testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			executionOrder = append(executionOrder, "handler")
+			w.WriteHeader(http.StatusOK)
+		})
+
+		middlewareA := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				executionOrder = append(executionOrder, "middlewareA-before")
+				next(w, r)
+				executionOrder = append(executionOrder, "middlewareA-after")
+			}
+		})
+
+		middlewareB := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				executionOrder = append(executionOrder, "middlewareB-before")
+				next(w, r)
+				executionOrder = append(executionOrder, "middlewareB-after")
+			}
+		})
+
+		route, err := NewRouteWithMiddleware(
+			"order-test",
+			"/order-test",
+			testHandler,
+			middlewareA,
+			middlewareB,
+		)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest("GET", "/order-test", nil)
+		w := httptest.NewRecorder()
+		route.Handler(w, req)
+
+		// The expected order is: middlewareA before, middlewareB before, handler, middlewareB after, middlewareA after
+		expectedOrder := []string{
+			"middlewareA-before",
+			"middlewareB-before",
+			"handler",
+			"middlewareB-after",
+			"middlewareA-after",
+		}
+		assert.Equal(t, expectedOrder, executionOrder)
+	})
 }

@@ -300,6 +300,49 @@ func TestReloadConfig_EdgeCases(t *testing.T) {
 	})
 }
 
+// TestReloadWithStopServerError tests that the reload process fails gracefully
+// when the stopServer method returns an error
+func TestReloadWithStopServerError(t *testing.T) {
+	t.Parallel()
+
+	// Create initial and modified configs
+	initialConfig := createSimpleConfigForMock(t, ":8300")
+	modifiedConfig := createModifiedConfigForMock(t, ":8300")
+
+	// Create a mock FSM that can transition to any state for testing
+	mockFSM := new(MockStateMachine)
+	mockFSM.On("Transition", finitestate.StatusReloading).Return(nil)
+	mockFSM.On("Transition", finitestate.StatusRunning).Return(nil)
+	mockFSM.On("SetState", finitestate.StatusError).Return(nil)
+	mockFSM.On("GetState").Return(finitestate.StatusRunning)
+
+	// Create config callback that returns different configs
+	configCalled := false
+	configCallback := func() (*Config, error) {
+		if !configCalled {
+			configCalled = true
+			return initialConfig, nil
+		}
+		return modifiedConfig, nil
+	}
+
+	// Create MockRunner with mocked dependencies
+	runner := NewMockRunner(configCallback, mockFSM)
+	runner.stopServerErr = errors.New("intentional stopServer failure")
+
+	// Load the initial config
+	err := runner.reloadConfig()
+	assert.NoError(t, err)
+	assert.Same(t, initialConfig, runner.getConfig())
+
+	// Perform reload which should fail when stopServer is called
+	runner.Reload()
+
+	// Verify error state was set
+	assert.True(t, runner.setStateErrorCalled, "setStateError should have been called")
+	mockFSM.AssertCalled(t, "SetState", finitestate.StatusError)
+}
+
 // TestReloadConfig_WithFullRunner tests the reloadConfig method with a real Runner
 func TestReloadConfig_WithFullRunner(t *testing.T) {
 	t.Parallel()

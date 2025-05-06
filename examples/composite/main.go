@@ -104,6 +104,4 @@ func main() {
 		logger.Error("Supervisor failed", "error", err)
 		os.Exit(1)
 	}
-
-	logger.Info("Supervisor shut down gracefully")
 }

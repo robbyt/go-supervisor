@@ -1,8 +1,10 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 )
@@ -12,12 +14,19 @@ type ServerCreator func(addr string, handler http.Handler, cfg *Config) HttpServ
 
 // DefaultServerCreator creates a standard http.Server instance with the settings from Config
 func DefaultServerCreator(addr string, handler http.Handler, cfg *Config) HttpServer {
+	// Determine which context to use
+	ctx := cfg.context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	return &http.Server{
 		Addr:         addr,
 		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
+		BaseContext:  func(_ net.Listener) context.Context { return ctx },
 	}
 }
 
@@ -35,6 +44,9 @@ type Config struct {
 
 	// Server creation callback function
 	ServerCreator ServerCreator
+
+	// Context for request handlers
+	context context.Context
 }
 
 // ConfigOption defines a functional option for configuring Config
@@ -77,6 +89,36 @@ func WithServerCreator(creator ServerCreator) ConfigOption {
 	}
 }
 
+// WithRequestContext sets the context that will be propagated to all request handlers
+// via http.Server's BaseContext. This allows handlers to be aware of server shutdown.
+func WithRequestContext(ctx context.Context) ConfigOption {
+	return func(c *Config) {
+		if ctx != nil {
+			c.context = ctx
+		}
+	}
+}
+
+// WithConfigCopy creates a ConfigOption that copies most settings from the source config
+// except for ListenAddr and Routes which must be provided directly to NewConfig.
+func WithConfigCopy(src *Config) ConfigOption {
+	return func(dst *Config) {
+		if src == nil {
+			return
+		}
+
+		// Copy timeout settings
+		dst.DrainTimeout = src.DrainTimeout
+		dst.ReadTimeout = src.ReadTimeout
+		dst.WriteTimeout = src.WriteTimeout
+		dst.IdleTimeout = src.IdleTimeout
+
+		// Copy other settings
+		dst.ServerCreator = src.ServerCreator
+		dst.context = src.context
+	}
+}
+
 // NewConfig creates a new Config with the required address and routes
 // plus any optional configuration via functional options
 func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error) {
@@ -94,6 +136,7 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		WriteTimeout:  15 * time.Second,
 		IdleTimeout:   1 * time.Minute,
 		ServerCreator: DefaultServerCreator,
+		context:       context.Background(),
 	}
 
 	// Apply functional options
