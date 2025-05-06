@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -132,6 +133,7 @@ func TestFunctionalOptions(t *testing.T) {
 		expectIdleTO  time.Duration
 		expectDrainTO time.Duration
 		checkCreator  bool
+		checkContext  bool
 	}{
 		{
 			name:          "DefaultTimeouts",
@@ -141,6 +143,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name:          "CustomReadTimeout",
@@ -150,6 +153,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name:          "CustomWriteTimeout",
@@ -159,6 +163,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name:          "CustomIdleTimeout",
@@ -168,6 +173,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  3 * time.Minute,  // Custom idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name:          "CustomDrainTimeout",
@@ -177,6 +183,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 45 * time.Second, // Custom drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name: "CustomServerCreator",
@@ -190,6 +197,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  true,
+			checkContext:  false,
 		},
 		{
 			name: "MultipleCombinedOptions",
@@ -204,6 +212,7 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  2 * time.Minute,  // Custom idle timeout
 			expectDrainTO: 10 * time.Second, // Custom drain timeout
 			checkCreator:  false,
+			checkContext:  false,
 		},
 		{
 			name:          "NilServerCreator",
@@ -213,6 +222,27 @@ func TestFunctionalOptions(t *testing.T) {
 			expectIdleTO:  1 * time.Minute,  // Default idle timeout
 			expectDrainTO: 30 * time.Second, // Default drain timeout
 			checkCreator:  false,            // Should use the default creator
+			checkContext:  false,
+		},
+		{
+			name:          "WithRequestContext",
+			opts:          []ConfigOption{WithRequestContext(context.Background())},
+			expectReadTO:  15 * time.Second, // Default read timeout
+			expectWriteTO: 15 * time.Second, // Default write timeout
+			expectIdleTO:  1 * time.Minute,  // Default idle timeout
+			expectDrainTO: 30 * time.Second, // Default drain timeout
+			checkCreator:  false,
+			checkContext:  true,
+		},
+		{
+			name:          "WithRequestContextNil",
+			opts:          []ConfigOption{WithRequestContext(context.Background())},
+			expectReadTO:  15 * time.Second, // Default read timeout
+			expectWriteTO: 15 * time.Second, // Default write timeout
+			expectIdleTO:  1 * time.Minute,  // Default idle timeout
+			expectDrainTO: 30 * time.Second, // Default drain timeout
+			checkCreator:  false,
+			checkContext:  true,
 		},
 	}
 
@@ -243,6 +273,13 @@ func TestFunctionalOptions(t *testing.T) {
 					fmt.Sprintf("%p", DefaultServerCreator),
 					fmt.Sprintf("%p", config.ServerCreator),
 					"ServerCreator should be DefaultServerCreator when nil is provided")
+			}
+
+			// Verify context if applicable
+			if tt.checkContext {
+				assert.NotNil(t, config.context, "Context should not be nil when set")
+			} else if tt.name == "WithRequestContextNil" {
+				assert.NotNil(t, config.context, "Context should not be nil")
 			}
 		})
 	}
@@ -319,7 +356,11 @@ func TestConfigEqual(t *testing.T) {
 			Handler: handler,
 		},
 	}
-	baseConfig, err := NewConfig(":8080", baseRoutes, WithDrainTimeout(30*time.Second))
+	baseConfig, err := NewConfig(":8080", baseRoutes,
+		WithDrainTimeout(30*time.Second),
+		WithReadTimeout(15*time.Second),
+		WithWriteTimeout(15*time.Second),
+		WithIdleTimeout(1*time.Minute))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -340,6 +381,9 @@ func TestConfigEqual(t *testing.T) {
 			config2: &Config{
 				ListenAddr:   ":9090",
 				DrainTimeout: 30 * time.Second,
+				ReadTimeout:  15 * time.Second,
+				WriteTimeout: 15 * time.Second,
+				IdleTimeout:  1 * time.Minute,
 				Routes:       baseRoutes,
 			},
 			expected: false,
@@ -350,6 +394,9 @@ func TestConfigEqual(t *testing.T) {
 			config2: &Config{
 				ListenAddr:   ":8080",
 				DrainTimeout: 15 * time.Second,
+				ReadTimeout:  15 * time.Second,
+				WriteTimeout: 15 * time.Second,
+				IdleTimeout:  1 * time.Minute,
 				Routes:       baseRoutes,
 			},
 			expected: false,
@@ -360,6 +407,9 @@ func TestConfigEqual(t *testing.T) {
 			config2: &Config{
 				ListenAddr:   ":8080",
 				DrainTimeout: 30 * time.Second,
+				ReadTimeout:  15 * time.Second,
+				WriteTimeout: 15 * time.Second,
+				IdleTimeout:  1 * time.Minute,
 				Routes: Routes{
 					{
 						name:    "v2",
@@ -376,6 +426,32 @@ func TestConfigEqual(t *testing.T) {
 			config2:  nil,
 			expected: false,
 		},
+		{
+			name:    "Different read timeout",
+			config1: baseConfig,
+			config2: &Config{
+				ListenAddr:   ":8080",
+				DrainTimeout: 30 * time.Second,
+				ReadTimeout:  30 * time.Second, // Different read timeout
+				WriteTimeout: 15 * time.Second,
+				IdleTimeout:  1 * time.Minute,
+				Routes:       baseRoutes,
+			},
+			expected: false,
+		},
+		{
+			name:    "Different write timeout",
+			config1: baseConfig,
+			config2: &Config{
+				ListenAddr:   ":8080",
+				DrainTimeout: 30 * time.Second,
+				ReadTimeout:  15 * time.Second,
+				WriteTimeout: 30 * time.Second, // Different write timeout
+				IdleTimeout:  1 * time.Minute,
+				Routes:       baseRoutes,
+			},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -384,6 +460,134 @@ func TestConfigEqual(t *testing.T) {
 			t.Parallel()
 			result := tt.config1.Equal(tt.config2)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestWithConfigCopy tests that the WithConfigCopy option correctly copies settings
+func TestWithConfigCopy(t *testing.T) {
+	t.Parallel()
+
+	// Create a handler for testing
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+
+	// Define a custom context key type to avoid collisions
+	type contextKey string
+	testKey := contextKey("test")
+
+	// Create a custom context
+	ctx := context.WithValue(context.Background(), testKey, "value")
+
+	// Create a custom server creator
+	customCreator := func(addr string, handler http.Handler, cfg *Config) HttpServer {
+		return &http.Server{Addr: addr, Handler: handler}
+	}
+
+	// Create source config with custom settings
+	sourceRoutes := Routes{
+		{
+			name:    "source",
+			Path:    "/source",
+			Handler: handler,
+		},
+	}
+	sourceConfig, err := NewConfig(":8080", sourceRoutes,
+		WithDrainTimeout(45*time.Second),
+		WithReadTimeout(30*time.Second),
+		WithWriteTimeout(25*time.Second),
+		WithIdleTimeout(2*time.Minute),
+		WithServerCreator(customCreator),
+		WithRequestContext(ctx),
+	)
+	require.NoError(t, err)
+
+	// Create destination routes
+	destRoutes := Routes{
+		{
+			name:    "dest",
+			Path:    "/dest",
+			Handler: handler,
+		},
+	}
+
+	// Test cases
+	tests := []struct {
+		name           string
+		sourceConfig   *Config
+		options        []ConfigOption
+		expectCopied   bool
+		checkNilSource bool
+	}{
+		{
+			name:         "Copy all settings",
+			sourceConfig: sourceConfig,
+			options:      []ConfigOption{WithConfigCopy(sourceConfig)},
+			expectCopied: true,
+		},
+		{
+			name:           "Nil source config",
+			sourceConfig:   nil,
+			options:        []ConfigOption{WithConfigCopy(nil)},
+			expectCopied:   false,
+			checkNilSource: true,
+		},
+		{
+			name:         "Copy and override",
+			sourceConfig: sourceConfig,
+			options: []ConfigOption{
+				WithConfigCopy(sourceConfig),
+				WithDrainTimeout(10 * time.Second), // Override drain timeout
+			},
+			expectCopied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // Capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create a new config using WithConfigCopy
+			destConfig, err := NewConfig(":9090", destRoutes, tt.options...)
+			require.NoError(t, err)
+
+			// Special case for nil source config
+			if tt.checkNilSource {
+				// Should have default values
+				assert.Equal(t, 30*time.Second, destConfig.DrainTimeout)
+				assert.Equal(t, 15*time.Second, destConfig.ReadTimeout)
+				assert.Equal(t, 15*time.Second, destConfig.WriteTimeout)
+				assert.Equal(t, 1*time.Minute, destConfig.IdleTimeout)
+				return
+			}
+
+			if tt.expectCopied {
+				if len(tt.options) == 1 { // Only WithConfigCopy
+					// Check that timeouts were copied
+					assert.Equal(t, sourceConfig.DrainTimeout, destConfig.DrainTimeout)
+					assert.Equal(t, sourceConfig.ReadTimeout, destConfig.ReadTimeout)
+					assert.Equal(t, sourceConfig.WriteTimeout, destConfig.WriteTimeout)
+					assert.Equal(t, sourceConfig.IdleTimeout, destConfig.IdleTimeout)
+
+					// Check that ServerCreator was copied
+					assert.Equal(t,
+						fmt.Sprintf("%p", sourceConfig.ServerCreator),
+						fmt.Sprintf("%p", destConfig.ServerCreator))
+
+					// Check that context was copied
+					assert.Equal(t, sourceConfig.context, destConfig.context)
+				} else { // WithConfigCopy + overrides
+					// Check that all values except the overridden one were copied
+					assert.NotEqual(t, sourceConfig.DrainTimeout, destConfig.DrainTimeout) // This was overridden
+					assert.Equal(t, sourceConfig.ReadTimeout, destConfig.ReadTimeout)
+					assert.Equal(t, sourceConfig.WriteTimeout, destConfig.WriteTimeout)
+					assert.Equal(t, sourceConfig.IdleTimeout, destConfig.IdleTimeout)
+				}
+
+				// Verify that ListenAddr and Routes were NOT copied
+				assert.NotEqual(t, sourceConfig.ListenAddr, destConfig.ListenAddr)
+				assert.NotEqual(t, sourceConfig.Routes, destConfig.Routes)
+			}
 		})
 	}
 }

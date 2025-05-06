@@ -709,3 +709,78 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		mockRunnable.AssertExpectations(t)
 	})
 }
+
+// TestPIDZero_Run_StateMonitor tests that the state monitor is started for stateable runnables
+func TestPIDZero_Run_StateMonitor(t *testing.T) {
+	t.Parallel()
+
+	// Create a mock stateable runnable
+	mockStateable := mocks.NewMockRunnableWithStatable()
+	mockStateable.On("String").Return("stateable-runnable").Maybe()
+	mockStateable.On("Run", mock.Anything).Return(nil)
+	mockStateable.On("Stop").Once()
+	mockStateable.On("GetState").Return("initial").Once()  // Initial state
+	mockStateable.On("GetState").Return("running").Maybe() // Called during shutdown
+
+	stateChan := make(chan string, 5) // Buffered to prevent blocking
+	mockStateable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+
+	// Will be called during startup verification
+	mockStateable.On("IsRunning").Return(true).Once()
+
+	// Create context with timeout to ensure test completion
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Create supervisor with the mock runnable
+	pid0, err := New(
+		WithContext(ctx),
+		WithRunnables(mockStateable),
+		WithStartupTimeout(100*time.Millisecond),
+	)
+	require.NoError(t, err)
+
+	// Create a state subscriber to verify state broadcasts
+	stateUpdates := make(chan StateMap, 5)
+	pid0.AddStateSubscriber(stateUpdates)
+
+	// Start the supervisor in a goroutine
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pid0.Run()
+	}()
+
+	// Allow time for initialization
+	time.Sleep(50 * time.Millisecond)
+
+	// Send state updates through the channel
+	stateChan <- "initial"  // This should be discarded as it's the initial state
+	stateChan <- "running"  // This will be processed
+	stateChan <- "stopping" // Additional state change
+
+	// Use require.Eventually to verify the state monitor receives and broadcasts states
+	require.Eventually(t, func() bool {
+		// Check if we have received at least one state update
+		select {
+		case stateMap := <-stateUpdates:
+			// We don't check for specific values, just that broadcasts are happening
+			return stateMap["stateable-runnable"] != ""
+		default:
+			return false
+		}
+	}, 500*time.Millisecond, 50*time.Millisecond, "No state updates received")
+
+	// Cancel the context to shut down the supervisor
+	cancel()
+
+	// Verify the supervisor shuts down cleanly
+	select {
+	case err := <-execDone:
+		assert.NoError(t, err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Supervisor did not shut down in time")
+	}
+
+	// Verify expectations
+	mockStateable.AssertExpectations(t)
+}

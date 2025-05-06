@@ -29,8 +29,13 @@ import (
 )
 
 const (
-	DefaultStartupTimeout = 2 * time.Minute       // Default max timeout for startup
+	DefaultStartupTimeout = 2 * time.Minute       // Default per-Runnable max timeout for startup
 	DefaultStartupInitial = 50 * time.Millisecond // Initial wait time for startup
+
+	// DefaultShutdownTimeout is the TOTAL timeout for waiting on all supervisor goroutines
+	// (including external runnables) to complete during shutdown, *after* Stop() has been called
+	// on all of the runnables.
+	DefaultShutdownTimeout = 2 * time.Minute
 )
 
 // PIDZero manages multiple "runnables" and handles OS signals for HUP or graceful shutdown.
@@ -49,8 +54,9 @@ type PIDZero struct {
 	stateSubscribers   sync.Map
 	subscriberMutex    sync.Mutex
 
-	startupTimeout time.Duration
-	startupInitial time.Duration
+	startupTimeout  time.Duration
+	startupInitial  time.Duration
+	shutdownTimeout time.Duration
 
 	logger *slog.Logger
 }
@@ -116,6 +122,17 @@ func WithStartupInitial(initial time.Duration) Option {
 	}
 }
 
+// WithShutdownTimeout sets the timeout for graceful shutdown of all runnables.
+// If the timeout is reached before all runnables have completed their shutdown,
+// the supervisor will log a warning but continue with the shutdown process.
+func WithShutdownTimeout(timeout time.Duration) Option {
+	return func(p *PIDZero) {
+		if timeout > 0 {
+			p.shutdownTimeout = timeout
+		}
+	}
+}
+
 // New creates a new PIDZero instance with the provided options.
 func New(opts ...Option) (*PIDZero, error) {
 	// Load the default logger and append the Supervisor group
@@ -140,6 +157,7 @@ func New(opts ...Option) (*PIDZero, error) {
 		reloadListener:   make(chan struct{}),
 		startupTimeout:   DefaultStartupTimeout,
 		startupInitial:   DefaultStartupInitial,
+		shutdownTimeout:  DefaultShutdownTimeout,
 		logger:           logger,
 	}
 
@@ -266,9 +284,15 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 	}
 }
 
-// Shutdown gracefully shuts down all runnables and cleans up resources.
+// Shutdown stops all runnables in reverse initialization order and attempts
+// to wait for their goroutines to complete. Each runnable's Stop method will
+// always be called regardless of timeouts. However, if shutdownTimeout is
+// configured and exceeded, this function will return before all goroutines
+// complete, potentially causing unclean termination if the program exits
+// immediately afterward.
 func (p *PIDZero) Shutdown() {
 	p.shutdownOnce.Do(func() {
+		shutdownStart := time.Now()
 		p.logger.Info("Graceful shutdown has been initiated...")
 		signal.Stop(p.SignalChan) // stop listening for new signals
 
@@ -282,8 +306,10 @@ func (p *PIDZero) Shutdown() {
 				p.logger.Debug("Pre-shutdown state", "runnable", r, "state", currentState)
 			}
 
+			runnableStart := time.Now()
 			p.logger.Debug("Stopping", "runnable", r)
 			r.Stop()
+			stopDuration := time.Since(runnableStart)
 
 			// Log the state after stopping if available
 			if stateable, ok := r.(Stateable); ok {
@@ -291,14 +317,40 @@ func (p *PIDZero) Shutdown() {
 				p.stateMap.Store(r, finalState)
 				p.logger.Debug("Post-shutdown state", "runnable", r, "state", finalState)
 			}
+
+			p.logger.Debug("Runnable stopped", "runnable", r, "duration", stopDuration)
 		}
 
 		p.logger.Debug("Waiting for runnables to complete...")
-		p.cancel()         // cancel the context, to close any other remaining goroutines
-		p.wg.Wait()        // block here until all runnables have stopped
+		p.cancel() // cancel the context for any remaining goroutines
+
+		// Set up a timeout for wait if configured
+		if p.shutdownTimeout > 0 {
+			// Create a channel to signal when wg.Wait() completes
+			done := make(chan struct{})
+			go func() {
+				p.wg.Wait()
+				close(done)
+			}()
+
+			// Wait for either completion or timeout
+			select {
+			case <-done:
+				p.logger.Debug("All goroutines completed")
+			case <-time.After(p.shutdownTimeout):
+				p.logger.Warn("Shutdown timeout exceeded waiting for goroutines",
+					"timeout", p.shutdownTimeout,
+					"elapsed", time.Since(shutdownStart))
+			}
+		} else {
+			// No timeout configured, just wait
+			p.wg.Wait()
+		}
+
 		close(p.errorChan) // close the error channel, since no runnables can send errors
 
-		p.logger.Debug("Shutdown complete.")
+		totalShutdownTime := time.Since(shutdownStart)
+		p.logger.Debug("Shutdown complete", "duration", totalShutdownTime)
 	})
 }
 

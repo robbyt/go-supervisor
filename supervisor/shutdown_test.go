@@ -154,3 +154,132 @@ func TestPIDZero_StartShutdownManager_NoSenders(t *testing.T) {
 	// No ShutdownSender specific mock expectations to verify
 	nonSenderRunnable.AssertExpectations(t) // Assert expectations for Run/Stop/String if set
 }
+
+// TestPIDZero_Shutdown_WithTimeoutNotExceeded verifies that shutdown completes
+// successfully when runnables finish within the configured timeout.
+func TestPIDZero_Shutdown_WithTimeoutNotExceeded(t *testing.T) {
+	t.Parallel()
+
+	// Create a blocking channel that will be closed when Stop is called
+	stopCalled := make(chan struct{})
+
+	// Create a mock service that blocks in Run until Stop is called
+	runnable := mocks.NewMockRunnable()
+
+	// Configure Run to block until Stop is called
+	runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		// Block until stopCalled is closed
+		<-stopCalled
+	})
+
+	// Configure Stop to unblock the Run method
+	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
+		close(stopCalled)
+	})
+
+	runnable.On("String").Return("blockingRunnable").Maybe()
+
+	// Create supervisor with reasonable timeout
+	pidZero, err := New(
+		WithRunnables(runnable),
+		WithShutdownTimeout(2*time.Second),
+	)
+	assert.NoError(t, err)
+
+	// Run the supervisor
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pidZero.Run()
+	}()
+
+	// Let Run method start
+	time.Sleep(200 * time.Millisecond)
+
+	shutdownStart := time.Now()
+	pidZero.Shutdown()
+	shutdownDuration := time.Since(shutdownStart)
+
+	assert.Less(t, shutdownDuration, 1*time.Second,
+		"Shutdown took too long: %v", shutdownDuration)
+
+	select {
+	case err := <-execDone:
+		assert.NoError(t, err)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Run did not complete after shutdown")
+	}
+
+	runnable.AssertExpectations(t)
+}
+
+// TestPIDZero_Shutdown_WithTimeoutExceeded verifies that shutdown still completes
+// but logs a warning when the timeout is exceeded by goroutines that don't stop timely.
+func TestPIDZero_Shutdown_WithTimeoutExceeded(t *testing.T) {
+	t.Parallel()
+
+	// Create a blocking channel that will NOT be closed by Stop
+	// to simulate a runnable that doesn't terminate quickly
+	stopCalled := make(chan struct{})
+	shutdownComplete := make(chan struct{})
+
+	// Create a mock service that blocks in Run indefinitely
+	runnable := mocks.NewMockRunnable()
+
+	// Configure Run to block indefinitely
+	runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		// Block until stopCalled is closed (which won't happen in this test)
+		select {
+		case <-stopCalled:
+			// This won't happen
+		case <-shutdownComplete:
+			// This will happen after shutdown completes
+			// We need this to prevent the goroutine from leaking
+		}
+	})
+
+	// Configure Stop to NOT unblock the Run method
+	// This simulates a runnable that's slow to finish
+	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
+		// Do not close stopCalled channel, simulating a stuck runnable
+		time.Sleep(50 * time.Millisecond) // Fast return from Stop itself
+	})
+
+	runnable.On("String").Return("stuckRunnable").Maybe()
+
+	// Create supervisor with very short timeout
+	pidZero, err := New(
+		WithRunnables(runnable),
+		WithShutdownTimeout(200*time.Millisecond), // Shorter than our test duration
+	)
+	assert.NoError(t, err)
+
+	// Run the supervisor
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pidZero.Run()
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	shutdownStart := time.Now()
+	shutdownDone := make(chan struct{})
+	go func() {
+		pidZero.Shutdown()
+		close(shutdownDone)
+	}()
+
+	select {
+	case <-shutdownDone:
+		shutdownDuration := time.Since(shutdownStart)
+
+		assert.GreaterOrEqual(t, shutdownDuration, 200*time.Millisecond,
+			"Shutdown returned too quickly: %v", shutdownDuration)
+		assert.Less(t, shutdownDuration, 500*time.Millisecond,
+			"Shutdown took too long: %v", shutdownDuration)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Shutdown did not complete despite timeout")
+	}
+
+	close(shutdownComplete) // Prevent goroutine leak
+	runnable.AssertExpectations(t)
+}

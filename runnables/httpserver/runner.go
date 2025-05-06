@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -186,23 +187,84 @@ func (r *Runner) Stop() {
 	r.cancel()
 }
 
+// serverReadinessProbe checks if the HTTP server is listening and accepting connections
+// by attempting to establish a TCP connection to the server's address
+func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
+	// Create a dialer with timeout
+	dialer := &net.Dialer{
+		Timeout: 100 * time.Millisecond,
+	}
+
+	// Set up a timeout context for the entire probe operation
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Retry loop - attempt to connect until success or timeout
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-probeCtx.Done():
+			return fmt.Errorf("server readiness probe timed out: %w", probeCtx.Err())
+		case <-ticker.C:
+			// Attempt to establish a TCP connection
+			conn, err := dialer.DialContext(ctx, "tcp", addr)
+			if err == nil {
+				// Connection successful, server is accepting connections
+				if err := conn.Close(); err != nil {
+					r.logger.Warn("Error closing connection", "error", err)
+				}
+				return nil
+			}
+
+			// Connection failed, log and retry
+			r.logger.Debug("Server not ready yet, retrying", "error", err)
+		}
+	}
+}
+
 func (r *Runner) boot() error {
-	cfg := r.getConfig()
-	if cfg == nil {
+	originalCfg := r.getConfig()
+	if originalCfg == nil {
 		return errors.New("failed to retrieve config")
 	}
 
-	// Use the Config's CreateServer callback to create the HttpServer implementation
-	r.server = cfg.createServer()
+	// Create a new Config with the same settings but use the Runner's context
+	serverCfg, err := NewConfig(
+		originalCfg.ListenAddr,
+		originalCfg.Routes,
+		WithConfigCopy(originalCfg), // Copy all other settings
+		WithRequestContext(r.ctx),   // Use the Runner's context
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create server config: %w", err)
+	}
 
-	r.logger.Info("Starting HTTP server", "listenOn", cfg.ListenAddr)
+	// Create the server
+	r.server = serverCfg.createServer()
+	listenAddr := serverCfg.ListenAddr
+
+	r.logger.Info("Starting HTTP server", "listenOn", listenAddr)
+
+	// Start the server in a goroutine
 	go func() {
 		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
-		r.logger.Debug("HTTP server stopped", "listenOn", cfg.ListenAddr)
+		r.logger.Debug("HTTP server stopped", "listenOn", listenAddr)
 	}()
 
+	// Wait for the server to be ready or fail
+	if err := r.serverReadinessProbe(r.ctx, listenAddr); err != nil {
+		// If probe fails, attempt to stop the server since it may be partially started
+		if err := r.stopServer(r.ctx); err != nil {
+			r.logger.Warn("Error stopping server", "error", err)
+		}
+		return fmt.Errorf("server failed readiness check: %w", err)
+	}
+
+	r.logger.Debug("HTTP server is ready and accepting connections")
 	return nil
 }
 
