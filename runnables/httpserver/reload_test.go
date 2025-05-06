@@ -131,7 +131,7 @@ func TestRapidReload(t *testing.T) {
 // TestReload tests the Reload method with various configurations
 func TestReload(t *testing.T) {
 	t.Parallel()
-	
+
 	t.Run("Reload fails when boot fails", func(t *testing.T) {
 		// Setup mock server with custom behavior
 		initialPort := getAvailablePort(t, 8000)

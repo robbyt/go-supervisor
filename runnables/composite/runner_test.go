@@ -206,7 +206,9 @@ func TestCompositeRunner_Run(t *testing.T) {
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			// Create a goroutine that will send an error to the serverErrors channel
 			go func() {
-				time.Sleep(50 * time.Millisecond)
+				// Use a timer channel instead of sleep for better testability
+				timer := time.NewTimer(50 * time.Millisecond)
+				<-timer.C
 				capturedRunner.serverErrors <- errors.New("runnable error")
 			}()
 
