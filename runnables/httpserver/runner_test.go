@@ -19,22 +19,9 @@ import (
 // or fails the test if the server doesn't enter the Running state within the timeout
 func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
 	t.Helper()
-	startTime := time.Now()
-
-	for {
-		if time.Since(startTime) > timeout {
-			t.Fatalf(
-				"Server did not reach Running state in time. Current state: %s",
-				server.GetState(),
-			)
-		}
-
-		if server.GetState() == finitestate.StatusRunning {
-			break
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
+	require.Eventually(t, func() bool {
+		return server.GetState() == finitestate.StatusRunning
+	}, timeout, 10*time.Millisecond, "Server did not reach Running state in time. Current state: %s", server.GetState())
 }
 
 // TestRun_ShutdownWithDrainTimeout tests that the server waits for handlers to complete
@@ -88,12 +75,15 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	}()
 
 	// Wait for handler to start, then initiate shutdown
-	select {
-	case <-started:
-		server.Stop()
-	case <-time.After(1 * time.Second):
-		t.Fatal("Handler did not start in time")
-	}
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			server.Stop()
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
 
 	// Measure shutdown time
 	start := time.Now()
@@ -158,12 +148,15 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	}()
 
 	// Wait for handler to start, then initiate shutdown
-	select {
-	case <-started:
-		server.Stop()
-	case <-time.After(1 * time.Second):
-		t.Fatal("Handler did not start in time")
-	}
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			server.Stop()
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
 
 	// Measure shutdown time
 	start := time.Now()

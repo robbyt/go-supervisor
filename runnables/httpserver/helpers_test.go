@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +74,10 @@ func setupTestServer(
 	}()
 
 	// Give the server time to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the server to be ready
+	require.Eventually(t, func() bool {
+		return server.GetState() == finitestate.StatusRunning
+	}, 2*time.Second, 10*time.Millisecond)
 
 	return server, listenPort, done
 }

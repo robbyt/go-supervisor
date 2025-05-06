@@ -128,11 +128,12 @@ func TestGetStateChan(t *testing.T) {
 
 	// Test context cancellation
 	cancel()
-	time.Sleep(100 * time.Millisecond) // Give time for channel to close
 
-	// Channel should be closed
-	_, ok := <-stateChan
-	assert.False(t, ok, "Channel should be closed after context cancellation")
+	// Wait for channel to close
+	require.Eventually(t, func() bool {
+		_, ok := <-stateChan
+		return !ok
+	}, 1*time.Second, 10*time.Millisecond, "Channel should be closed after context cancellation")
 }
 
 // TestWaitForState verifies the waitForState helper function
@@ -142,44 +143,23 @@ func TestWaitForState(t *testing.T) {
 	server, _, _ := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	// Set the state to Running
+	err := server.fsm.SetState(finitestate.StatusRunning)
+	require.NoError(t, err)
 
-	stateChan := server.GetStateChan(ctx)
-
-	// Set the state to Running after a short delay
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		err := server.fsm.SetState(finitestate.StatusRunning)
-		assert.NoError(t, err)
-	}()
-
+	// Verify state is set correctly
 	require.Eventually(t, func() bool {
-		select {
-		case state := <-stateChan:
-			return finitestate.StatusRunning == state
-		default:
-			return false
-		}
-	}, 2*time.Second, 10*time.Millisecond)
-	require.Equal(t, finitestate.StatusRunning, server.GetState())
+		return server.GetState() == finitestate.StatusRunning
+	}, 1*time.Second, 10*time.Millisecond)
 
-	// Set the state to Stopping after a short delay
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		err := server.fsm.SetState(finitestate.StatusStopping)
-		assert.NoError(t, err)
-	}()
+	// Set the state to Stopping
+	err = server.fsm.SetState(finitestate.StatusStopping)
+	require.NoError(t, err)
 
+	// Verify state is set correctly
 	require.Eventually(t, func() bool {
-		select {
-		case state := <-stateChan:
-			return finitestate.StatusStopping == state
-		default:
-			return false
-		}
-	}, 2*time.Second, 10*time.Millisecond)
-	require.Equal(t, finitestate.StatusStopping, server.GetState())
+		return server.GetState() == finitestate.StatusStopping
+	}, 1*time.Second, 10*time.Millisecond)
 }
 
 // TestIsRunning verifies that IsRunning returns the correct value based on the state

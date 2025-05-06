@@ -13,7 +13,12 @@ import (
 func createStatusHandler(t *testing.T, status int, message string) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(1 * time.Millisecond) // Ensure we get some duration
+		// Ensure we get some duration by using a busy loop instead of sleep
+		metricStart := time.Now()
+		// Add processing time to simulate work
+		for time.Since(metricStart) < 1*time.Millisecond {
+		}
+
 		w.WriteHeader(status)
 		n, err := w.Write([]byte(message))
 		assert.NoError(t, err)

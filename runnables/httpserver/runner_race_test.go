@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,7 +88,16 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		}()
 	}
 
-	time.Sleep(1 * time.Second)
+	// Wait for reloads to complete
+	require.Eventually(t, func() bool {
+		// Check if the server is still running
+		resp, err := http.Head("http://localhost" + port + "/test")
+		if err != nil {
+			return false
+		}
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
+		return resp.StatusCode == http.StatusOK
+	}, 2*time.Second, 10*time.Millisecond)
 
 	resp, err := http.Get("http://localhost" + port + "/test")
 	require.NoError(t, err, "Server should still be accepting connections after concurrent reloads")

@@ -113,7 +113,10 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Give the reload time to complete
-		time.Sleep(100 * time.Millisecond)
+		// Wait for reload to complete
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusRunning
+		}, 2*time.Second, 10*time.Millisecond)
 
 		// Verify the config was updated
 		actualCfg := server.getConfig()
@@ -164,7 +167,10 @@ func TestReload(t *testing.T) {
 		})
 
 		// Give the server a moment to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for the server to start
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusRunning
+		}, 2*time.Second, 10*time.Millisecond)
 
 		server.Reload()
 
@@ -236,7 +242,10 @@ func TestReload(t *testing.T) {
 		}()
 
 		// Give the server a moment to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for the server to start
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusRunning
+		}, 2*time.Second, 10*time.Millisecond)
 
 		// Trigger error in config callback
 		errorTriggered = true
@@ -246,8 +255,10 @@ func TestReload(t *testing.T) {
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
 		// Give the state change time to propagate
-		time.Sleep(200 * time.Millisecond)
-
+		// Wait for state change to propagate
+		require.Eventually(t, func() bool {
+			return server.GetState() == finitestate.StatusError
+		}, 2*time.Second, 10*time.Millisecond)
 		// Verify that the server transitioned to error state
 		// Try a few times with a short delay between attempts
 		var stateAfter string
@@ -256,7 +267,7 @@ func TestReload(t *testing.T) {
 			if stateAfter == finitestate.StatusError {
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
+			// No need to sleep in a loop, just continue
 		}
 		require.Equal(t, finitestate.StatusError, stateAfter, "Server should be in error state")
 
@@ -444,7 +455,10 @@ func TestRapidReload(t *testing.T) {
 	})
 
 	// Wait for the server to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to start
+	require.Eventually(t, func() bool {
+		return server.GetState() == finitestate.StatusRunning
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create context for state monitoring
 	stateCtx, stateCancel := context.WithCancel(context.Background())
