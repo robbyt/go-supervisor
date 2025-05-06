@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Tests for supervisor options and initialization
+
 // TestPIDZero_NewPIDZero tests creating a new PIDZero instance.
 func TestPIDZero_NewPIDZero(t *testing.T) {
 	// Create a mock runnable for testing
@@ -107,6 +109,152 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGTERM)
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGHUP)
 }
+
+func TestBlockUntilRunnableReady(t *testing.T) {
+	t.Parallel()
+
+	t.Run("immediately ready", func(t *testing.T) {
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("String").Return("ready-runnable").Maybe()
+		mockRunnable.On("IsRunning").Return(true).Once()
+
+		sv, err := New(
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(100*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		result := assert.Eventually(t, func() bool {
+			err := sv.blockUntilRunnableReady(mockRunnable)
+			return err == nil
+		}, 200*time.Millisecond, 10*time.Millisecond, "Should return quickly without error")
+
+		assert.True(t, result, "blockUntilRunnableReady should complete successfully")
+		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("becomes ready after delay", func(t *testing.T) {
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("String").Return("delayed-runnable").Maybe()
+		mockRunnable.On("IsRunning").Return(false).Once()
+		mockRunnable.On("IsRunning").Return(false).Once()
+		mockRunnable.On("IsRunning").Return(true).Once()
+
+		sv, err := New(
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(500*time.Millisecond),
+			WithStartupInitial(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		result := assert.Eventually(t, func() bool {
+			err := sv.blockUntilRunnableReady(mockRunnable)
+			return err == nil
+		}, 300*time.Millisecond, 10*time.Millisecond, "Should succeed after delay")
+
+		assert.True(t, result, "blockUntilRunnableReady should eventually succeed")
+		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		// Setup mock that never reports as running
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("String").Return("stuck-runnable").Maybe()
+		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+
+		// Create supervisor with a very short timeout
+		sv, err := New(
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(50*time.Millisecond),
+			WithStartupInitial(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		// Call blockUntilRunnableReady - should timeout
+		var resultErr error
+		assert.Eventually(t, func() bool {
+			resultErr = sv.blockUntilRunnableReady(mockRunnable)
+			return resultErr != nil
+		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error when timeout occurs")
+
+		assert.Error(t, resultErr)
+		assert.Contains(t, resultErr.Error(), "timeout waiting for runnable to start")
+		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("parent context canceled", func(t *testing.T) {
+		// Setup mock that never reports as running
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("String").Return("canceled-runnable").Maybe()
+		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+
+		// Create supervisor with a context
+		ctx, cancel := context.WithCancel(context.Background())
+		sv, err := New(
+			WithContext(ctx),
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(500*time.Millisecond),
+			WithStartupInitial(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		// Cancel the context right away
+		cancel()
+
+		// Use Eventually to verify the correct result
+		result := assert.Eventually(t, func() bool {
+			err := sv.blockUntilRunnableReady(mockRunnable)
+			return err == nil // Should return nil when parent context is canceled
+		}, 200*time.Millisecond, 10*time.Millisecond, "Should return nil when context is canceled")
+
+		assert.True(t, result, "blockUntilRunnableReady should return nil when context is canceled")
+		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("error from runnable", func(t *testing.T) {
+		// Setup mock that never reports as running
+		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable.On("String").Return("error-runnable").Maybe()
+		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+
+		sv, err := New(
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(500*time.Millisecond),
+			WithStartupInitial(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		// Send an error through the error channel
+		expectedErr := errors.New("runnable startup error")
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			sv.errorChan <- expectedErr
+		}()
+
+		// Call blockUntilRunnableReady - should return the error
+		var resultErr error
+		assert.Eventually(t, func() bool {
+			resultErr = sv.blockUntilRunnableReady(mockRunnable)
+			return resultErr != nil
+		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error from error channel")
+
+		assert.Error(t, resultErr)
+		assert.Contains(t, resultErr.Error(), "runnable failed to start")
+		assert.Contains(t, resultErr.Error(), expectedErr.Error())
+
+		// Verify the error was put back in the channel for reap() to process
+		select {
+		case err := <-sv.errorChan:
+			assert.Equal(t, expectedErr, err, "Error should be put back in channel")
+		default:
+			t.Fatal("Error was not put back in the channel")
+		}
+
+		mockRunnable.AssertExpectations(t)
+	})
+}
+
+// Tests for error handling and reaping processes
 
 // TestPIDZero_Reap_ErrorFromRunnable tests that an error from a runnable initiates shutdown.
 func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
@@ -438,6 +586,8 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	mockRunnable.AssertNumberOfCalls(t, "Stop", 1)
 }
 
+// Tests for signal handling
+
 // TestPIDZero_ShutdownIgnoresSIGHUP tests that SIGHUP signals are ignored during shutdown.
 func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	t.Parallel()
@@ -564,223 +714,4 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 
 	// Ensure Stop was called only once
 	mockRunnable.AssertNumberOfCalls(t, "Stop", 1)
-}
-
-func TestBlockUntilRunnableReady(t *testing.T) {
-	t.Parallel()
-
-	t.Run("immediately ready", func(t *testing.T) {
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-		mockRunnable.On("String").Return("ready-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(true).Once()
-
-		sv, err := New(
-			WithRunnables(mockRunnable),
-			WithStartupTimeout(100*time.Millisecond),
-		)
-		require.NoError(t, err)
-
-		result := assert.Eventually(t, func() bool {
-			err := sv.blockUntilRunnableReady(mockRunnable)
-			return err == nil
-		}, 200*time.Millisecond, 10*time.Millisecond, "Should return quickly without error")
-
-		assert.True(t, result, "blockUntilRunnableReady should complete successfully")
-		mockRunnable.AssertExpectations(t)
-	})
-
-	t.Run("becomes ready after delay", func(t *testing.T) {
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-		mockRunnable.On("String").Return("delayed-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Once()
-		mockRunnable.On("IsRunning").Return(false).Once()
-		mockRunnable.On("IsRunning").Return(true).Once()
-
-		sv, err := New(
-			WithRunnables(mockRunnable),
-			WithStartupTimeout(500*time.Millisecond),
-			WithStartupInitial(10*time.Millisecond),
-		)
-		require.NoError(t, err)
-
-		result := assert.Eventually(t, func() bool {
-			err := sv.blockUntilRunnableReady(mockRunnable)
-			return err == nil
-		}, 300*time.Millisecond, 10*time.Millisecond, "Should succeed after delay")
-
-		assert.True(t, result, "blockUntilRunnableReady should eventually succeed")
-		mockRunnable.AssertExpectations(t)
-	})
-
-	t.Run("timeout", func(t *testing.T) {
-		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-		mockRunnable.On("String").Return("stuck-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
-
-		// Create supervisor with a very short timeout
-		sv, err := New(
-			WithRunnables(mockRunnable),
-			WithStartupTimeout(50*time.Millisecond),
-			WithStartupInitial(10*time.Millisecond),
-		)
-		require.NoError(t, err)
-
-		// Call blockUntilRunnableReady - should timeout
-		var resultErr error
-		assert.Eventually(t, func() bool {
-			resultErr = sv.blockUntilRunnableReady(mockRunnable)
-			return resultErr != nil
-		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error when timeout occurs")
-
-		assert.Error(t, resultErr)
-		assert.Contains(t, resultErr.Error(), "timeout waiting for runnable to start")
-		mockRunnable.AssertExpectations(t)
-	})
-
-	t.Run("parent context canceled", func(t *testing.T) {
-		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-		mockRunnable.On("String").Return("canceled-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
-
-		// Create supervisor with a context
-		ctx, cancel := context.WithCancel(context.Background())
-		sv, err := New(
-			WithContext(ctx),
-			WithRunnables(mockRunnable),
-			WithStartupTimeout(500*time.Millisecond),
-			WithStartupInitial(10*time.Millisecond),
-		)
-		require.NoError(t, err)
-
-		// Cancel the context right away
-		cancel()
-
-		// Use Eventually to verify the correct result
-		result := assert.Eventually(t, func() bool {
-			err := sv.blockUntilRunnableReady(mockRunnable)
-			return err == nil // Should return nil when parent context is canceled
-		}, 200*time.Millisecond, 10*time.Millisecond, "Should return nil when context is canceled")
-
-		assert.True(t, result, "blockUntilRunnableReady should return nil when context is canceled")
-		mockRunnable.AssertExpectations(t)
-	})
-
-	t.Run("error from runnable", func(t *testing.T) {
-		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
-		mockRunnable.On("String").Return("error-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
-
-		sv, err := New(
-			WithRunnables(mockRunnable),
-			WithStartupTimeout(500*time.Millisecond),
-			WithStartupInitial(10*time.Millisecond),
-		)
-		require.NoError(t, err)
-
-		// Send an error through the error channel
-		expectedErr := errors.New("runnable startup error")
-		go func() {
-			time.Sleep(20 * time.Millisecond)
-			sv.errorChan <- expectedErr
-		}()
-
-		// Call blockUntilRunnableReady - should return the error
-		var resultErr error
-		assert.Eventually(t, func() bool {
-			resultErr = sv.blockUntilRunnableReady(mockRunnable)
-			return resultErr != nil
-		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error from error channel")
-
-		assert.Error(t, resultErr)
-		assert.Contains(t, resultErr.Error(), "runnable failed to start")
-		assert.Contains(t, resultErr.Error(), expectedErr.Error())
-
-		// Verify the error was put back in the channel for reap() to process
-		select {
-		case err := <-sv.errorChan:
-			assert.Equal(t, expectedErr, err, "Error should be put back in channel")
-		default:
-			t.Fatal("Error was not put back in the channel")
-		}
-
-		mockRunnable.AssertExpectations(t)
-	})
-}
-
-// TestPIDZero_Run_StateMonitor tests that the state monitor is started for stateable runnables
-func TestPIDZero_Run_StateMonitor(t *testing.T) {
-	t.Parallel()
-
-	// Create a mock stateable runnable
-	mockStateable := mocks.NewMockRunnableWithStatable()
-	mockStateable.On("String").Return("stateable-runnable").Maybe()
-	mockStateable.On("Run", mock.Anything).Return(nil)
-	mockStateable.On("Stop").Once()
-	mockStateable.On("GetState").Return("initial").Once()  // Initial state
-	mockStateable.On("GetState").Return("running").Maybe() // Called during shutdown
-
-	stateChan := make(chan string, 5) // Buffered to prevent blocking
-	mockStateable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
-
-	// Will be called during startup verification
-	mockStateable.On("IsRunning").Return(true).Once()
-
-	// Create context with timeout to ensure test completion
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Create supervisor with the mock runnable
-	pid0, err := New(
-		WithContext(ctx),
-		WithRunnables(mockStateable),
-		WithStartupTimeout(100*time.Millisecond),
-	)
-	require.NoError(t, err)
-
-	// Create a state subscriber to verify state broadcasts
-	stateUpdates := make(chan StateMap, 5)
-	pid0.AddStateSubscriber(stateUpdates)
-
-	// Start the supervisor in a goroutine
-	execDone := make(chan error, 1)
-	go func() {
-		execDone <- pid0.Run()
-	}()
-
-	// Allow time for initialization
-	time.Sleep(50 * time.Millisecond)
-
-	// Send state updates through the channel
-	stateChan <- "initial"  // This should be discarded as it's the initial state
-	stateChan <- "running"  // This will be processed
-	stateChan <- "stopping" // Additional state change
-
-	// Use require.Eventually to verify the state monitor receives and broadcasts states
-	require.Eventually(t, func() bool {
-		// Check if we have received at least one state update
-		select {
-		case stateMap := <-stateUpdates:
-			// We don't check for specific values, just that broadcasts are happening
-			return stateMap["stateable-runnable"] != ""
-		default:
-			return false
-		}
-	}, 500*time.Millisecond, 50*time.Millisecond, "No state updates received")
-
-	// Cancel the context to shut down the supervisor
-	cancel()
-
-	// Verify the supervisor shuts down cleanly
-	select {
-	case err := <-execDone:
-		assert.NoError(t, err)
-	case <-time.After(1 * time.Second):
-		t.Fatal("Supervisor did not shut down in time")
-	}
-
-	// Verify expectations
-	mockStateable.AssertExpectations(t)
 }

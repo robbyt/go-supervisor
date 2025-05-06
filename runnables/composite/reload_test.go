@@ -1213,8 +1213,15 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Equal(t, mockRunnable3, updatedConfig.Entries[0].Runnable)
 		assert.Equal(t, mockRunnable4, updatedConfig.Entries[1].Runnable)
 
-		time.Sleep(50 * time.Millisecond)
-		mockRunnable1.AssertExpectations(t)
+		// Instead of sleeping, use require.Eventually to verify expectations
+		require.Eventually(t, func() bool {
+			// Return true if the mock expectations are met
+			return mockRunnable1.AssertExpectations(t) &&
+				mockRunnable2.AssertExpectations(t) &&
+				mockRunnable3.AssertExpectations(t) &&
+				mockRunnable4.AssertExpectations(t)
+		}, 100*time.Millisecond, 10*time.Millisecond, "Mock expectations should be met")
+
 		mockRunnable2.AssertExpectations(t)
 		mockRunnable3.AssertExpectations(t)
 		mockRunnable4.AssertExpectations(t)

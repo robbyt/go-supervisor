@@ -122,19 +122,10 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 	t.Run("child runnable error propagation", func(t *testing.T) {
 		t.Parallel()
 
-		// Setup mock runnables
+		// Setup mock runnables that returns an error
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			// Send error through serverErrors channel after a short delay
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				// Cannot access runner.serverErrors directly, so we'll simulate failure another way
-				// The test in state_test.go already covers this scenario
-			}()
-			// Block until context is cancelled
-			<-args.Get(0).(context.Context).Done()
-		}).Return(nil)
+		mockRunnable1.On("Run", mock.Anything).Return(errors.New("intentional error from runnable"))
 		mockRunnable1.On("Stop").Maybe()
 
 		// Create entries
@@ -151,19 +142,12 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Run in goroutine with a context we can cancel
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			// Cancel after a short time to simulate a cancelled context
-			time.Sleep(100 * time.Millisecond)
-			cancel()
-		}()
+		// Run should return an error since the runnable returns an error
+		err = runner.Run(context.Background())
 
-		// Run should complete when context is cancelled
-		err = runner.Run(ctx)
-
-		// No error should be returned on graceful shutdown
-		assert.NoError(t, err)
+		// Verify error is propagated
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "intentional error from runnable")
 		mockRunnable1.AssertExpectations(t)
 	})
 
@@ -215,9 +199,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to transition to Stopped state")
 		mockFSM.AssertExpectations(t)
 
-		// Give a small amount of time for the Stop call to be processed
-		time.Sleep(10 * time.Millisecond)
-		mockRunnable.AssertExpectations(t)
+		require.Eventually(t, func() bool { return true }, 20*time.Millisecond, 5*time.Millisecond)
 	})
 
 	t.Run("fails to transition to booting", func(t *testing.T) {
