@@ -39,6 +39,9 @@ func TestGetState(t *testing.T) {
 
 // TestGetStateChan verifies that the state channel works correctly
 func TestGetStateChan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	server, listenPort := createTestServer(t,

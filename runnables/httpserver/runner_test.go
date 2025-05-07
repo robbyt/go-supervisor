@@ -144,6 +144,9 @@ func TestRoutesRequired(t *testing.T) {
 
 // TestRun_ShutdownDeadlineExceeded tests shutdown behavior when a handler exceeds the drain timeout
 func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Create test server with a handler that exceeds the drain timeout
@@ -223,6 +226,9 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 // TestRun_ShutdownWithDrainTimeout tests that the server waits for handlers to complete
 // within the drain timeout period
 func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Create test server with a handler that sleeps
@@ -350,6 +356,9 @@ func TestServerErr(t *testing.T) {
 
 // TestServerLifecycle tests the complete lifecycle of the server
 func TestServerLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Use unique port numbers for parallel tests
