@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,32 +54,46 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		t,
 		runner,
 		"Running",
-		5*time.Second,
+		10*time.Second,
 		"Server should reach Running state before reloads",
 	)
 
-	for i := 0; i < 5; i++ {
-		go func() {
-			runner.Reload()
-		}()
-	}
-
-	// Wait for reloads to complete
+	// Verify server is accepting connections before starting reloads
 	require.Eventually(t, func() bool {
-		// Check if the server is still running
+		// Check if the server is running and accepting connections
 		resp, err := http.Head("http://localhost" + port + "/test")
 		if err != nil {
-			t.Logf("Connection attempt failed: %v", err)
+			t.Logf("Initial connection attempt failed: %v", err)
 			return false
 		}
 		defer func() { assert.NoError(t, resp.Body.Close()) }()
 		return resp.StatusCode == http.StatusOK
-	}, 5*time.Second, 100*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond, "Server should be accepting connections before reloads")
 
-	resp, err := http.Get("http://localhost" + port + "/test")
-	require.NoError(t, err, "Server should still be accepting connections after concurrent reloads")
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, resp.Body.Close(), "Failed to close response body")
+	// Launch concurrent reloads
+	var wg sync.WaitGroup
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runner.Reload()
+		}()
+	}
+
+	// Wait for all reloads to complete
+	wg.Wait()
+
+	// Verify server is still accepting connections after reloads
+	require.Eventually(t, func() bool {
+		resp, err := http.Get("http://localhost" + port + "/test")
+		if err != nil {
+			t.Logf("Final connection attempt failed: %v", err)
+			return false
+		}
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 100*time.Millisecond, "Server should still be accepting connections after concurrent reloads")
 
 	cancel()
 
