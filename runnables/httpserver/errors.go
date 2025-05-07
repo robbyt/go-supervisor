@@ -4,20 +4,19 @@ package httpserver
 
 import "errors"
 
-// ErrNoConfig is returned when no configuration is provided to the server
-var ErrNoConfig = errors.New("no config provided")
-
-// ErrNoHandlers is returned when no HTTP handlers are provided in the configuration
-var ErrNoHandlers = errors.New("no handlers provided")
-
-// ErrGracefulShutdown is returned when the server fails to shut down gracefully
-var ErrGracefulShutdown = errors.New("graceful shutdown failed")
-
-// ErrGracefulShutdownTimeout is returned when the server shutdown exceeds the configured drain timeout
-var ErrGracefulShutdownTimeout = errors.New("graceful shutdown deadline reached")
-
-// ErrHttpServer is returned when the HTTP server encounters an operational error
-var ErrHttpServer = errors.New("http server error")
-
-// ErrOldConfig is returned when a reload is attempted but the configuration hasn't changed
-var ErrOldConfig = errors.New("config hasn't changed since last update")
+var (
+	ErrNoConfig                = errors.New("no config provided")
+	ErrNoHandlers              = errors.New("no handlers provided")
+	ErrGracefulShutdown        = errors.New("graceful shutdown failed")
+	ErrGracefulShutdownTimeout = errors.New("graceful shutdown deadline reached")
+	ErrHttpServer              = errors.New("http server error")
+	ErrOldConfig               = errors.New("config hasn't changed since last update")
+	ErrRetrieveConfig          = errors.New("failed to retrieve server configuration")
+	ErrCreateConfig            = errors.New("failed to create server configuration")
+	ErrServerNotRunning        = errors.New("http server is not running")
+	ErrServerReadinessTimeout  = errors.New("server readiness check timed out")
+	ErrServerBoot              = errors.New("failed to start HTTP server")
+	ErrConfigCallbackNil       = errors.New("config callback returned nil")
+	ErrConfigCallback          = errors.New("failed to load configuration from callback")
+	ErrStateTransition         = errors.New("state transition failed")
+)

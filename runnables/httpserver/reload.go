@@ -11,11 +11,11 @@ import (
 func (r *Runner) reloadConfig() error {
 	newConfig, err := r.configCallback()
 	if err != nil {
-		return fmt.Errorf("failed to reload config: %w", err)
+		return fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
 
 	if newConfig == nil {
-		return errors.New("config callback returned nil")
+		return ErrConfigCallbackNil
 	}
 
 	oldConfig := r.getConfig()

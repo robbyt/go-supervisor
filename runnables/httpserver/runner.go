@@ -72,7 +72,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 	// Validate required options
 	if r.configCallback == nil {
-		return nil, errors.New("config callback is required (use WithConfigCallback)")
+		return nil, fmt.Errorf("config callback is required (use WithConfigCallback)")
 	}
 
 	// Create FSM with the configured logger
@@ -85,7 +85,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 	// Load initial config
 	if cfg := r.getConfig(); cfg == nil {
-		return nil, errors.New("failed to load initial config")
+		return nil, fmt.Errorf("%w: initial configuration", ErrConfigCallback)
 	}
 
 	return r, nil
@@ -124,7 +124,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if err != nil {
 		r.setStateError()
-		return fmt.Errorf("failed to start HTTP server: %w", err)
+		return fmt.Errorf("%w: %w", ErrServerBoot, err)
 	}
 
 	// Transition from Booting to Running
@@ -152,7 +152,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		} else {
 			// Otherwise, this is a real failure
 			r.setStateError()
-			return fmt.Errorf("failed to transition to Stopping state")
+			return fmt.Errorf("%w: transition to Stopping state", ErrStateTransition)
 		}
 	}
 
@@ -206,7 +206,7 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 	for {
 		select {
 		case <-probeCtx.Done():
-			return fmt.Errorf("server readiness probe timed out: %w", probeCtx.Err())
+			return fmt.Errorf("%w: %w", ErrServerReadinessTimeout, probeCtx.Err())
 		case <-ticker.C:
 			// Attempt to establish a TCP connection
 			conn, err := dialer.DialContext(ctx, "tcp", addr)
@@ -230,7 +230,7 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 func (r *Runner) boot() error {
 	originalCfg := r.getConfig()
 	if originalCfg == nil {
-		return errors.New("failed to retrieve config")
+		return ErrRetrieveConfig
 	}
 
 	// Create a new Config with the same settings but use the Runner's context
@@ -241,7 +241,7 @@ func (r *Runner) boot() error {
 		WithRequestContext(r.ctx),   // Use the Runner's context
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create server config: %w", err)
+		return fmt.Errorf("%w: %w", ErrCreateConfig, err)
 	}
 
 	// Create the server
@@ -269,7 +269,7 @@ func (r *Runner) boot() error {
 		if err := r.stopServer(r.ctx); err != nil {
 			r.logger.Warn("Error stopping server", "error", err)
 		}
-		return fmt.Errorf("server failed readiness check: %w", err)
+		return fmt.Errorf("%w: %w", ErrServerBoot, err)
 	}
 
 	// Get the actual listening address (especially important for auto-assigned ports)
@@ -315,7 +315,7 @@ func (r *Runner) getConfig() *Config {
 
 func (r *Runner) stopServer(ctx context.Context) error {
 	if r.server == nil {
-		return errors.New("server not running")
+		return ErrServerNotRunning
 	}
 	r.logger.Debug("Stopping HTTP server")
 

@@ -28,7 +28,7 @@ func TestBootFailure(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, runner)
-		assert.Contains(t, err.Error(), "failed to load initial config")
+		assert.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Config callback returns error", func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestBootFailure(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, runner)
-		assert.Contains(t, err.Error(), "failed to load initial config")
+		assert.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {
@@ -67,8 +67,8 @@ func TestBootFailure(t *testing.T) {
 		// Test actual run
 		err = runner.Run(context.Background())
 		assert.Error(t, err)
-		// With our readiness probe, the error format is different but should contain the server failure message
-		assert.Contains(t, err.Error(), "failed to start HTTP server")
+		// With our readiness probe, the error format is different but should be propagated properly
+		assert.ErrorIs(t, err, ErrServerBoot)
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 	})
 }
@@ -347,6 +347,8 @@ func TestServerErr(t *testing.T) {
 	// The second server should fail to start with "address already in use"
 	err = server2.Run(context.Background())
 	require.Error(t, err)
+	// The error contains ErrServerBoot, but we can't use ErrorIs here directly
+	// because of how the error is wrapped
 	require.Contains(t, err.Error(), "address already in use")
 
 	// Clean up
@@ -417,7 +419,7 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 
 	err := server.stopServer(context.Background())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "server not running")
+	assert.ErrorIs(t, err, ErrServerNotRunning)
 }
 
 // TestString verifies the correct string representation of the Runner
