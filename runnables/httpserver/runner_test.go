@@ -399,8 +399,12 @@ func TestServerLifecycle(t *testing.T) {
 func TestStopServerWhenNotRunning(t *testing.T) {
 	t.Parallel()
 
-	server, _, _ := createTestServer(t,
+	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+	t.Logf("Server listening on port %s", listenPort)
+	t.Cleanup(func() {
+		server.Stop()
+	})
 
 	err := server.stopServer(context.Background())
 	assert.Error(t, err)

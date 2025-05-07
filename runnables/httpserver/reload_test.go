@@ -322,10 +322,7 @@ func TestReload(t *testing.T) {
 		initialHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
-		server, initialPort, done := createTestServer(t, initialHandler, "/", 1*time.Second)
-		t.Cleanup(func() {
-			cleanupTestServer(t, server, done)
-		})
+		server, initialPort := createTestServer(t, initialHandler, "/", 1*time.Second)
 
 		// Verify the initial configuration is stored
 		initialCfg := server.getConfig()
