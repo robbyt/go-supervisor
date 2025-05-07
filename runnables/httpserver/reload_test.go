@@ -15,6 +15,9 @@ import (
 
 // TestRapidReload tests the behavior of the server under rapid consecutive reloads
 func TestRapidReload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Setup initial configuration
@@ -129,6 +132,9 @@ func TestRapidReload(t *testing.T) {
 
 // TestReload tests the Reload method with various configurations
 func TestReload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	t.Run("Reload fails when boot fails", func(t *testing.T) {
@@ -322,10 +328,7 @@ func TestReload(t *testing.T) {
 		initialHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
-		server, initialPort, done := createTestServer(t, initialHandler, "/", 1*time.Second)
-		t.Cleanup(func() {
-			cleanupTestServer(t, server, done)
-		})
+		server, initialPort := createTestServer(t, initialHandler, "/", 1*time.Second)
 
 		// Verify the initial configuration is stored
 		initialCfg := server.getConfig()

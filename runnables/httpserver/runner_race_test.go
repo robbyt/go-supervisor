@@ -12,6 +12,9 @@ import (
 
 // TestConcurrentReloadsRaceCondition verifies that concurrent reloads don't cause race conditions
 func TestConcurrentReloadsRaceCondition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
@@ -74,6 +77,9 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 
 // TestRunnerRaceConditions verifies that there are no race conditions in the boot and stopServer methods
 func TestRunnerRaceConditions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}

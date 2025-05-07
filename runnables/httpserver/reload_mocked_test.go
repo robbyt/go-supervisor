@@ -256,7 +256,7 @@ func TestReloadConfig_WithMock(t *testing.T) {
 		// Verify expectations
 		mockCallback.AssertExpectations(t)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to reload config")
+		assert.ErrorIs(t, err, ErrConfigCallback)
 		assert.ErrorIs(t, err, expectedErr)
 	})
 
@@ -280,7 +280,7 @@ func TestReloadConfig_WithMock(t *testing.T) {
 		// Verify expectations
 		mockCallback.AssertExpectations(t)
 		assert.Error(t, err)
-		assert.Equal(t, "config callback returned nil", err.Error())
+		assert.ErrorIs(t, err, ErrConfigCallbackNil)
 	})
 
 	// Test case: ErrOldConfig returned when the new config matches the old config

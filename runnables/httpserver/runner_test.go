@@ -15,15 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// waitForRunningState waits for the server to enter the Running state
-// or fails the test if the server doesn't enter the Running state within the timeout
-func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		return server.GetState() == finitestate.StatusRunning
-	}, timeout, 10*time.Millisecond, "Server did not reach Running state in time. Current state: %s", server.GetState())
-}
-
 // TestBootFailure tests various boot failure scenarios
 func TestBootFailure(t *testing.T) {
 	t.Parallel()
@@ -37,7 +28,7 @@ func TestBootFailure(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, runner)
-		assert.Contains(t, err.Error(), "failed to load initial config")
+		assert.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Config callback returns error", func(t *testing.T) {
@@ -49,7 +40,7 @@ func TestBootFailure(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, runner)
-		assert.Contains(t, err.Error(), "failed to load initial config")
+		assert.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {
@@ -76,8 +67,8 @@ func TestBootFailure(t *testing.T) {
 		// Test actual run
 		err = runner.Run(context.Background())
 		assert.Error(t, err)
-		// With our readiness probe, the error format is different but should contain the server failure message
-		assert.Contains(t, err.Error(), "failed to start HTTP server")
+		// With our readiness probe, the error format is different but should be propagated properly
+		assert.ErrorIs(t, err, ErrServerBoot)
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 	})
 }
@@ -153,6 +144,9 @@ func TestRoutesRequired(t *testing.T) {
 
 // TestRun_ShutdownDeadlineExceeded tests shutdown behavior when a handler exceeds the drain timeout
 func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Create test server with a handler that exceeds the drain timeout
@@ -190,7 +184,13 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	}()
 
 	// Wait for the server to enter the Running state
-	waitForRunningState(t, server, 2*time.Second)
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should enter Running state",
+	)
 
 	// Make a request to trigger the handler
 	go func() {
@@ -226,6 +226,9 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 // TestRun_ShutdownWithDrainTimeout tests that the server waits for handlers to complete
 // within the drain timeout period
 func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Create test server with a handler that sleeps
@@ -263,7 +266,13 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	}()
 
 	// Wait for the server to enter the Running state
-	waitForRunningState(t, server, 2*time.Second)
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should enter Running state",
+	)
 
 	// Make a request to trigger the handler
 	go func() {
@@ -322,7 +331,13 @@ func TestServerErr(t *testing.T) {
 	}()
 
 	// Give time for the first server to start
-	waitForRunningState(t, server1, 2*time.Second)
+	waitForState(
+		t,
+		server1,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"First server should enter Running state",
+	)
 
 	// Create a second server with the same port
 	cfg2 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
@@ -332,6 +347,8 @@ func TestServerErr(t *testing.T) {
 	// The second server should fail to start with "address already in use"
 	err = server2.Run(context.Background())
 	require.Error(t, err)
+	// The error contains ErrServerBoot, but we can't use ErrorIs here directly
+	// because of how the error is wrapped
 	require.Contains(t, err.Error(), "address already in use")
 
 	// Clean up
@@ -341,6 +358,9 @@ func TestServerErr(t *testing.T) {
 
 // TestServerLifecycle tests the complete lifecycle of the server
 func TestServerLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
 	t.Parallel()
 
 	// Use unique port numbers for parallel tests
@@ -365,7 +385,13 @@ func TestServerLifecycle(t *testing.T) {
 	}()
 
 	// Wait for the server to start
-	waitForRunningState(t, server, 2*time.Second)
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should enter Running state",
+	)
 
 	// Test stop and state transition
 	server.Stop()
@@ -384,12 +410,16 @@ func TestServerLifecycle(t *testing.T) {
 func TestStopServerWhenNotRunning(t *testing.T) {
 	t.Parallel()
 
-	server, _, _ := createTestServer(t,
+	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+	t.Logf("Server listening on port %s", listenPort)
+	t.Cleanup(func() {
+		server.Stop()
+	})
 
 	err := server.stopServer(context.Background())
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "server not running")
+	assert.ErrorIs(t, err, ErrServerNotRunning)
 }
 
 // TestString verifies the correct string representation of the Runner
@@ -424,7 +454,13 @@ func TestString(t *testing.T) {
 		}()
 
 		// Wait for the server to start
-		waitForRunningState(t, server, 2*time.Second)
+		waitForState(
+			t,
+			server,
+			finitestate.StatusRunning,
+			2*time.Second,
+			"Server should enter Running state",
+		)
 
 		// Test string representation while running
 		assert.Equal(t, expectedStr, server.String(), "Wrong string representation while running")
