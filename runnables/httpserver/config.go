@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	defaultDrainTimeout = 30 * time.Second
+	defaultReadTimeout  = 15 * time.Second
+	defaultWriteTimeout = 15 * time.Second
+	defaultIdleTimeout  = 1 * time.Minute
+)
+
 // ServerCreator is a function type that creates an HttpServer instance
 type ServerCreator func(addr string, handler http.Handler, cfg *Config) HttpServer
 
@@ -126,20 +133,19 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		return nil, errors.New("routes cannot be empty")
 	}
 
+	// Use constants for default values
 	c := &Config{
-		ListenAddr: addr,
-		Routes:     routes,
-
-		// set some reasonable default values
-		DrainTimeout:  30 * time.Second,
-		ReadTimeout:   15 * time.Second,
-		WriteTimeout:  15 * time.Second,
-		IdleTimeout:   1 * time.Minute,
+		ListenAddr:    addr,
+		Routes:        routes,
+		DrainTimeout:  defaultDrainTimeout,
+		ReadTimeout:   defaultReadTimeout,
+		WriteTimeout:  defaultWriteTimeout,
+		IdleTimeout:   defaultIdleTimeout,
 		ServerCreator: DefaultServerCreator,
 		context:       context.Background(),
 	}
 
-	// Apply functional options
+	// Apply overrides from the functional options
 	for _, opt := range opts {
 		opt(c)
 	}
