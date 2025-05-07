@@ -213,7 +213,10 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 			if err == nil {
 				// Connection successful, server is accepting connections
 				if err := conn.Close(); err != nil {
-					r.logger.Warn("Error closing connection", "error", err)
+					// Check if it's a "closed network connection" error
+					if !errors.Is(err, net.ErrClosed) {
+						r.logger.Warn("Error closing connection", "error", err)
+					}
 				}
 				return nil
 			}
