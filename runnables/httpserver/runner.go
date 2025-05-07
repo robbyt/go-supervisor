@@ -39,13 +39,17 @@ type Runner struct {
 	name           string
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
-	mutex          sync.Mutex
-	server         HttpServer
-	serverErrors   chan error
-	fsm            finitestate.Machine
-	ctx            context.Context
-	cancel         context.CancelFunc
-	logger         *slog.Logger
+	mutex          sync.RWMutex
+
+	server          HttpServer
+	serverCloseOnce sync.Once
+	serverMutex     sync.RWMutex
+	serverErrors    chan error
+
+	fsm    finitestate.Machine
+	ctx    context.Context
+	cancel context.CancelFunc
+	logger *slog.Logger
 }
 
 // NewRunner initializes a new HTTPServer runner instance.
@@ -57,12 +61,13 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &Runner{
-		name:         "",
-		config:       atomic.Pointer[Config]{},
-		serverErrors: make(chan error, 1),
-		ctx:          ctx,
-		cancel:       cancel,
-		logger:       logger,
+		name:            "",
+		config:          atomic.Pointer[Config]{},
+		serverCloseOnce: sync.Once{},
+		serverErrors:    make(chan error, 1),
+		ctx:             ctx,
+		cancel:          cancel,
+		logger:          logger,
 	}
 
 	// Apply options
@@ -93,6 +98,9 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 // String returns a string representation of the HTTPServer instance
 func (r *Runner) String() string {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	args := make([]string, 0)
 	if r.name != "" {
 		args = append(args, "name: "+r.name)
@@ -244,9 +252,13 @@ func (r *Runner) boot() error {
 		return fmt.Errorf("%w: %w", ErrCreateConfig, err)
 	}
 
-	// Create the server
-	r.server = serverCfg.createServer()
 	listenAddr := serverCfg.ListenAddr
+
+	// Create the server, and reset the serverCloseOnce with a mutex
+	r.serverMutex.Lock()
+	r.server = serverCfg.createServer()
+	r.serverCloseOnce = sync.Once{}
+	r.serverMutex.Unlock()
 
 	r.logger.Info("Starting HTTP server",
 		"listenOn", listenAddr,
@@ -257,6 +269,8 @@ func (r *Runner) boot() error {
 
 	// Start the server in a goroutine
 	go func() {
+		r.serverMutex.RLock()
+		defer r.serverMutex.RUnlock()
 		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
@@ -274,9 +288,11 @@ func (r *Runner) boot() error {
 
 	// Get the actual listening address (especially important for auto-assigned ports)
 	actualAddr := listenAddr
+	r.serverMutex.RLock()
 	if tcpAddr, ok := r.server.(interface{ Addr() net.Addr }); ok && tcpAddr.Addr() != nil {
 		actualAddr = tcpAddr.Addr().String()
 	}
+	r.serverMutex.RUnlock()
 
 	r.logger.Debug("HTTP server is ready",
 		"addr", actualAddr)
@@ -314,40 +330,53 @@ func (r *Runner) getConfig() *Config {
 }
 
 func (r *Runner) stopServer(ctx context.Context) error {
-	if r.server == nil {
-		return ErrServerNotRunning
-	}
-	r.logger.Debug("Stopping HTTP server")
-
-	cfg := r.getConfig()
-	drainTimeout := 5 * time.Second
-	if cfg != nil {
-		drainTimeout = cfg.DrainTimeout
-	} else {
-		r.logger.Warn("Config missing, using default drain timeout")
-	}
-
-	r.logger.Debug("Waiting for graceful HTTP server shutdown...", "timeout", drainTimeout)
-	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, drainTimeout)
-	defer shutdownCancel()
-
-	shutdownErr := r.server.Shutdown(shutdownCtx)
-
-	// Check if the context deadline was exceeded, regardless of the error from Shutdown
-	select {
-	case <-shutdownCtx.Done():
-		if errors.Is(shutdownCtx.Err(), context.DeadlineExceeded) {
-			r.logger.Warn("Shutdown timeout reached, some connections may have been terminated")
-			return fmt.Errorf("%w: %w", ErrGracefulShutdownTimeout, shutdownCtx.Err())
+	var shutdownErr error
+	r.serverCloseOnce.Do(func() {
+		r.serverMutex.RLock()
+		defer r.serverMutex.RUnlock()
+		if r.server == nil {
+			shutdownErr = ErrServerNotRunning
+			return
 		}
-	default:
-		// Context not done, normal shutdown
-	}
+		r.logger.Debug("Stopping HTTP server")
 
-	// Handle any other error from shutdown
-	if shutdownErr != nil {
-		return fmt.Errorf("%w: %w", ErrGracefulShutdown, shutdownErr)
-	}
+		cfg := r.getConfig()
+		drainTimeout := 5 * time.Second
+		if cfg != nil {
+			drainTimeout = cfg.DrainTimeout
+		} else {
+			r.logger.Warn("Config missing, using default drain timeout")
+		}
 
-	return nil
+		r.logger.Debug("Waiting for graceful HTTP server shutdown...", "timeout", drainTimeout)
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, drainTimeout)
+		defer shutdownCancel()
+
+		localErr := r.server.Shutdown(shutdownCtx)
+
+		// Check if the context deadline was exceeded, regardless of the error from Shutdown
+		select {
+		case <-shutdownCtx.Done():
+			if errors.Is(shutdownCtx.Err(), context.DeadlineExceeded) {
+				r.logger.Warn("Shutdown timeout reached, some connections may have been terminated")
+				shutdownErr = fmt.Errorf("%w: %w", ErrGracefulShutdownTimeout, shutdownCtx.Err())
+				return
+			}
+		default:
+			// Context not done, normal shutdown
+		}
+
+		// Handle any other error from shutdown
+		if localErr != nil {
+			shutdownErr = fmt.Errorf("%w: %w", ErrGracefulShutdown, localErr)
+			return
+		}
+	})
+
+	// if stopServer is called, always reset the server reference
+	r.serverMutex.Lock()
+	r.server = nil
+	r.serverMutex.Unlock()
+
+	return shutdownErr
 }
