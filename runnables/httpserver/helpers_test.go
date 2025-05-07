@@ -55,6 +55,24 @@ func createTestServer(
 	return server, listenPort, done
 }
 
+// waitForState waits for the server to reach a specific state
+// with improved diagnostics when failures occur
+func waitForState(
+	t *testing.T,
+	server *Runner,
+	targetState string,
+	timeout time.Duration,
+	message string,
+) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		state := server.GetState()
+		t.Logf("Current state: %s, Expected: %s", state, targetState)
+		return state == targetState
+	}, timeout, 10*time.Millisecond, message)
+}
+
 // setupTestServer creates a server and starts it
 // nolint:unused
 func setupTestServer(
@@ -73,11 +91,14 @@ func setupTestServer(
 		done <- err
 	}()
 
-	// Give the server time to start
 	// Wait for the server to be ready
-	require.Eventually(t, func() bool {
-		return server.GetState() == finitestate.StatusRunning
-	}, 2*time.Second, 10*time.Millisecond)
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should reach Running state",
+	)
 
 	return server, listenPort, done
 }

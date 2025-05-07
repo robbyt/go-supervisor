@@ -248,7 +248,12 @@ func (r *Runner) boot() error {
 	r.server = serverCfg.createServer()
 	listenAddr := serverCfg.ListenAddr
 
-	r.logger.Info("Starting HTTP server", "listenOn", listenAddr)
+	r.logger.Info("Starting HTTP server",
+		"listenOn", listenAddr,
+		"readTimeout", serverCfg.ReadTimeout,
+		"writeTimeout", serverCfg.WriteTimeout,
+		"idleTimeout", serverCfg.IdleTimeout,
+		"drainTimeout", serverCfg.DrainTimeout)
 
 	// Start the server in a goroutine
 	go func() {
@@ -267,7 +272,15 @@ func (r *Runner) boot() error {
 		return fmt.Errorf("server failed readiness check: %w", err)
 	}
 
-	r.logger.Debug("HTTP server is ready and accepting connections")
+	// Get the actual listening address (especially important for auto-assigned ports)
+	actualAddr := listenAddr
+	if tcpAddr, ok := r.server.(interface{ Addr() net.Addr }); ok && tcpAddr.Addr() != nil {
+		actualAddr = tcpAddr.Addr().String()
+	}
+
+	r.logger.Debug("HTTP server is ready",
+		"addr", actualAddr)
+
 	return nil
 }
 
