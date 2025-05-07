@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -317,7 +318,13 @@ func TestContextPropagation(t *testing.T) {
 	}()
 
 	// Wait for the server to be ready
-	waitForRunningState(t, server, 2*time.Second)
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should reach Running state",
+	)
 
 	// Start a client request in a goroutine
 	var clientWg sync.WaitGroup
