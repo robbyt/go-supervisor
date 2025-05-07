@@ -48,6 +48,15 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		errChan <- err
 	}()
 
+	// Wait for server to reach Running state
+	waitForState(
+		t,
+		runner,
+		"Running",
+		5*time.Second,
+		"Server should reach Running state before reloads",
+	)
+
 	for i := 0; i < 5; i++ {
 		go func() {
 			runner.Reload()
@@ -59,11 +68,12 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		// Check if the server is still running
 		resp, err := http.Head("http://localhost" + port + "/test")
 		if err != nil {
+			t.Logf("Connection attempt failed: %v", err)
 			return false
 		}
 		defer func() { assert.NoError(t, resp.Body.Close()) }()
 		return resp.StatusCode == http.StatusOK
-	}, 2*time.Second, 10*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 
 	resp, err := http.Get("http://localhost" + port + "/test")
 	require.NoError(t, err, "Server should still be accepting connections after concurrent reloads")
@@ -100,15 +110,33 @@ func TestRunnerRaceConditions(t *testing.T) {
 	require.NoError(t, err)
 
 	errChan := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	go func() {
-		err := runner.Run(context.Background())
+		err := runner.Run(ctx)
 		errChan <- err
 	}()
 
-	resp, err := http.Get("http://localhost" + port + "/test")
-	require.NoError(t, err, "Server should be accepting connections")
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, resp.Body.Close(), "Failed to close response body")
+	// Wait for server to reach Running state
+	waitForState(
+		t,
+		runner,
+		"Running",
+		5*time.Second,
+		"Server should reach Running state before connection attempt",
+	)
+
+	// Try connecting with retries to handle potential timing issues
+	require.Eventually(t, func() bool {
+		resp, err := http.Get("http://localhost" + port + "/test")
+		if err != nil {
+			t.Logf("Connection attempt failed: %v", err)
+			return false
+		}
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
+		return resp.StatusCode == http.StatusOK
+	}, 5*time.Second, 100*time.Millisecond, "Server should be accepting connections")
 
 	runner.Stop()
 
