@@ -317,7 +317,7 @@ func TestContextPropagation(t *testing.T) {
 	}()
 
 	// Wait for the server to be ready
-	waitForRunningState(t, server, 2*time.Second)
+	waitForRunningState(t, server, 2*time.Second, "Server should enter Running state")
 
 	// Start a client request in a goroutine
 	var clientWg sync.WaitGroup

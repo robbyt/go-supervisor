@@ -28,7 +28,7 @@ type ConfigCallback func() (*Config, error)
 
 // HttpServer is the interface for the HTTP server
 type HttpServer interface {
-	ListenAndServe() error
+	Serve(net.Listener) error
 	Shutdown(ctx context.Context) error
 }
 
@@ -41,6 +41,7 @@ type Runner struct {
 	configCallback ConfigCallback
 	mutex          sync.Mutex
 	server         HttpServer
+	listener       net.Listener
 	serverErrors   chan error
 	fsm            finitestate.Machine
 	ctx            context.Context
@@ -111,6 +112,18 @@ func (r *Runner) String() string {
 func (r *Runner) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+
+	// Ensure resources are cleaned up when we exit
+	defer func() {
+		// Clean up listener if we still have one at the end
+		if r.listener != nil {
+			r.logger.Debug("Closing listener during final shutdown")
+			if err := r.listener.Close(); err != nil {
+				r.logger.Warn("Error closing listener during final shutdown", "error", err)
+			}
+			r.listener = nil
+		}
+	}()
 
 	// Transition from New to Booting
 	err := r.fsm.Transition(finitestate.StatusBooting)
@@ -184,7 +197,11 @@ func (r *Runner) Stop() {
 		// This error is expected if we're already stopping, so only log at debug level
 		r.logger.Debug("Note: Not transitioning to Stopping state", "error", err)
 	}
+
+	// Cancel the context to trigger shutdown
 	r.cancel()
+
+	// Final cleanup of resources will happen in the Run() method after server shutdown
 }
 
 // serverReadinessProbe checks if the HTTP server is listening and accepting connections
@@ -241,6 +258,15 @@ func (r *Runner) boot() error {
 		return fmt.Errorf("failed to create server config: %w", err)
 	}
 
+	// Get or create listener
+	listener, err := r.getListener(serverCfg)
+	if err != nil {
+		return fmt.Errorf("failed to get listener: %w", err)
+	}
+
+	// Store the listener for potential reuse
+	r.listener = listener
+
 	// Create the server
 	r.server = serverCfg.createServer()
 	listenAddr := serverCfg.ListenAddr
@@ -249,20 +275,32 @@ func (r *Runner) boot() error {
 
 	// Start the server in a goroutine
 	go func() {
-		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		// Use the listener with Serve method instead of ListenAndServe
+		if err := r.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
 		r.logger.Debug("HTTP server stopped", "listenOn", listenAddr)
 	}()
 
+	// Get the actual listening address from the listener (important for automatic port assignment)
+	actualAddr := listener.Addr().String()
+
 	// Wait for the server to be ready or fail
-	if err := r.serverReadinessProbe(r.ctx, listenAddr); err != nil {
+	if err := r.serverReadinessProbe(r.ctx, actualAddr); err != nil {
 		// If probe fails, attempt to stop the server since it may be partially started
 		if err := r.stopServer(r.ctx); err != nil {
 			r.logger.Warn("Error stopping server", "error", err)
 		}
 		return fmt.Errorf("server failed readiness check: %w", err)
 	}
+
+	r.logger.Debug(
+		"Server ready at address",
+		"configuredAddr",
+		listenAddr,
+		"actualAddr",
+		actualAddr,
+	)
 
 	r.logger.Debug("HTTP server is ready and accepting connections")
 	return nil

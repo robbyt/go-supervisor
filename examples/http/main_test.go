@@ -106,5 +106,5 @@ func TestRunServerInvalidPort(t *testing.T) {
 	// Run the supervisor - should fail because of invalid port
 	err = sv.Run()
 	assert.Error(t, err, "Run should fail with invalid port")
-	assert.Contains(t, err.Error(), "timeout waiting for runnable to start")
+	assert.Contains(t, err.Error(), "failed to create listener")
 }

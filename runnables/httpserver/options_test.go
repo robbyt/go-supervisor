@@ -117,7 +117,7 @@ func TestWithServerCreator(t *testing.T) {
 	t.Parallel()
 	// Create a mock server and track creation parameters
 	mockServer := new(MockHttpServer)
-	mockServer.On("ListenAndServe").Return(nil)
+	mockServer.On("Serve", mock.Anything).Return(nil)
 	mockServer.On("Shutdown", mock.Anything).Return(nil)
 	var capturedAddr string
 	var capturedHandler http.Handler

@@ -64,12 +64,19 @@ func (r *Runner) Reload() {
 		return
 	}
 
+	// When reusing listeners, we need to:
+	// 1. Gracefully stop the current server (without closing the listener)
+	// 2. Create a new server that uses the existing listener
+	// 3. Start the new server with the existing listener
+
+	// First, gracefully stop the existing server
 	if err := r.stopServer(r.ctx); err != nil {
 		r.logger.Error("Failed to stop server during reload", "error", err)
 		r.setStateError()
 		return
 	}
 
+	// Then, boot a new server (this will reuse the listener if appropriate)
 	if err := r.boot(); err != nil {
 		r.logger.Error("Failed to boot server during reload", "error", err)
 		r.setStateError()
@@ -82,5 +89,5 @@ func (r *Runner) Reload() {
 		return
 	}
 
-	r.logger.Debug("Completed.")
+	r.logger.Debug("Reload completed successfully")
 }

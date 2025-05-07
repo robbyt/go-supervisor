@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/mock"
@@ -189,9 +190,9 @@ type MockHttpServer struct {
 	mock.Mock
 }
 
-// ListenAndServe mocks the ListenAndServe method of the HttpServer interface
-func (m *MockHttpServer) ListenAndServe() error {
-	args := m.Called()
+// Serve mocks the Serve method of the HttpServer interface
+func (m *MockHttpServer) Serve(listener net.Listener) error {
+	args := m.Called(listener)
 	return args.Error(0)
 }
 

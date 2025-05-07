@@ -42,6 +42,10 @@ type Config struct {
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
 
+	// Listener settings
+	ReuseListener bool
+	TCPKeepAlive  time.Duration
+
 	// Server creation callback function
 	ServerCreator ServerCreator
 
@@ -99,6 +103,20 @@ func WithRequestContext(ctx context.Context) ConfigOption {
 	}
 }
 
+// WithReuseListener configures whether to reuse the listener across server restarts
+func WithReuseListener(reuse bool) ConfigOption {
+	return func(c *Config) {
+		c.ReuseListener = reuse
+	}
+}
+
+// WithTCPKeepAlive sets the TCP keepalive period for the listener
+func WithTCPKeepAlive(d time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.TCPKeepAlive = d
+	}
+}
+
 // WithConfigCopy creates a ConfigOption that copies most settings from the source config
 // except for ListenAddr and Routes which must be provided directly to NewConfig.
 func WithConfigCopy(src *Config) ConfigOption {
@@ -112,6 +130,10 @@ func WithConfigCopy(src *Config) ConfigOption {
 		dst.ReadTimeout = src.ReadTimeout
 		dst.WriteTimeout = src.WriteTimeout
 		dst.IdleTimeout = src.IdleTimeout
+
+		// Copy listener settings
+		dst.ReuseListener = src.ReuseListener
+		dst.TCPKeepAlive = src.TCPKeepAlive
 
 		// Copy other settings
 		dst.ServerCreator = src.ServerCreator
@@ -135,6 +157,8 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		ReadTimeout:   15 * time.Second,
 		WriteTimeout:  15 * time.Second,
 		IdleTimeout:   1 * time.Minute,
+		ReuseListener: true,            // Enable listener reuse by default
+		TCPKeepAlive:  3 * time.Minute, // Default TCP keepalive
 		ServerCreator: DefaultServerCreator,
 		context:       context.Background(),
 	}
@@ -188,6 +212,15 @@ func (c *Config) Equal(other *Config) bool {
 	}
 
 	if c.IdleTimeout != other.IdleTimeout {
+		return false
+	}
+
+	// Compare listener settings
+	if c.ReuseListener != other.ReuseListener {
+		return false
+	}
+
+	if c.TCPKeepAlive != other.TCPKeepAlive {
 		return false
 	}
 

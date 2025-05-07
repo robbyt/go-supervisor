@@ -17,11 +17,13 @@ import (
 
 // waitForRunningState waits for the server to enter the Running state
 // or fails the test if the server doesn't enter the Running state within the timeout
-func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration) {
+func waitForRunningState(t *testing.T, server *Runner, timeout time.Duration, message string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		return server.GetState() == finitestate.StatusRunning
-	}, timeout, 10*time.Millisecond, "Server did not reach Running state in time. Current state: %s", server.GetState())
+		state := server.GetState()
+		t.Logf("Current state: %s, Expected: %s", state, finitestate.StatusRunning)
+		return state == finitestate.StatusRunning
+	}, timeout, 10*time.Millisecond, message)
 }
 
 // TestBootFailure tests various boot failure scenarios
@@ -88,7 +90,7 @@ func TestCustomServerCreator(t *testing.T) {
 
 	// Create a mock HTTP server
 	mockServer := new(MockHttpServer)
-	mockServer.On("ListenAndServe").Return(nil)
+	mockServer.On("Serve", mock.Anything).Return(nil)
 	mockServer.On("Shutdown", mock.Anything).Return(nil)
 
 	// Create a custom server creator that returns our mock
@@ -190,7 +192,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	}()
 
 	// Wait for the server to enter the Running state
-	waitForRunningState(t, server, 2*time.Second)
+	waitForRunningState(t, server, 2*time.Second, "Server should enter Running state")
 
 	// Make a request to trigger the handler
 	go func() {
@@ -263,7 +265,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	}()
 
 	// Wait for the server to enter the Running state
-	waitForRunningState(t, server, 2*time.Second)
+	waitForRunningState(t, server, 2*time.Second, "Server should enter Running state")
 
 	// Make a request to trigger the handler
 	go func() {
@@ -322,7 +324,7 @@ func TestServerErr(t *testing.T) {
 	}()
 
 	// Give time for the first server to start
-	waitForRunningState(t, server1, 2*time.Second)
+	waitForRunningState(t, server1, 2*time.Second, "Server should enter Running state")
 
 	// Create a second server with the same port
 	cfg2 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
@@ -365,7 +367,7 @@ func TestServerLifecycle(t *testing.T) {
 	}()
 
 	// Wait for the server to start
-	waitForRunningState(t, server, 2*time.Second)
+	waitForRunningState(t, server, 2*time.Second, "Server should enter Running state")
 
 	// Test stop and state transition
 	server.Stop()
@@ -424,7 +426,7 @@ func TestString(t *testing.T) {
 		}()
 
 		// Wait for the server to start
-		waitForRunningState(t, server, 2*time.Second)
+		waitForRunningState(t, server, 2*time.Second, "Server should enter Running state")
 
 		// Test string representation while running
 		assert.Equal(t, expectedStr, server.String(), "Wrong string representation while running")
