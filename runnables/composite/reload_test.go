@@ -982,7 +982,7 @@ func TestSetStateError(t *testing.T) {
 func TestGetChildStates(t *testing.T) {
 	t.Parallel()
 
-	// Create a mock for MockRunnableWithStatable to use in tests
+	// Create a mock for MockRunnableWithStateable to use in tests
 	t.Run("nil config case", func(t *testing.T) {
 		// Create runner with a config callback that returns nil
 		configCallback := func() (*Config[*mocks.Runnable], error) {
