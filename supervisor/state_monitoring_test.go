@@ -16,7 +16,7 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	t.Parallel()
 
 	// Create a mock stateable runnable
-	mockStateable := mocks.NewMockRunnableWithStatable()
+	mockStateable := mocks.NewMockRunnableWithStateable()
 	mockStateable.On("String").Return("stateable-runnable").Maybe()
 	mockStateable.On("Run", mock.Anything).Return(nil)
 	mockStateable.On("Stop").Once()
@@ -96,7 +96,7 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 	defer cancel()
 
 	// Create mock services that implement Stateable
-	mockService := mocks.NewMockRunnableWithStatable()
+	mockService := mocks.NewMockRunnableWithStateable()
 	stateChan := make(chan string, 2)
 	mockService.On("GetStateChan", mock.Anything).Return(stateChan).Once()
 	mockService.On("String").Return("mock-service").Maybe()

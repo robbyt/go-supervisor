@@ -103,15 +103,15 @@ func (m *Runnable) String() string {
 	return "Runnable"
 }
 
-// MockRunnableWithStatable extends Runnable to also implement the Stateable interface.
-type MockRunnableWithStatable struct {
+// MockRunnableWithStateable extends Runnable to also implement the Stateable interface.
+type MockRunnableWithStateable struct {
 	*Runnable
 	DelayGetState time.Duration // Delay before GetState and GetStateChan return
 }
 
 // GetState mocks the GetState method of the Stateable interface.
 // It returns the current state of the service as configured in test expectations.
-func (m *MockRunnableWithStatable) GetState() string {
+func (m *MockRunnableWithStateable) GetState() string {
 	time.Sleep(m.DelayGetState)
 	args := m.Called()
 	return args.String(0)
@@ -119,21 +119,21 @@ func (m *MockRunnableWithStatable) GetState() string {
 
 // GetStateChan mocks the GetStateChan method of the Stateable interface.
 // It returns a receive-only channel that will emit state updates as configured in test expectations.
-func (m *MockRunnableWithStatable) GetStateChan(ctx context.Context) <-chan string {
+func (m *MockRunnableWithStateable) GetStateChan(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
 	return args.Get(0).(chan string)
 }
 
 // IsRunning mocks the IsRunning method of the Stateable interface.
 // It returns true if the service is currently running, as configured in test expectations.
-func (m *MockRunnableWithStatable) IsRunning() bool {
+func (m *MockRunnableWithStateable) IsRunning() bool {
 	args := m.Called()
 	return args.Bool(0)
 }
 
-// NewMockRunnableWithStatable creates a new MockRunnableWithStatable with default delays.
-func NewMockRunnableWithStatable() *MockRunnableWithStatable {
-	return &MockRunnableWithStatable{
+// NewMockRunnableWithStateable creates a new MockRunnableWithStateable with default delays.
+func NewMockRunnableWithStateable() *MockRunnableWithStateable {
+	return &MockRunnableWithStateable{
 		Runnable:      NewMockRunnable(),
 		DelayGetState: defaultDelay,
 	}

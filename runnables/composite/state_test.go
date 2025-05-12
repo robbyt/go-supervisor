@@ -15,16 +15,16 @@ import (
 func TestCompositeRunner_GetChildStates(t *testing.T) {
 	t.Parallel()
 
-	// Create a statable runnable mock
-	mockRunnable := mocks.NewMockRunnableWithStatable()
-	mockRunnable.On("String").Return("statable-runnable").Once()
+	// Create a stateable runnable mock
+	mockRunnable := mocks.NewMockRunnableWithStateable()
+	mockRunnable.On("String").Return("stateable-runnable").Once()
 	mockRunnable.On("GetState").Return("mock-state").Once()
 
 	// Create a regular runnable mock
 	regularRunnable := mocks.NewMockRunnable()
 	regularRunnable.On("String").Return("regular-runnable").Once()
 
-	// Create entries for the statable runnable
+	// Create entries for the stateable runnable
 	entries := []RunnableEntry[supervisor.Runnable]{
 		{Runnable: mockRunnable, Config: nil},
 		{Runnable: regularRunnable, Config: nil},
@@ -42,7 +42,7 @@ func TestCompositeRunner_GetChildStates(t *testing.T) {
 	// Get child states
 	states := runner.GetChildStates()
 	require.Len(t, states, 2)
-	assert.Equal(t, "mock-state", states["statable-runnable"])
+	assert.Equal(t, "mock-state", states["stateable-runnable"])
 	assert.Equal(t, "unknown", states["regular-runnable"])
 
 	// Verify expectations
@@ -164,7 +164,7 @@ func TestGetChildStates_WithStateables(t *testing.T) {
 	t.Parallel()
 
 	// Create a mock stateable runnable
-	mockStateable := mocks.NewMockRunnableWithStatable()
+	mockStateable := mocks.NewMockRunnableWithStateable()
 	mockStateable.On("String").Return("stateable").Maybe()
 	mockStateable.On("GetState").Return("running")
 	mockStateable.On("Stop").Maybe()

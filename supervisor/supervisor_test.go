@@ -114,7 +114,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 	t.Parallel()
 
 	t.Run("immediately ready", func(t *testing.T) {
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("ready-runnable").Maybe()
 		mockRunnable.On("IsRunning").Return(true).Once()
 
@@ -134,7 +134,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 	})
 
 	t.Run("becomes ready after delay", func(t *testing.T) {
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("delayed-runnable").Maybe()
 		mockRunnable.On("IsRunning").Return(false).Once()
 		mockRunnable.On("IsRunning").Return(false).Once()
@@ -158,7 +158,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 
 	t.Run("timeout", func(t *testing.T) {
 		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("stuck-runnable").Maybe()
 		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
 
@@ -184,7 +184,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 
 	t.Run("parent context canceled", func(t *testing.T) {
 		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("canceled-runnable").Maybe()
 		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
 
@@ -213,7 +213,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 
 	t.Run("error from runnable", func(t *testing.T) {
 		// Setup mock that never reports as running
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("error-runnable").Maybe()
 		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
 
