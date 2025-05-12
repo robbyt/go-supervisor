@@ -42,13 +42,18 @@ type Reloadable interface {
 
 // Stateable represents a service that can report its state.
 type Stateable interface {
+	Readiness
+
 	// GetState returns the current state of the service.
 	GetState() string
 
 	// GetStateChan returns a channel that will receive the current state of the service.
 	GetStateChan(context.Context) <-chan string
+}
 
-	// IsRunning returns true if the service is currently running.
+// Readiness provides a way to check if a Runnable is currently running,
+// used to determine if a Runnable is done with it's startup phase.
+type Readiness interface {
 	IsRunning() bool
 }
 
