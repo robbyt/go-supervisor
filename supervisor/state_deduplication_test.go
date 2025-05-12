@@ -23,7 +23,7 @@ func TestStateDeduplication(t *testing.T) {
 
 	// Create a channel for sending state updates
 	stateChan := make(chan string, 10)
-	runnable := mocks.NewMockRunnableWithStatable()
+	runnable := mocks.NewMockRunnableWithStateable()
 	runnable.On("String").Return("test-runnable")
 	runnable.On("GetStateChan", mock.Anything).Return(stateChan)
 	runnable.On("GetState").Return("initial")

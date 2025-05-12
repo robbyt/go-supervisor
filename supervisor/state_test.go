@@ -19,9 +19,9 @@ func TestPIDZero_GetState(t *testing.T) {
 		{
 			name: "runnable implements Stateable",
 			setupMock: func() Runnable {
-				mockService := mocks.NewMockRunnableWithStatable()
+				mockService := mocks.NewMockRunnableWithStateable()
 				mockService.On("GetState").Return("running").Once()
-				mockService.On("String").Return("StatableService").Maybe()
+				mockService.On("String").Return("StateableService").Maybe()
 				return mockService
 			},
 			expectedState: "running",
@@ -68,11 +68,11 @@ func TestPIDZero_GetStates(t *testing.T) {
 	t.Parallel()
 
 	// Create mock services
-	mockService1 := mocks.NewMockRunnableWithStatable()
+	mockService1 := mocks.NewMockRunnableWithStateable()
 	mockService1.On("GetState").Return("running").Once()
 	mockService1.On("String").Return("MockService1").Maybe()
 
-	mockService2 := mocks.NewMockRunnableWithStatable()
+	mockService2 := mocks.NewMockRunnableWithStateable()
 	mockService2.On("GetState").Return("stopped").Once()
 	mockService2.On("String").Return("MockService2").Maybe()
 

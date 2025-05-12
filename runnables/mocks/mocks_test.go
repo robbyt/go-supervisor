@@ -20,7 +20,7 @@ import (
 func TestInterfaceGuards(t *testing.T) {
 	// Create mock instances
 	mockRunnable := mocks.NewMockRunnable()
-	mockRunnableWithState := mocks.NewMockRunnableWithStatable()
+	mockRunnableWithState := mocks.NewMockRunnableWithStateable()
 	mockRunnableWithReload := mocks.NewMockRunnableWithReloadSender()
 	mockRunnableWithShutdown := mocks.NewMockRunnableWithShutdownSender()
 
@@ -68,7 +68,7 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
 
-	case *mocks.MockRunnableWithStatable:
+	case *mocks.MockRunnableWithStateable:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
 		mockObj.On("Reload").Return()
@@ -206,10 +206,10 @@ func TestMockRunnable(t *testing.T) {
 	})
 }
 
-func TestMockRunnableWithStatable(t *testing.T) {
+func TestMockRunnableWithStateable(t *testing.T) {
 	t.Run("GetState method", func(t *testing.T) {
 		// Create a mock with a shorter delay for testing
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.DelayGetState = 5 * time.Millisecond
 
 		// Set up expectations
@@ -228,7 +228,7 @@ func TestMockRunnableWithStatable(t *testing.T) {
 
 	t.Run("GetStateChan method", func(t *testing.T) {
 		// Create a mock
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 
 		// Create a test channel
 		testChan := make(chan string, 1)
@@ -248,7 +248,7 @@ func TestMockRunnableWithStatable(t *testing.T) {
 
 	t.Run("IsRunning method", func(t *testing.T) {
 		// Create a mock
-		mockRunnable := mocks.NewMockRunnableWithStatable()
+		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("IsRunning", mock.Anything).Return(true)
 		r := mockRunnable.IsRunning()
 		assert.True(t, r)
@@ -256,7 +256,7 @@ func TestMockRunnableWithStatable(t *testing.T) {
 	})
 
 	t.Run("inherits from base Runnable", func(t *testing.T) {
-		testHelperInheritedMethods(t, mocks.NewMockRunnableWithStatable(), "StatefulService")
+		testHelperInheritedMethods(t, mocks.NewMockRunnableWithStateable(), "StatefulService")
 	})
 }
 
@@ -331,8 +331,8 @@ func TestFactoryMethods(t *testing.T) {
 		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
 	})
 
-	t.Run("NewMockRunnableWithStatable creates with default delays", func(t *testing.T) {
-		mock := mocks.NewMockRunnableWithStatable()
+	t.Run("NewMockRunnableWithStateable creates with default delays", func(t *testing.T) {
+		mock := mocks.NewMockRunnableWithStateable()
 		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
 		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
 		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
