@@ -2,7 +2,9 @@ package httpcluster
 
 import (
 	"context"
+	"iter"
 	"log/slog"
+	"maps"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 )
@@ -27,12 +29,15 @@ type serverEntry struct {
 	cancel   context.CancelFunc
 	stateSub <-chan string
 
-	// Pending action for commit phase
+	// Pending action for the commit phase
 	action action
 }
 
+// Ensure the entries collection object implements entriesManager, used by the Runnable
+var _ entriesManager = (*entries)(nil)
+
 // entries is an immutable collection of server entries with pending actions.
-// Once created, it cannot be modified - only replaced with a new instance.
+// Once created, it should not be modified - only replaced with a new instance.
 type entries struct {
 	servers map[string]*serverEntry
 }
@@ -45,75 +50,16 @@ func newEntries(
 	logger *slog.Logger,
 ) *entries {
 	logger = logger.WithGroup("newEntries")
-
 	servers := make(map[string]*serverEntry)
 
-	// Process all servers from previous state first
+	// Process existing servers (mark for stop, or update)
 	if previous != nil {
 		for id, oldEntry := range previous.servers {
-			desiredConfig, shouldExist := desiredConfigs[id]
-
-			if !shouldExist || desiredConfig == nil {
-				// Server should be removed - copy it over marked for stopping
-				if oldEntry.runner != nil {
-					servers[id] = &serverEntry{
-						id:       id,
-						config:   oldEntry.config,
-						runner:   oldEntry.runner,
-						ctx:      oldEntry.ctx,
-						cancel:   oldEntry.cancel,
-						stateSub: oldEntry.stateSub,
-						action:   actionStop,
-					}
-					logger.Debug("Server marked for stop", "id", id)
-				}
-				// If runner is nil, server was never started, so we can just skip it
-			} else if oldEntry.config.Equal(desiredConfig) {
-				// Config unchanged - copy as-is with no action
-				servers[id] = &serverEntry{
-					id:       id,
-					config:   oldEntry.config,
-					runner:   oldEntry.runner,
-					ctx:      oldEntry.ctx,
-					cancel:   oldEntry.cancel,
-					stateSub: oldEntry.stateSub,
-					action:   actionNone,
-				}
-				logger.Debug("Server unchanged", "id", id)
-			} else {
-				// Config changed - stop and start for simplicity
-				if oldEntry.runner != nil {
-					// Mark old for stop
-					servers[id] = &serverEntry{
-						id:       id,
-						config:   oldEntry.config, // Keep old config for stop
-						runner:   oldEntry.runner,
-						ctx:      oldEntry.ctx,
-						cancel:   oldEntry.cancel,
-						stateSub: oldEntry.stateSub,
-						action:   actionStop,
-					}
-					// Then create new entry for start
-					servers[id+":new"] = &serverEntry{
-						id:     id,
-						config: desiredConfig,
-						action: actionStart,
-					}
-					logger.Debug("Server marked for restart", "id", id)
-				} else {
-					// Server not running, just update config and mark for start
-					servers[id] = &serverEntry{
-						id:     id,
-						config: desiredConfig,
-						action: actionStart,
-					}
-					logger.Debug("Server marked for start", "id", id)
-				}
-			}
+			maps.Insert(servers, processExistingServer(id, oldEntry, desiredConfigs[id], logger))
 		}
 	}
 
-	// Process any new servers not in previous state
+	// Process new servers
 	for id, config := range desiredConfigs {
 		if config == nil {
 			continue
@@ -169,7 +115,7 @@ func (e *entries) countByAction(a action) int {
 // commit creates a new entries collection with all actions marked as complete.
 // This should be called after all pending actions have been executed.
 // It removes entries marked for stop and clears all action flags.
-func (e *entries) commit() EntriesManager {
+func (e *entries) commit() entriesManager {
 	servers := make(map[string]*serverEntry)
 
 	for id, entry := range e.servers {
@@ -218,7 +164,7 @@ func (e *entries) setRuntime(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	stateSub <-chan string,
-) EntriesManager {
+) entriesManager {
 	_, exists := e.servers[id]
 	if !exists {
 		return nil
@@ -250,7 +196,7 @@ func (e *entries) setRuntime(
 // clearRuntime creates a new entries collection with cleared runtime state for a server.
 // This is used during the commit phase to record that a server has been stopped.
 // Returns nil if the server doesn't exist.
-func (e *entries) clearRuntime(id string) EntriesManager {
+func (e *entries) clearRuntime(id string) entriesManager {
 	_, exists := e.servers[id]
 	if !exists {
 		return nil
@@ -276,5 +222,68 @@ func (e *entries) clearRuntime(id string) EntriesManager {
 	return &entries{servers: newServers}
 }
 
-// Ensure entries implements EntriesManager
-var _ EntriesManager = (*entries)(nil)
+// processExistingServer handles the logic for processing a server from the previous state.
+// Returns an iterator that yields (key, *serverEntry) pairs to add to the servers map.
+func processExistingServer(
+	id string,
+	oldEntry *serverEntry,
+	desiredConfig *httpserver.Config,
+	logger *slog.Logger,
+) iter.Seq2[string, *serverEntry] {
+	return func(yield func(string, *serverEntry) bool) {
+		if oldEntry == nil {
+			logger.Warn("Old entry object is nil", "id", id)
+			return
+		}
+
+		// Case 1: Server should be removed
+		if desiredConfig == nil {
+			if oldEntry.runner != nil {
+				newEntry := *oldEntry
+				newEntry.action = actionStop
+				logger.Debug("Server marked for stop", "id", id)
+				yield(id, &newEntry)
+			}
+			// If runner is nil, server was never started, so skip it
+			return
+		}
+
+		// Case 2: Config unchanged
+		if oldEntry.config.Equal(desiredConfig) {
+			newEntry := *oldEntry
+			newEntry.action = actionNone
+			logger.Debug("Server unchanged", "id", id)
+			yield(id, &newEntry)
+			return
+		}
+
+		// Case 3: Config changed - need to restart
+		if oldEntry.runner != nil {
+			// Running server needs restart
+			stopEntry := *oldEntry
+			stopEntry.action = actionStop
+
+			if !yield(id+":stop", &stopEntry) {
+				return
+			}
+
+			startEntry := &serverEntry{
+				id:     id,
+				config: desiredConfig,
+				action: actionStart,
+			}
+
+			logger.Debug("Server marked for restart", "id", id)
+			yield(id, startEntry)
+			return
+		}
+
+		// Not running, just start with new config
+		logger.Debug("Server marked for start", "id", id)
+		yield(id, &serverEntry{
+			id:     id,
+			config: desiredConfig,
+			action: actionStart,
+		})
+	}
+}

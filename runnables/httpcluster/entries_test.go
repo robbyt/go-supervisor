@@ -17,8 +17,8 @@ var testLogger = slog.New(
 	slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
 )
 
-// createTestConfig creates a test httpserver config
-func createTestConfig(t *testing.T, addr string) *httpserver.Config {
+// createTestHTTPConfig creates a test httpserver config
+func createTestHTTPConfig(t *testing.T, addr string) *httpserver.Config {
 	t.Helper()
 	route, err := httpserver.NewRoute("test", "/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -34,8 +34,8 @@ func createTestConfig(t *testing.T, addr string) *httpserver.Config {
 	return config
 }
 
-// createTestEntry creates a test server entry with runtime state
-func createTestEntry(
+// createTestServerEntry creates a test server entry with runtime state
+func createTestServerEntry(
 	t *testing.T,
 	id string,
 	config *httpserver.Config,
@@ -64,8 +64,8 @@ func createTestEntry(
 func TestNewEntries_EmptyPrevious(t *testing.T) {
 	t.Run("nil previous state", func(t *testing.T) {
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8001"),
-			"server2": createTestConfig(t, ":8002"),
+			"server1": createTestHTTPConfig(t, ":8001"),
+			"server2": createTestHTTPConfig(t, ":8002"),
 		}
 
 		entries := newEntries(nil, configs, testLogger)
@@ -90,7 +90,7 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 	t.Run("empty previous state", func(t *testing.T) {
 		previous := &entries{servers: make(map[string]*serverEntry)}
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8001"),
+			"server1": createTestHTTPConfig(t, ":8001"),
 		}
 
 		entries := newEntries(previous, configs, testLogger)
@@ -108,7 +108,12 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 		// Setup previous state with running server
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), true),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					true,
+				),
 			},
 		}
 
@@ -133,7 +138,12 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 		// Setup previous state with non-running server
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), false),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					false,
+				),
 			},
 		}
 
@@ -151,7 +161,12 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 	t.Run("remove with nil config", func(t *testing.T) {
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), true),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					true,
+				),
 			},
 		}
 
@@ -174,13 +189,18 @@ func TestNewEntries_ServerAddition(t *testing.T) {
 	t.Run("add new server", func(t *testing.T) {
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), true),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					true,
+				),
 			},
 		}
 
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8001"), // Unchanged
-			"server2": createTestConfig(t, ":8002"), // New
+			"server1": createTestHTTPConfig(t, ":8001"), // Unchanged
+			"server2": createTestHTTPConfig(t, ":8002"), // New
 		}
 
 		entries := newEntries(previous, configs, testLogger)
@@ -208,12 +228,17 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 	t.Run("config change running server", func(t *testing.T) {
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), true),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					true,
+				),
 			},
 		}
 
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8002"), // Changed port
+			"server1": createTestHTTPConfig(t, ":8002"), // Changed port
 		}
 
 		entries := newEntries(previous, configs, testLogger)
@@ -224,16 +249,16 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		assert.Len(t, toStart, 1)
 		assert.Len(t, toStop, 1)
 
-		// Check stop entry
-		assert.Contains(t, toStop, "server1")
-		stopEntry := entries.get("server1")
+		// Check stop entry (with :stop suffix)
+		assert.Contains(t, toStop, "server1:stop")
+		stopEntry := entries.get("server1:stop")
 		require.NotNil(t, stopEntry)
 		assert.Equal(t, actionStop, stopEntry.action)
 		assert.Equal(t, ":8001", stopEntry.config.ListenAddr) // Old config preserved
 
-		// Check start entry (with :new suffix)
-		assert.Contains(t, toStart, "server1:new")
-		startEntry := entries.get("server1:new")
+		// Check start entry (original id)
+		assert.Contains(t, toStart, "server1")
+		startEntry := entries.get("server1")
 		require.NotNil(t, startEntry)
 		assert.Equal(t, actionStart, startEntry.action)
 		assert.Equal(t, ":8002", startEntry.config.ListenAddr) // New config
@@ -243,12 +268,17 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 	t.Run("config change non-running server", func(t *testing.T) {
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), false),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					false,
+				),
 			},
 		}
 
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8002"), // Changed port
+			"server1": createTestHTTPConfig(t, ":8002"), // Changed port
 		}
 
 		entries := newEntries(previous, configs, testLogger)
@@ -267,10 +297,10 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 	})
 
 	t.Run("config unchanged", func(t *testing.T) {
-		config := createTestConfig(t, ":8001")
+		config := createTestHTTPConfig(t, ":8001")
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", config, true),
+				"server1": createTestServerEntry(t, "server1", config, true),
 			},
 		}
 
@@ -298,22 +328,22 @@ func TestEntriesCommit(t *testing.T) {
 			servers: map[string]*serverEntry{
 				"keep": {
 					id:     "keep",
-					config: createTestConfig(t, ":8001"),
+					config: createTestHTTPConfig(t, ":8001"),
 					action: actionNone,
 				},
 				"stop": {
 					id:     "stop",
-					config: createTestConfig(t, ":8002"),
+					config: createTestHTTPConfig(t, ":8002"),
 					action: actionStop,
 				},
 				"start": {
 					id:     "start",
-					config: createTestConfig(t, ":8003"),
+					config: createTestHTTPConfig(t, ":8003"),
 					action: actionStart,
 				},
 				"restart:new": {
 					id:     "restart",
-					config: createTestConfig(t, ":8004"),
+					config: createTestHTTPConfig(t, ":8004"),
 					action: actionStart,
 				},
 			},
@@ -352,7 +382,7 @@ func TestEntriesSetRuntime(t *testing.T) {
 			servers: map[string]*serverEntry{
 				"server1": {
 					id:     "server1",
-					config: createTestConfig(t, ":8001"),
+					config: createTestHTTPConfig(t, ":8001"),
 					action: actionStart,
 				},
 			},
@@ -399,7 +429,7 @@ func TestEntriesClearRuntime(t *testing.T) {
 			servers: map[string]*serverEntry{
 				"server1": {
 					id:     "server1",
-					config: createTestConfig(t, ":8001"),
+					config: createTestHTTPConfig(t, ":8001"),
 					ctx:    ctx,
 					cancel: cancel,
 					action: actionStop,
@@ -478,12 +508,17 @@ func TestEntriesImmutability(t *testing.T) {
 	t.Run("newEntries doesn't modify previous", func(t *testing.T) {
 		original := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), true),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					true,
+				),
 			},
 		}
 
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8002"), // Different config
+			"server1": createTestHTTPConfig(t, ":8002"), // Different config
 		}
 
 		newEntries := newEntries(original, configs, testLogger)
@@ -502,7 +537,12 @@ func TestEntriesImmutability(t *testing.T) {
 	t.Run("setRuntime doesn't modify original", func(t *testing.T) {
 		original := &entries{
 			servers: map[string]*serverEntry{
-				"server1": createTestEntry(t, "server1", createTestConfig(t, ":8001"), false),
+				"server1": createTestServerEntry(
+					t,
+					"server1",
+					createTestHTTPConfig(t, ":8001"),
+					false,
+				),
 			},
 		}
 
@@ -526,17 +566,27 @@ func TestComplexScenarios(t *testing.T) {
 		// Previous state: 3 servers running
 		previous := &entries{
 			servers: map[string]*serverEntry{
-				"keep":   createTestEntry(t, "keep", createTestConfig(t, ":8001"), true),
-				"remove": createTestEntry(t, "remove", createTestConfig(t, ":8002"), true),
-				"change": createTestEntry(t, "change", createTestConfig(t, ":8003"), true),
+				"keep": createTestServerEntry(t, "keep", createTestHTTPConfig(t, ":8001"), true),
+				"remove": createTestServerEntry(
+					t,
+					"remove",
+					createTestHTTPConfig(t, ":8002"),
+					true,
+				),
+				"change": createTestServerEntry(
+					t,
+					"change",
+					createTestHTTPConfig(t, ":8003"),
+					true,
+				),
 			},
 		}
 
 		// New config: keep one, remove one, change one, add one
 		configs := map[string]*httpserver.Config{
-			"keep":   createTestConfig(t, ":8001"), // Unchanged
-			"change": createTestConfig(t, ":8004"), // Changed port
-			"add":    createTestConfig(t, ":8005"), // New server
+			"keep":   createTestHTTPConfig(t, ":8001"), // Unchanged
+			"change": createTestHTTPConfig(t, ":8004"), // Changed port
+			"add":    createTestHTTPConfig(t, ":8005"), // New server
 			// "remove" not in new config
 		}
 
@@ -552,17 +602,17 @@ func TestComplexScenarios(t *testing.T) {
 		// Verify specific entries
 		assert.Equal(t, actionNone, entries.get("keep").action)
 		assert.Equal(t, actionStop, entries.get("remove").action)
-		assert.Equal(t, actionStop, entries.get("change").action)
-		assert.Equal(t, actionStart, entries.get("change:new").action)
+		assert.Equal(t, actionStop, entries.get("change:stop").action)
+		assert.Equal(t, actionStart, entries.get("change").action)
 		assert.Equal(t, actionStart, entries.get("add").action)
 
 		// After commit, should have 3 servers
 		committed := entries.commit()
 		assert.Equal(t, 3, committed.count())
 		assert.NotNil(t, committed.get("keep"))
-		assert.NotNil(t, committed.get("change")) // :new suffix removed
+		assert.NotNil(t, committed.get("change"))
 		assert.NotNil(t, committed.get("add"))
 		assert.Nil(t, committed.get("remove"))
-		assert.Nil(t, committed.get("change:new"))
+		assert.Nil(t, committed.get("change:stop"))
 	})
 }

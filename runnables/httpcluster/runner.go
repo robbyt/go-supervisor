@@ -26,14 +26,13 @@ type Runner struct {
 	configSiphon chan map[string]*httpserver.Config
 
 	// Current entries state
-	currentEntries EntriesManager
+	currentEntries entriesManager
 
 	// State management using FSM
 	fsm finitestate.Machine
 
 	// Options
-	logger       *slog.Logger
-	siphonBuffer int
+	logger *slog.Logger
 }
 
 // Interface guards
@@ -45,9 +44,9 @@ var (
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
-		siphonBuffer:   0, // Unbuffered by default
 		logger:         slog.Default().WithGroup("httpcluster"),
 		parentCtx:      context.Background(),
+		configSiphon:   make(chan map[string]*httpserver.Config),         // unbuffered by default
 		currentEntries: &entries{servers: make(map[string]*serverEntry)}, // Empty initial state
 	}
 
@@ -57,9 +56,6 @@ func NewRunner(opts ...Option) (*Runner, error) {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-
-	// Create the configuration siphon channel with configured buffer
-	r.configSiphon = make(chan map[string]*httpserver.Config, r.siphonBuffer)
 
 	// Create FSM with the configured logger
 	fsmLogger := r.logger.WithGroup("fsm")
@@ -117,18 +113,23 @@ func (r *Runner) waitForServerReady(
 
 // String returns a string representation of the cluster.
 func (r *Runner) String() string {
-	r.mu.RLock()
-	serverCount := r.currentEntries.count()
-	r.mu.RUnlock()
-
-	state := r.fsm.GetState()
-	return fmt.Sprintf("HTTPCluster[servers=%d, state=%s]", serverCount, state)
+	return fmt.Sprintf(
+		"HTTPCluster[servers=%d, state=%s]",
+		r.GetServerCount(),
+		r.fsm.GetState())
 }
 
 // Run starts the HTTP cluster and manages all child servers.
 func (r *Runner) Run(ctx context.Context) error {
 	logger := r.logger.WithGroup("Run")
 	logger.Info("Starting HTTP cluster")
+
+	// Transition to booting state
+	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
+		logger.Error("Failed to transition to booting state", "error", err)
+		r.setStateError()
+		return fmt.Errorf("failed to transition to booting state: %w", err)
+	}
 
 	// Set up run context - combines parent context and Run's context
 	r.mu.Lock()
@@ -137,13 +138,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.runCancel = runCancel
 	r.mu.Unlock()
 	defer runCancel()
-
-	// Transition to booting state
-	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
-		logger.Error("Failed to transition to booting state", "error", err)
-		r.setStateError()
-		return fmt.Errorf("failed to transition to booting state: %w", err)
-	}
 
 	// Transition to running (no servers initially)
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
@@ -157,20 +151,20 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Info("Run context cancelled, initiating shutdown")
-			return r.shutdown(ctx)
+			return r.shutdown(runCtx)
 
 		case <-r.parentCtx.Done():
 			logger.Info("Parent context cancelled, initiating shutdown")
-			return r.shutdown(ctx)
+			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Info("Config siphon closed, initiating shutdown")
-				return r.shutdown(ctx)
+				return r.shutdown(runCtx)
 			}
 
 			logger.Info("Received configuration update", "serverCount", len(newConfigs))
-			if err := r.processConfigUpdate(ctx, newConfigs); err != nil {
+			if err := r.processConfigUpdate(runCtx, newConfigs); err != nil {
 				logger.Error("Failed to process config update", "error", err)
 				// Continue running, don't fail the whole cluster
 			}
@@ -186,44 +180,13 @@ func (r *Runner) Stop() {
 	r.mu.Lock()
 	r.runCancel()
 	r.mu.Unlock()
-
-	// TODO: When should we close the config siphon?
-	// close(r.configSiphon)
-}
-
-// GetState returns the current state of the cluster.
-func (r *Runner) GetState() string {
-	return r.fsm.GetState()
-}
-
-// GetStateChan returns a channel that receives state updates.
-func (r *Runner) GetStateChan(ctx context.Context) <-chan string {
-	return r.fsm.GetStateChan(ctx)
-}
-
-// IsRunning returns true if the cluster is in a running state.
-func (r *Runner) IsRunning() bool {
-	return r.fsm.GetState() == finitestate.StatusRunning
-}
-
-// setStateError transitions the state machine to the Error state.
-func (r *Runner) setStateError() {
-	if r.fsm.TransitionBool(finitestate.StatusError) {
-		return
-	}
-
-	r.logger.Debug("Using SetState to force Error state")
-	if err := r.fsm.SetState(finitestate.StatusError); err != nil {
-		r.logger.Error("Failed to set Error state", "error", err)
-
-		if err := r.fsm.SetState(finitestate.StatusUnknown); err != nil {
-			r.logger.Error("Failed to set Unknown state", "error", err)
-		}
-	}
 }
 
 // shutdown performs graceful shutdown of all servers.
 func (r *Runner) shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if err := r.fsm.Transition(finitestate.StatusStopping); err != nil {
 		r.logger.Error("Failed to transition to stopping state", "error", err)
 	}
@@ -232,7 +195,7 @@ func (r *Runner) shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	stopConfigs := make(map[string]*httpserver.Config)
 	// Empty map means all servers should be removed
-	pendingEntries := NewEntriesManager(r.currentEntries, stopConfigs, r.logger)
+	pendingEntries := newEntries(r.currentEntries.(*entries), stopConfigs, r.logger)
 	r.mu.Unlock()
 
 	// Execute the stop actions
@@ -271,7 +234,7 @@ func (r *Runner) processConfigUpdate(
 
 	// Phase 1: Create new entries with pending actions
 	r.mu.RLock()
-	pendingEntries := NewEntriesManager(r.currentEntries, newConfigs, r.logger)
+	pendingEntries := newEntries(r.currentEntries.(*entries), newConfigs, r.logger)
 	r.mu.RUnlock()
 
 	// Log pending actions
@@ -299,7 +262,10 @@ func (r *Runner) processConfigUpdate(
 }
 
 // executeActions performs all pending actions and returns updated entries.
-func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) EntriesManager {
+func (r *Runner) executeActions(ctx context.Context, pending entriesManager) entriesManager {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	logger := r.logger.WithGroup("executeActions")
 	current := pending
 
@@ -309,6 +275,7 @@ func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) Ent
 	// Stop servers first
 	logger.Debug("Processing server stops", "count", len(toStop))
 	var wg sync.WaitGroup
+
 	for _, id := range toStop {
 		entry := current.get(id)
 		if entry == nil || entry.runner == nil {
@@ -338,14 +305,6 @@ func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) Ent
 
 	// Start new servers
 	logger.Debug("Processing server starts", "count", len(toStart))
-	r.mu.RLock()
-	runCtx := r.runCtx
-	r.mu.RUnlock()
-
-	if runCtx == nil {
-		logger.Error("Cannot start servers: run context not initialized")
-		return current
-	}
 
 	for _, id := range toStart {
 		entry := current.get(id)
@@ -357,10 +316,9 @@ func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) Ent
 		logger.Debug("Starting server", "id", id, "addr", entry.config.ListenAddr)
 
 		// Create server context
-		serverCtx, serverCancel := context.WithCancel(runCtx)
+		serverCtx, serverCancel := context.WithCancel(ctx)
 
 		// Create httpserver runner
-		//nolint:contextcheck // serverCtx is inherited from runCtx
 		runner, err := httpserver.NewRunner(
 			httpserver.WithConfig(entry.config),
 			httpserver.WithContext(serverCtx),
@@ -373,17 +331,14 @@ func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) Ent
 		}
 
 		// Get state channel
-		//nolint:contextcheck // serverCtx is inherited from runCtx
 		stateSub := runner.GetStateChan(serverCtx)
 
 		// Update entries with runtime info
-		//nolint:contextcheck // serverCtx is inherited from runCtx
 		if updated := current.setRuntime(id, runner, serverCtx, serverCancel, stateSub); updated != nil {
 			current = updated
 		}
 
 		// Start server in goroutine
-		//nolint:contextcheck // ctx is serverCtx
 		go func(id string, runner *httpserver.Runner, ctx context.Context) {
 			logger.Debug("Starting server goroutine", "id", id)
 			if err := runner.Run(ctx); err != nil {
@@ -396,8 +351,7 @@ func (r *Runner) executeActions(ctx context.Context, pending EntriesManager) Ent
 		}(entry.id, runner, serverCtx) // Use entry.id not id to handle ":new" suffix
 
 		// Wait for server to be ready
-		//nolint:contextcheck // serverCtx is inherited from runCtx
-		if !r.waitForServerReady(runner, serverCtx, 5*time.Second) {
+		if !r.waitForServerReady(runner, serverCtx, 10*time.Second) {
 			logger.Error("Server failed to become ready", "id", id)
 			// Cancel the server context to clean up
 			serverCancel()

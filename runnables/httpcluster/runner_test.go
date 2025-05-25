@@ -41,9 +41,9 @@ func (m *MockEntriesManager) getPendingActions() (toStart, toStop []string) {
 	return args.Get(0).([]string), args.Get(1).([]string)
 }
 
-func (m *MockEntriesManager) commit() EntriesManager {
+func (m *MockEntriesManager) commit() entriesManager {
 	args := m.Called()
-	return args.Get(0).(EntriesManager)
+	return args.Get(0).(entriesManager)
 }
 
 func (m *MockEntriesManager) setRuntime(
@@ -52,20 +52,20 @@ func (m *MockEntriesManager) setRuntime(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	stateSub <-chan string,
-) EntriesManager {
+) entriesManager {
 	args := m.Called(id, runner, ctx, cancel, stateSub)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(EntriesManager)
+	return args.Get(0).(entriesManager)
 }
 
-func (m *MockEntriesManager) clearRuntime(id string) EntriesManager {
+func (m *MockEntriesManager) clearRuntime(id string) entriesManager {
 	args := m.Called(id)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(EntriesManager)
+	return args.Get(0).(entriesManager)
 }
 
 func TestNewRunner(t *testing.T) {
@@ -74,7 +74,6 @@ func TestNewRunner(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, runner)
 
-		assert.Equal(t, 0, runner.siphonBuffer)
 		assert.NotNil(t, runner.logger)
 		assert.NotNil(t, runner.parentCtx)
 		assert.NotNil(t, runner.configSiphon)
@@ -90,12 +89,27 @@ func TestNewRunner(t *testing.T) {
 		runner, err := NewRunner(
 			WithLogger(logger),
 			WithContext(ctx),
-			WithSiphonBuffer(10),
+			WithSiphonBuffer(1),
 		)
 		require.NoError(t, err)
-
-		assert.Equal(t, 10, runner.siphonBuffer)
 		assert.Equal(t, ctx, runner.parentCtx)
+
+		cfg := make(map[string]*httpserver.Config)
+		select {
+		case runner.configSiphon <- cfg:
+			// we're good!
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("Should be able to send config without blocking")
+		}
+
+		assert.Never(t, func() bool {
+			select {
+			case runner.configSiphon <- cfg:
+				return true
+			default:
+				return false
+			}
+		}, 100*time.Millisecond, time.Millisecond, "Full channel should block, because Runnable hasn't booted yet")
 	})
 
 	t.Run("invalid option", func(t *testing.T) {
@@ -271,7 +285,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 
 		// Send config update
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8001"),
+			"server1": createTestHTTPConfig(t, ":8001"),
 		}
 
 		select {
@@ -299,7 +313,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 
 		// Don't start runner - should ignore config updates
 		configs := map[string]*httpserver.Config{
-			"server1": createTestConfig(t, ":8001"),
+			"server1": createTestHTTPConfig(t, ":8001"),
 		}
 
 		err = runner.processConfigUpdate(context.Background(), configs)
@@ -405,7 +419,7 @@ func TestRunnerConcurrency(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				configs := map[string]*httpserver.Config{
-					"server1": createTestConfig(t, ":8001"),
+					"server1": createTestHTTPConfig(t, ":8001"),
 				}
 
 				select {
@@ -538,6 +552,19 @@ func TestRunnerExecuteActions(t *testing.T) {
 		// Don't set run context
 		mockEntries := &MockEntriesManager{}
 		mockEntries.On("getPendingActions").Return([]string{"start1"}, []string{})
+
+		// Mock the get() method to return a test server entry
+		testConfig := createTestHTTPConfig(t, ":8001")
+		testEntry := &serverEntry{
+			id:     "start1",
+			config: testConfig,
+			action: actionStart,
+		}
+		mockEntries.On("get", "start1").Return(testEntry)
+
+		// Mock setRuntime to return the same mock (simulating immutable update)
+		mockEntries.On("setRuntime", "start1", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(mockEntries)
 
 		result := runner.executeActions(context.Background(), mockEntries)
 		assert.Equal(t, mockEntries, result)

@@ -3,6 +3,8 @@ package httpcluster
 import (
 	"context"
 	"log/slog"
+
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 )
 
 // Option is a function that configures a Runner.
@@ -24,11 +26,27 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithLogHandler sets the log handler for the cluster.
+func WithLogHandler(handler slog.Handler) Option {
+	return func(r *Runner) error {
+		r.logger = slog.New(handler)
+		return nil
+	}
+}
+
 // WithSiphonBuffer sets the buffer size for the configuration siphon channel.
 // A buffer of 0 (default) makes the channel synchronous.
 func WithSiphonBuffer(size int) Option {
 	return func(r *Runner) error {
-		r.siphonBuffer = size
+		r.configSiphon = make(chan map[string]*httpserver.Config, size)
+		return nil
+	}
+}
+
+// WithCustomSiphonChannel sets the custom configuration siphon channel for the cluster.
+func WithCustomSiphonChannel(channel chan map[string]*httpserver.Config) Option {
+	return func(r *Runner) error {
+		r.configSiphon = channel
 		return nil
 	}
 }
