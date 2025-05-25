@@ -64,6 +64,13 @@ func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 	return args.Get(0).(<-chan string)
 }
 
+// GetStateChanBuffer mocks the GetStateChanBuffer method of the stateMachine interface.
+// It returns a channel with a configurable buffer size that emits the state machine's state whenever it changes.
+func (m *MockStateMachine) GetStateChanBuffer(ctx context.Context, bufferSize int) <-chan string {
+	args := m.Called(ctx, bufferSize)
+	return args.Get(0).(<-chan string)
+}
+
 // MockRunner is a special version of Runner that allows direct manipulation
 // of config storage for testing purposes
 type MockRunner struct {

@@ -169,9 +169,11 @@ func (s *ConfigurableService) Reload() {
 
 ## Example Runnables
 
-The package includes some ready-to-use runnables for common use cases, and example:
+The package includes some ready-to-use runnables for common use cases:
 
-- HTTP Server Runnable: A configurable HTTP server with routing and middleware support
+- **HTTP Server**: A configurable HTTP server with routing and middleware support (`runnables/httpserver`)
+- **Composite**: A container for managing multiple Runnables using generics (`runnables/composite`)
+- **HTTP Cluster**: Dynamic management of multiple HTTP servers with hot-reload support using channel-based configuration (`runnables/httpcluster`)
 
 Each runnable has its own documentation in its directory (e.g., `runnables/httpserver/README.md`).
 

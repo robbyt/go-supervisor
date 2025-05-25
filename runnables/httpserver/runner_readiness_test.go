@@ -36,10 +36,6 @@ func TestServerReadinessProbe(t *testing.T) {
 		assert.ErrorIs(t, err, ErrServerReadinessTimeout)
 	})
 
-	t.Run("connection_close_error", func(t *testing.T) {
-		t.Skip("Skipping as it requires mocking the net.Conn Close() method")
-	})
-
 	t.Run("successful_probe", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
