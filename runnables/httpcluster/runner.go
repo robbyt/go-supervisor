@@ -17,6 +17,9 @@ import (
 type Runner struct {
 	mu sync.RWMutex
 
+	// runner factory creates the Runnable instances
+	runnerFactory func(context.Context, *httpserver.Config, slog.Handler) (httpServerRunner, error)
+
 	// Context management - similar to composite pattern
 	parentCtx context.Context // Set during construction
 	runCtx    context.Context // Set during Run()
@@ -41,9 +44,23 @@ var (
 	_ supervisor.Stateable = (*Runner)(nil)
 )
 
+// defaultRunnerFactory creates a new httpserver Runnable.
+func defaultRunnerFactory(
+	ctx context.Context,
+	cfg *httpserver.Config,
+	handler slog.Handler,
+) (httpServerRunner, error) {
+	return httpserver.NewRunner(
+		httpserver.WithConfig(cfg),
+		httpserver.WithContext(ctx),
+		httpserver.WithLogHandler(handler),
+	)
+}
+
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
+		runnerFactory:  defaultRunnerFactory,
 		logger:         slog.Default().WithGroup("httpcluster"),
 		parentCtx:      context.Background(),
 		configSiphon:   make(chan map[string]*httpserver.Config),         // unbuffered by default
@@ -379,12 +396,8 @@ func (r *Runner) createAndStartServer(
 	// Create server context
 	serverCtx, serverCancel := context.WithCancel(ctx)
 
-	// Create httpserver runner
-	runner, err := httpserver.NewRunner(
-		httpserver.WithConfig(entry.config),
-		httpserver.WithContext(serverCtx),
-		httpserver.WithLogHandler(r.logger.Handler()),
-	)
+	// Create the Runnable implementation, based on the factory associated with this runner
+	runner, err := r.runnerFactory(serverCtx, entry.config, r.logger.Handler())
 	if err != nil {
 		serverCancel()
 		return nil, nil, nil, err

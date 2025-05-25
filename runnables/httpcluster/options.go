@@ -50,3 +50,13 @@ func WithCustomSiphonChannel(channel chan map[string]*httpserver.Config) Option 
 		return nil
 	}
 }
+
+// WithRunnerFactory sets the factory function for creating Runnable instances.
+func WithRunnerFactory(
+	factory func(context.Context, *httpserver.Config, slog.Handler) (httpServerRunner, error),
+) Option {
+	return func(r *Runner) error {
+		r.runnerFactory = factory
+		return nil
+	}
+}
