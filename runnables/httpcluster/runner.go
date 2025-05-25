@@ -348,7 +348,7 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 				}
 			}
 			logger.Debug("Server goroutine stopped", "id", id)
-		}(entry.id, runner, serverCtx) // Use entry.id not id to handle ":new" suffix
+		}(entry.id, runner, serverCtx)
 
 		// Wait for server to be ready
 		if !r.waitForServerReady(runner, serverCtx, 10*time.Second) {

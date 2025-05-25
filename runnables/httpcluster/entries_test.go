@@ -341,7 +341,7 @@ func TestEntriesCommit(t *testing.T) {
 					config: createTestHTTPConfig(t, ":8003"),
 					action: actionStart,
 				},
-				"restart:new": {
+				"restart": {
 					id:     "restart",
 					config: createTestHTTPConfig(t, ":8004"),
 					action: actionStart,
@@ -351,7 +351,7 @@ func TestEntriesCommit(t *testing.T) {
 
 		committed := entries.commit()
 
-		// Should have 3 servers (stop entry removed, :new suffix removed)
+		// Should have 3 servers (stop entry removed)
 		assert.Equal(t, 3, committed.count())
 
 		// Check kept entry
@@ -367,12 +367,11 @@ func TestEntriesCommit(t *testing.T) {
 		require.NotNil(t, startEntry)
 		assert.Equal(t, actionNone, startEntry.action)
 
-		// Check restarted entry (suffix removed)
+		// Check restarted entry
 		restartEntry := committed.get("restart")
 		require.NotNil(t, restartEntry)
 		assert.Equal(t, "restart", restartEntry.id)
 		assert.Equal(t, actionNone, restartEntry.action)
-		assert.Nil(t, committed.get("restart:new"))
 	})
 }
 

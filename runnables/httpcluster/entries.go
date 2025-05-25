@@ -123,21 +123,6 @@ func (e *entries) commit() entriesManager {
 		case actionStop:
 			// Don't copy stopped servers
 			continue
-		case actionStart:
-			// For servers marked with ":new" suffix, restore original ID
-			actualID := id
-			if len(id) > 4 && id[len(id)-4:] == ":new" {
-				actualID = id[:len(id)-4]
-			}
-			servers[actualID] = &serverEntry{
-				id:       actualID,
-				config:   entry.config,
-				runner:   entry.runner,
-				ctx:      entry.ctx,
-				cancel:   entry.cancel,
-				stateSub: entry.stateSub,
-				action:   actionNone,
-			}
 		default:
 			// Copy entry with action cleared
 			servers[id] = &serverEntry{
