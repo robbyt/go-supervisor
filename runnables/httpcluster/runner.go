@@ -84,7 +84,7 @@ func (r *Runner) GetServerCount() int {
 // It returns true if the server was ready within the timeout deadline.
 // If the server is in error state, it returns false.
 func (r *Runner) waitForServerReady(
-	server *httpserver.Runner,
+	server httpServerRunner,
 	ctx context.Context,
 	timeout time.Duration,
 ) bool {
@@ -261,21 +261,35 @@ func (r *Runner) processConfigUpdate(
 	return nil
 }
 
-// executeActions performs all pending actions and returns updated entries.
+// executeActions orchestrates server lifecycle changes by stopping and starting servers.
 func (r *Runner) executeActions(ctx context.Context, pending entriesManager) entriesManager {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	logger := r.logger.WithGroup("executeActions")
 	current := pending
-
-	// Get actions to perform
 	toStart, toStop := pending.getPendingActions()
 
-	// Stop servers first
+	// Phase 1: Stop servers that need to be stopped
+	current = r.stopServers(ctx, current, toStop)
+
+	// Phase 2: Start servers that need to be started
+	current = r.startServers(ctx, current, toStart)
+
+	return current
+}
+
+// stopServers handles stopping servers and clearing their runtime state.
+func (r *Runner) stopServers(
+	_ context.Context,
+	current entriesManager,
+	toStop []string,
+) entriesManager {
+	logger := r.logger.WithGroup("stopServers")
 	logger.Debug("Processing server stops", "count", len(toStop))
+
 	var wg sync.WaitGroup
 
+	// Stop all servers in parallel
 	for _, id := range toStop {
 		entry := current.get(id)
 		if entry == nil || entry.runner == nil {
@@ -303,7 +317,16 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 		}
 	}
 
-	// Start new servers
+	return current
+}
+
+// startServers handles starting new servers and waiting for them to be ready.
+func (r *Runner) startServers(
+	ctx context.Context,
+	current entriesManager,
+	toStart []string,
+) entriesManager {
+	logger := r.logger.WithGroup("startServers")
 	logger.Debug("Processing server starts", "count", len(toStart))
 
 	for _, id := range toStart {
@@ -315,18 +338,10 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 
 		logger.Debug("Starting server", "id", id, "addr", entry.config.ListenAddr)
 
-		// Create server context
-		serverCtx, serverCancel := context.WithCancel(ctx)
-
-		// Create httpserver runner
-		runner, err := httpserver.NewRunner(
-			httpserver.WithConfig(entry.config),
-			httpserver.WithContext(serverCtx),
-			httpserver.WithLogHandler(r.logger.Handler()),
-		)
+		// Create and start the server
+		runner, serverCtx, serverCancel, err := r.createAndStartServer(ctx, entry)
 		if err != nil {
-			logger.Error("Failed to create server runner", "id", id, "error", err)
-			serverCancel()
+			logger.Error("Failed to create server", "id", id, "error", err)
 			continue
 		}
 
@@ -337,18 +352,6 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 		if updated := current.setRuntime(id, runner, serverCtx, serverCancel, stateSub); updated != nil {
 			current = updated
 		}
-
-		// Start server in goroutine
-		go func(id string, runner *httpserver.Runner, ctx context.Context) {
-			logger.Debug("Starting server goroutine", "id", id)
-			if err := runner.Run(ctx); err != nil {
-				if ctx.Err() == nil {
-					// Context not cancelled, this is an actual error
-					logger.Error("Server failed", "id", id, "error", err)
-				}
-			}
-			logger.Debug("Server goroutine stopped", "id", id)
-		}(entry.id, runner, serverCtx)
 
 		// Wait for server to be ready
 		if !r.waitForServerReady(runner, serverCtx, 10*time.Second) {
@@ -366,4 +369,39 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 	}
 
 	return current
+}
+
+// createAndStartServer creates a new HTTP server runner and starts it in a goroutine.
+func (r *Runner) createAndStartServer(
+	ctx context.Context,
+	entry *serverEntry,
+) (httpServerRunner, context.Context, context.CancelFunc, error) {
+	// Create server context
+	serverCtx, serverCancel := context.WithCancel(ctx)
+
+	// Create httpserver runner
+	runner, err := httpserver.NewRunner(
+		httpserver.WithConfig(entry.config),
+		httpserver.WithContext(serverCtx),
+		httpserver.WithLogHandler(r.logger.Handler()),
+	)
+	if err != nil {
+		serverCancel()
+		return nil, nil, nil, err
+	}
+
+	// Start server in goroutine
+	go func(id string, runner httpServerRunner, ctx context.Context) {
+		logger := r.logger.WithGroup("serverGoroutine")
+		logger.Debug("Starting server goroutine", "id", id)
+		if err := runner.Run(ctx); err != nil {
+			if ctx.Err() == nil {
+				// Context not cancelled, this is an actual error
+				logger.Error("Server failed", "id", id, "error", err)
+			}
+		}
+		logger.Debug("Server goroutine stopped", "id", id)
+	}(entry.id, runner, serverCtx)
+
+	return runner, serverCtx, serverCancel, nil
 }

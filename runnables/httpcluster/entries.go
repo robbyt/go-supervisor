@@ -24,7 +24,7 @@ type serverEntry struct {
 	config *httpserver.Config
 
 	// Runtime state - nil if server is not running
-	runner   *httpserver.Runner
+	runner   httpServerRunner
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stateSub <-chan string
@@ -145,7 +145,7 @@ func (e *entries) commit() entriesManager {
 // Returns nil if the server doesn't exist.
 func (e *entries) setRuntime(
 	id string,
-	runner *httpserver.Runner,
+	runner httpServerRunner,
 	ctx context.Context,
 	cancel context.CancelFunc,
 	stateSub <-chan string,

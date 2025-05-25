@@ -48,7 +48,7 @@ func (m *MockEntriesManager) commit() entriesManager {
 
 func (m *MockEntriesManager) setRuntime(
 	id string,
-	runner *httpserver.Runner,
+	runner httpServerRunner,
 	ctx context.Context,
 	cancel context.CancelFunc,
 	stateSub <-chan string,

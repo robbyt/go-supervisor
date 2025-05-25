@@ -3,7 +3,7 @@ package httpcluster
 import (
 	"context"
 
-	"github.com/robbyt/go-supervisor/runnables/httpserver"
+	"github.com/robbyt/go-supervisor/supervisor"
 )
 
 // entriesManager defines the interface for managing server entries.
@@ -31,7 +31,7 @@ type entriesManager interface {
 	// Returns nil if the server doesn't exist.
 	setRuntime(
 		id string,
-		runner *httpserver.Runner,
+		runner httpServerRunner,
 		ctx context.Context,
 		cancel context.CancelFunc,
 		stateSub <-chan string,
@@ -41,4 +41,10 @@ type entriesManager interface {
 	// This is used during the commit phase to record that a server has been stopped.
 	// Returns nil if the server doesn't exist.
 	clearRuntime(id string) entriesManager
+}
+
+// httpServerRunner defines the interface for running an HTTP server.
+type httpServerRunner interface {
+	supervisor.Runnable
+	supervisor.Stateable
 }
