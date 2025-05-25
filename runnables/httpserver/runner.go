@@ -270,8 +270,15 @@ func (r *Runner) boot() error {
 	// Start the server in a goroutine
 	go func() {
 		r.serverMutex.RLock()
-		defer r.serverMutex.RUnlock()
-		if err := r.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		server := r.server
+		r.serverMutex.RUnlock()
+
+		if server == nil {
+			r.logger.Debug("Server was nil, not starting")
+			return
+		}
+
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
 		r.logger.Debug("HTTP server stopped", "listenOn", listenAddr)
