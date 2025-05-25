@@ -34,7 +34,6 @@ type entriesManager interface {
 		runner httpServerRunner,
 		ctx context.Context,
 		cancel context.CancelFunc,
-		stateSub <-chan string,
 	) entriesManager
 
 	// clearRuntime creates a new entries collection with cleared runtime state for a server.

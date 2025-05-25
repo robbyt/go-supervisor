@@ -53,7 +53,6 @@ func createTestServerEntry(
 		// Set minimal runtime state for testing
 		entry.ctx = ctx
 		entry.cancel = cancel
-		entry.stateSub = make(<-chan string)
 		// Set a non-nil runner to indicate the server is running
 		entry.runner = &httpserver.Runner{}
 	}
@@ -389,9 +388,8 @@ func TestEntriesSetRuntime(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		stateSub := make(<-chan string)
 
-		updated := entries.setRuntime("server1", nil, ctx, cancel, stateSub)
+		updated := entries.setRuntime("server1", nil, ctx, cancel)
 
 		require.NotNil(t, updated)
 		assert.Equal(t, 1, updated.count())
@@ -399,7 +397,6 @@ func TestEntriesSetRuntime(t *testing.T) {
 		entry := updated.get("server1")
 		require.NotNil(t, entry)
 		assert.Equal(t, ctx, entry.ctx)
-		assert.Equal(t, stateSub, entry.stateSub)
 		assert.Equal(t, actionStart, entry.action) // Action preserved
 
 		// Original entries unchanged
@@ -415,7 +412,7 @@ func TestEntriesSetRuntime(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		updated := entries.setRuntime("nonexistent", nil, ctx, cancel, nil)
+		updated := entries.setRuntime("nonexistent", nil, ctx, cancel)
 
 		assert.Nil(t, updated)
 	})
@@ -548,7 +545,7 @@ func TestEntriesImmutability(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		updated := original.setRuntime("server1", nil, ctx, cancel, nil)
+		updated := original.setRuntime("server1", nil, ctx, cancel)
 
 		// Original unchanged
 		originalEntry := original.get("server1")

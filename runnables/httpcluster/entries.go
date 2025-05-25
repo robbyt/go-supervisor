@@ -24,10 +24,9 @@ type serverEntry struct {
 	config *httpserver.Config
 
 	// Runtime state - nil if server is not running
-	runner   httpServerRunner
-	ctx      context.Context
-	cancel   context.CancelFunc
-	stateSub <-chan string
+	runner httpServerRunner
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Pending action for the commit phase
 	action action
@@ -126,13 +125,12 @@ func (e *entries) commit() entriesManager {
 		default:
 			// Copy entry with action cleared
 			servers[id] = &serverEntry{
-				id:       entry.id,
-				config:   entry.config,
-				runner:   entry.runner,
-				ctx:      entry.ctx,
-				cancel:   entry.cancel,
-				stateSub: entry.stateSub,
-				action:   actionNone,
+				id:     entry.id,
+				config: entry.config,
+				runner: entry.runner,
+				ctx:    entry.ctx,
+				cancel: entry.cancel,
+				action: actionNone,
 			}
 		}
 	}
@@ -148,7 +146,6 @@ func (e *entries) setRuntime(
 	runner httpServerRunner,
 	ctx context.Context,
 	cancel context.CancelFunc,
-	stateSub <-chan string,
 ) entriesManager {
 	_, exists := e.servers[id]
 	if !exists {
@@ -161,13 +158,12 @@ func (e *entries) setRuntime(
 		if k == id {
 			// Create new entry with updated runtime
 			newServers[k] = &serverEntry{
-				id:       v.id,
-				config:   v.config,
-				runner:   runner,
-				ctx:      ctx,
-				cancel:   cancel,
-				stateSub: stateSub,
-				action:   v.action, // Preserve action
+				id:     v.id,
+				config: v.config,
+				runner: runner,
+				ctx:    ctx,
+				cancel: cancel,
+				action: v.action, // Preserve action
 			}
 		} else {
 			// Copy existing entry

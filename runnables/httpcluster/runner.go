@@ -65,7 +65,7 @@ func defaultRunnerFactory(
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
 		runnerFactory:  defaultRunnerFactory,
-		logger:         slog.Default().WithGroup("httpcluster"),
+		logger:         slog.Default().WithGroup("httpcluster.Runner"),
 		parentCtx:      context.Background(),
 		configSiphon:   make(chan map[string]*httpserver.Config),         // unbuffered by default
 		currentEntries: &entries{servers: make(map[string]*serverEntry)}, // Empty initial state
@@ -143,11 +143,10 @@ func (r *Runner) String() string {
 // Run starts the HTTP cluster and manages all child servers.
 func (r *Runner) Run(ctx context.Context) error {
 	logger := r.logger.WithGroup("Run")
-	logger.Debug("Starting")
+	logger.Debug("Starting...")
 
 	// Transition to booting state
 	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
-		logger.Error("Failed to transition to booting state", "error", err)
 		r.setStateError()
 		return fmt.Errorf("failed to transition to booting state: %w", err)
 	}
@@ -162,7 +161,6 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Transition to running (no servers initially)
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-		logger.Error("Failed to transition to running state", "error", err)
 		r.setStateError()
 		return fmt.Errorf("failed to transition to running state: %w", err)
 	}
@@ -249,7 +247,6 @@ func (r *Runner) processConfigUpdate(
 
 	// Transition to reloading state
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		logger.Error("Failed to transition to reloading state", "error", err)
 		return fmt.Errorf("failed to transition to reloading state: %w", err)
 	}
 
@@ -274,7 +271,6 @@ func (r *Runner) processConfigUpdate(
 
 	// Transition back to running state using conditional transition
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusReloading, finitestate.StatusRunning); err != nil {
-		logger.Error("Failed to transition back to running state", "error", err)
 		r.setStateError()
 		return fmt.Errorf("failed to transition back to running state: %w", err)
 	}
@@ -363,11 +359,8 @@ func (r *Runner) startServers(
 			continue
 		}
 
-		// Get state channel
-		stateSub := runner.GetStateChan(serverCtx)
-
 		// Update entries with runtime info
-		if updated := current.setRuntime(id, runner, serverCtx, serverCancel, stateSub); updated != nil {
+		if updated := current.setRuntime(id, runner, serverCtx, serverCancel); updated != nil {
 			current = updated
 		}
 
@@ -383,7 +376,7 @@ func (r *Runner) startServers(
 			continue
 		}
 
-		logger.Debug("Server started successfully", "id", id, "state", runner.GetState())
+		logger.Debug("Server instance started successfully", "id", id, "state", runner.GetState())
 	}
 
 	return current
@@ -404,17 +397,17 @@ func (r *Runner) createAndStartServer(
 		return nil, nil, nil, err
 	}
 
-	// Start server in goroutine
-	go func(id string, runner httpServerRunner, ctx context.Context) {
-		logger := r.logger.WithGroup("serverGoroutine")
-		logger.Debug("Starting server goroutine", "id", id)
-		if err := runner.Run(ctx); err != nil {
-			if ctx.Err() == nil {
+	// Start that Runnable implementation in a goroutine
+	go func(id string, runner httpServerRunner, c context.Context) {
+		logger := r.logger.WithGroup("cluster").With("id", id)
+		logger.Debug("Starting server instance")
+		if err := runner.Run(c); err != nil {
+			if c.Err() == nil {
 				// Context not cancelled, this is an actual error
-				logger.Error("Server failed", "id", id, "error", err)
+				logger.Error("Server instance failed", "error", err)
 			}
 		}
-		logger.Debug("Server goroutine stopped", "id", id)
+		logger.Debug("Instance stopped")
 	}(entry.id, runner, serverCtx)
 
 	return runner, serverCtx, serverCancel, nil

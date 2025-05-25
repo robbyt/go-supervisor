@@ -24,6 +24,9 @@ const (
 
 	// Drain timeout for HTTP servers
 	DrainTimeout = 2 * time.Second
+
+	// Logger level
+	LoggerLevel = slog.LevelDebug
 )
 
 // PortRequest represents the JSON payload for port change requests
@@ -55,7 +58,6 @@ func createCommonMiddleware(logger *slog.Logger) []middleware.Middleware {
 	return []middleware.Middleware{
 		middleware.PanicRecovery(logger.WithGroup("recovery")),
 		middleware.Logger(logger.WithGroup("http")),
-		middleware.MetricCollector(),
 	}
 }
 
@@ -117,7 +119,9 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		"main": config,
 	}
 	cm.currentPort = newPort
-	cm.logger.Info("Configuration updated", "old_port", oldPort, "new_port", newPort)
+	if newPort != oldPort {
+		cm.logger.Info("Configuration updated", "old_port", oldPort, "new_port", newPort)
+	}
 
 	return nil
 }
@@ -259,8 +263,7 @@ func createHTTPCluster(
 func main() {
 	// Configure logger
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-		// Level: slog.LevelDebug,
+		Level: LoggerLevel,
 	})
 	slog.SetDefault(slog.New(handler))
 

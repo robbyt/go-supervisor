@@ -54,9 +54,8 @@ func (m *MockEntriesManager) setRuntime(
 	runner httpServerRunner,
 	ctx context.Context,
 	cancel context.CancelFunc,
-	stateSub <-chan string,
 ) entriesManager {
-	args := m.Called(id, runner, ctx, cancel, stateSub)
+	args := m.Called(id, runner, ctx, cancel)
 	if args.Get(0) == nil {
 		return nil
 	}
@@ -669,11 +668,6 @@ func TestRunnerWithMockFactory(t *testing.T) {
 				// Maybe() because Stop might not be called on all servers
 			mockServer.On("GetState").Return(finitestate.StatusRunning)
 			mockServer.On("IsRunning").Return(true)
-
-			// Setup state channel
-			stateChan := make(chan string, 1)
-			stateChan <- finitestate.StatusRunning
-			mockServer.On("GetStateChan", mock.Anything).Return(stateChan)
 
 			mu.Lock()
 			createdServers = append(createdServers, mockServer)
