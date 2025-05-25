@@ -18,7 +18,7 @@ type Runner struct {
 	mu sync.RWMutex
 
 	// runner factory creates the Runnable instances
-	runnerFactory func(context.Context, *httpserver.Config, slog.Handler) (httpServerRunner, error)
+	runnerFactory runnerFactory
 
 	// Context management - similar to composite pattern
 	parentCtx context.Context // Set during construction
@@ -44,13 +44,17 @@ var (
 	_ supervisor.Stateable = (*Runner)(nil)
 )
 
+type runnerFactory func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error)
+
 // defaultRunnerFactory creates a new httpserver Runnable.
 func defaultRunnerFactory(
 	ctx context.Context,
+	id string,
 	cfg *httpserver.Config,
 	handler slog.Handler,
 ) (httpServerRunner, error) {
 	return httpserver.NewRunner(
+		httpserver.WithName(id),
 		httpserver.WithConfig(cfg),
 		httpserver.WithContext(ctx),
 		httpserver.WithLogHandler(handler),
@@ -139,7 +143,7 @@ func (r *Runner) String() string {
 // Run starts the HTTP cluster and manages all child servers.
 func (r *Runner) Run(ctx context.Context) error {
 	logger := r.logger.WithGroup("Run")
-	logger.Info("Starting HTTP cluster")
+	logger.Debug("Starting")
 
 	// Transition to booting state
 	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
@@ -167,20 +171,20 @@ func (r *Runner) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-runCtx.Done():
-			logger.Info("Run context cancelled, initiating shutdown")
+			logger.Debug("Run context cancelled, initiating shutdown")
 			return r.shutdown(runCtx)
 
 		case <-r.parentCtx.Done():
-			logger.Info("Parent context cancelled, initiating shutdown")
+			logger.Debug("Parent context cancelled, initiating shutdown")
 			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
-				logger.Info("Config siphon closed, initiating shutdown")
+				logger.Debug("Config siphon closed, initiating shutdown")
 				return r.shutdown(runCtx)
 			}
 
-			logger.Info("Received configuration update", "serverCount", len(newConfigs))
+			logger.Debug("Received configuration update", "serverCount", len(newConfigs))
 			if err := r.processConfigUpdate(runCtx, newConfigs); err != nil {
 				logger.Error("Failed to process config update", "error", err)
 				// Continue running, don't fail the whole cluster
@@ -192,7 +196,7 @@ func (r *Runner) Run(ctx context.Context) error {
 // Stop signals the cluster to stop all servers and shut down.
 func (r *Runner) Stop() {
 	logger := r.logger.WithGroup("Stop")
-	logger.Info("Stopping HTTP cluster")
+	logger.Debug("Stopping")
 
 	r.mu.Lock()
 	r.runCancel()
@@ -256,7 +260,7 @@ func (r *Runner) processConfigUpdate(
 
 	// Log pending actions
 	toStart, toStop := pendingEntries.getPendingActions()
-	logger.Info("Pending actions calculated",
+	logger.Debug("Pending actions calculated",
 		"toStart", len(toStart),
 		"toStop", len(toStop))
 
@@ -280,9 +284,6 @@ func (r *Runner) processConfigUpdate(
 
 // executeActions orchestrates server lifecycle changes by stopping and starting servers.
 func (r *Runner) executeActions(ctx context.Context, pending entriesManager) entriesManager {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	current := pending
 	toStart, toStop := pending.getPendingActions()
 
@@ -397,7 +398,7 @@ func (r *Runner) createAndStartServer(
 	serverCtx, serverCancel := context.WithCancel(ctx)
 
 	// Create the Runnable implementation, based on the factory associated with this runner
-	runner, err := r.runnerFactory(serverCtx, entry.config, r.logger.Handler())
+	runner, err := r.runnerFactory(serverCtx, entry.id, entry.config, r.logger.Handler())
 	if err != nil {
 		serverCancel()
 		return nil, nil, nil, err

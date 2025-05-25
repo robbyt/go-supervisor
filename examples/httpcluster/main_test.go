@@ -22,7 +22,7 @@ func TestRunCluster(t *testing.T) {
 	logHandler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})
 	ctx := t.Context()
 
-	sv, configMgr, err := RunCluster(ctx, logHandler)
+	sv, configMgr, err := createHTTPCluster(ctx, logHandler)
 	require.NoError(t, err)
 	require.NotNil(t, sv)
 	require.NotNil(t, configMgr)

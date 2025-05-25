@@ -111,17 +111,13 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		return fmt.Errorf("failed to create config: %w", err)
 	}
 
-	// Send configuration update
+	// Send configuration update (will block until cluster is ready)
 	oldPort := cm.currentPort
-	select {
-	case cm.cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
+	cm.cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
 		"main": config,
-	}:
-		cm.currentPort = newPort
-		cm.logger.Info("Configuration updated", "old_port", oldPort, "new_port", newPort)
-	default:
-		return fmt.Errorf("configuration channel is blocked")
 	}
+	cm.currentPort = newPort
+	cm.logger.Info("Configuration updated", "old_port", oldPort, "new_port", newPort)
 
 	return nil
 }
@@ -190,6 +186,9 @@ func (cm *ConfigManager) createConfigHandler() http.HandlerFunc {
 				return
 			}
 
+			// Capture old port before updating
+			oldPort := cm.getCurrentPort()
+
 			// Update configuration
 			if err := cm.updatePort(req.Port); err != nil {
 				http.Error(
@@ -204,7 +203,7 @@ func (cm *ConfigManager) createConfigHandler() http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			err = json.NewEncoder(w).Encode(map[string]string{
 				"status":   "updated",
-				"old_port": cm.getCurrentPort(),
+				"old_port": oldPort,
 				"new_port": req.Port,
 				"message":  fmt.Sprintf("Server will move to port %s", req.Port),
 			})
@@ -219,8 +218,8 @@ func (cm *ConfigManager) createConfigHandler() http.HandlerFunc {
 	}
 }
 
-// RunCluster initializes and runs the HTTP cluster with supervisor
-func RunCluster(
+// createHTTPCluster initializes the HTTP cluster Runnable
+func createHTTPCluster(
 	ctx context.Context,
 	logHandler slog.Handler,
 ) (*supervisor.PIDZero, *ConfigManager, error) {
@@ -254,15 +253,6 @@ func RunCluster(
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create supervisor: %w", err)
 	}
-
-	// Monitor cluster state changes
-	go func() {
-		stateChan := cluster.GetStateChan(ctx)
-		for state := range stateChan {
-			logger.Info("Cluster state changed", "state", state)
-		}
-	}()
-
 	return sv, configMgr, nil
 }
 
@@ -270,6 +260,7 @@ func main() {
 	// Configure logger
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
+		// Level: slog.LevelDebug,
 	})
 	slog.SetDefault(slog.New(handler))
 
@@ -277,13 +268,13 @@ func main() {
 	ctx := context.Background()
 
 	// Run the cluster
-	sv, _, err := RunCluster(ctx, handler)
+	sv, _, err := createHTTPCluster(ctx, handler)
 	if err != nil {
 		slog.Error("Failed to setup cluster", "error", err)
 		os.Exit(1)
 	}
 
-	// Start the supervisor - this will block until shutdown
+	// Start the supervisor - this will block until receiving an OS signal to shutdown
 	slog.Info("Starting supervisor with HTTP cluster",
 		"initial_port", InitialPort,
 		"instructions", fmt.Sprintf("Visit http://localhost%s for instructions", InitialPort),

@@ -655,7 +655,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		var mu sync.Mutex
 
 		// Create a factory that returns mocked servers
-		mockFactory := func(ctx context.Context, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
+		mockFactory := func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
 			mockServer := mocks.NewMockRunnableWithStateable()
 
 			// Setup expectations
@@ -732,7 +732,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 	t.Run("server creation errors", func(t *testing.T) {
 		failCount := 0
-		mockFactory := func(ctx context.Context, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
+		mockFactory := func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
 			failCount++
 			if failCount == 1 {
 				// First server fails
@@ -789,7 +789,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 	})
 
 	t.Run("server state transitions", func(t *testing.T) {
-		mockFactory := func(ctx context.Context, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
+		mockFactory := func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
 			mockServer := mocks.NewMockRunnableWithStateable()
 
 			// Create a state channel we can control
@@ -848,7 +848,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 	})
 
 	t.Run("server readiness timeout", func(t *testing.T) {
-		mockFactory := func(ctx context.Context, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
+		mockFactory := func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
 			mockServer := mocks.NewMockRunnableWithStateable()
 
 			// Server never becomes ready (always returns New state)
@@ -900,7 +900,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		var capturedConfig *httpserver.Config
 		var capturedHandler slog.Handler
 
-		mockFactory := func(ctx context.Context, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
+		mockFactory := func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error) {
 			mu.Lock()
 			capturedCtx = ctx
 			capturedConfig = cfg
