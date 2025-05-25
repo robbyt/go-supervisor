@@ -13,7 +13,7 @@ func (r *Runner) GetState() string {
 
 // GetStateChan returns a channel that receives state updates.
 func (r *Runner) GetStateChan(ctx context.Context) <-chan string {
-	return r.fsm.GetStateChan(ctx)
+	return r.fsm.GetStateChanBuffer(ctx, r.stateChanBufferSize)
 }
 
 // IsRunning returns true if the cluster is in a running state.

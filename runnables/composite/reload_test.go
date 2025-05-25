@@ -51,6 +51,11 @@ func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 	return args.Get(0).(<-chan string)
 }
 
+func (m *MockStateMachine) GetStateChanBuffer(ctx context.Context, bufferSize int) <-chan string {
+	args := m.Called(ctx, bufferSize)
+	return args.Get(0).(<-chan string)
+}
+
 // MockReloadableWithConfig implements both Runnable and ReloadableWithConfig for testing
 type MockReloadableWithConfig struct {
 	*mocks.Runnable

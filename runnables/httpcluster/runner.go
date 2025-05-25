@@ -35,7 +35,8 @@ type Runner struct {
 	fsm finitestate.Machine
 
 	// Options
-	logger *slog.Logger
+	logger              *slog.Logger
+	stateChanBufferSize int
 }
 
 // Interface guards
@@ -64,11 +65,16 @@ func defaultRunnerFactory(
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
-		runnerFactory:  defaultRunnerFactory,
-		logger:         slog.Default().WithGroup("httpcluster.Runner"),
-		parentCtx:      context.Background(),
-		configSiphon:   make(chan map[string]*httpserver.Config),         // unbuffered by default
-		currentEntries: &entries{servers: make(map[string]*serverEntry)}, // Empty initial state
+		runnerFactory: defaultRunnerFactory,
+		logger:        slog.Default().WithGroup("httpcluster.Runner"),
+		parentCtx:     context.Background(),
+		configSiphon: make(
+			chan map[string]*httpserver.Config,
+		), // unbuffered by default
+		currentEntries: &entries{
+			servers: make(map[string]*serverEntry),
+		}, // Empty initial state
+		stateChanBufferSize: 10, // Default buffer size for state channels
 	}
 
 	// Apply options

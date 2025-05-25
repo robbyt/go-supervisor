@@ -2,6 +2,7 @@ package httpcluster
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
@@ -57,6 +58,19 @@ func WithRunnerFactory(
 ) Option {
 	return func(r *Runner) error {
 		r.runnerFactory = factory
+		return nil
+	}
+}
+
+// WithStateChanBufferSize sets the buffer size for state channels.
+// This helps prevent dropped state transitions in tests or when state changes happen rapidly.
+// Default is 10. Size of 0 creates an unbuffered channel.
+func WithStateChanBufferSize(size int) Option {
+	return func(r *Runner) error {
+		if size < 0 {
+			return fmt.Errorf("state channel buffer size cannot be negative: %d", size)
+		}
+		r.stateChanBufferSize = size
 		return nil
 	}
 }
