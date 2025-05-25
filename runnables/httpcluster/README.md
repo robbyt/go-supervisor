@@ -31,59 +31,46 @@ The `httpcluster` Runnable manages multiple HTTP server instances dynamically as
 package main
 
 import (
-    "context"
     "log"
     "net/http"
     
+    "github.com/robbyt/go-supervisor/supervisor"
     "github.com/robbyt/go-supervisor/runnables/httpcluster"
     "github.com/robbyt/go-supervisor/runnables/httpserver"
 )
 
 func main() {
-    // Create the httpcluster runner
-    cluster, err := httpcluster.NewRunner(
-        httpcluster.WithSiphonBuffer(10), // Buffer for config updates
+    // Create the httpcluster Runnable
+    cluster, err := httpcluster.NewRunner()
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Create supervisor with the cluster
+    super, err := supervisor.New(
+        supervisor.WithRunnables(cluster),
     )
     if err != nil {
         log.Fatal(err)
     }
     
-    // Start the cluster in a goroutine
-    ctx := context.Background()
+    // Send initial configuration
     go func() {
-        if err := cluster.Run(ctx); err != nil {
-            log.Printf("Cluster error: %v", err)
+        handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            w.Write([]byte("Hello World"))
+        })
+        
+        route, _ := httpserver.NewRoute("hello", "/", handler)
+        config, _ := httpserver.NewConfig(":8080", httpserver.Routes{*route})
+        
+        cluster.configSiphon <- map[string]*httpserver.Config{
+            "server1": config,
         }
     }()
     
-    // Create initial server configurations
-    apiRoute, _ := httpserver.NewRoute("api", "/api", apiHandler)
-    apiConfig, _ := httpserver.NewConfig(":8080", httpserver.Routes{*apiRoute})
-    
-    adminRoute, _ := httpserver.NewRoute("admin", "/admin", adminHandler)
-    adminConfig, _ := httpserver.NewConfig(":9090", httpserver.Routes{*adminRoute})
-    
-    // Send initial configuration
-    cluster.configSiphon <- map[string]*httpserver.Config{
-        "api-server":   apiConfig,
-        "admin-server": adminConfig,
-    }
-    
-    // Later, update configuration dynamically
-    metricsRoute, _ := httpserver.NewRoute("metrics", "/metrics", metricsHandler)
-    metricsConfig, _ := httpserver.NewConfig(":9091", httpserver.Routes{*metricsRoute})
-    
-    cluster.configSiphon <- map[string]*httpserver.Config{
-        "api-server":     apiConfig,      // Keep existing
-        "admin-server":   adminConfig,    // Keep existing
-        "metrics-server": metricsConfig,  // Add new server
-    }
-    
-    // Remove a server by omitting it from the config
-    cluster.configSiphon <- map[string]*httpserver.Config{
-        "api-server":     apiConfig,     // Keep
-        "metrics-server": metricsConfig, // Keep
-        // admin-server removed
+    // Run supervisor (blocks until signal)
+    if err := super.Run(); err != nil {
+        log.Fatal(err)
     }
 }
 ```
@@ -165,24 +152,58 @@ Unlike composite and httpserver, httpcluster does NOT implement the Reloadable i
 package main
 
 import (
-    "context"
-    "github.com/robbyt/go-supervisor"
+    "log"
+    "net/http"
+    "time"
+    
+    "github.com/robbyt/go-supervisor/supervisor"
     "github.com/robbyt/go-supervisor/runnables/httpcluster"
+    "github.com/robbyt/go-supervisor/runnables/httpserver"
 )
 
 func main() {
     // Create cluster
-    cluster, _ := httpcluster.NewRunner()
+    cluster, err := httpcluster.NewRunner()
+    if err != nil {
+        log.Fatal(err)
+    }
     
     // Create supervisor
-    super, _ := supervisor.New(
+    super, err := supervisor.New(
         supervisor.WithRunnables(cluster),
     )
+    if err != nil {
+        log.Fatal(err)
+    }
     
-    // In another goroutine, send config updates
+    // Configuration manager goroutine
     go func() {
-        // Send configs through the siphon
-        cluster.configSiphon <- newConfigs
+        // Initial configuration
+        handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            w.Write([]byte("API v1"))
+        })
+        
+        route, _ := httpserver.NewRoute("api", "/api", handler)
+        config, _ := httpserver.NewConfig(":8080", httpserver.Routes{*route})
+        
+        cluster.configSiphon <- map[string]*httpserver.Config{
+            "api": config,
+        }
+        
+        // Later: add another server
+        time.Sleep(10 * time.Second)
+        
+        adminHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            w.Write([]byte("Admin"))
+        })
+        
+        adminRoute, _ := httpserver.NewRoute("admin", "/admin", adminHandler)
+        adminConfig, _ := httpserver.NewConfig(":9090", httpserver.Routes{*adminRoute})
+        
+        cluster.configSiphon <- map[string]*httpserver.Config{
+            "api":   config,      // Keep existing
+            "admin": adminConfig, // Add new
+        }
     }()
     
     // Run supervisor (blocks until signal)
