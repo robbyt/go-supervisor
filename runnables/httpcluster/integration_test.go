@@ -3,12 +3,14 @@ package httpcluster
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
+	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -419,4 +421,219 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
+}
+
+func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	runner, err := NewRunner()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start runner
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(ctx)
+	}()
+
+	// Wait for running
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, time.Second, 10*time.Millisecond)
+
+	// Create initial configuration
+	route, err := httpserver.NewRoute(
+		"test",
+		"/test",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write([]byte("test response")); err != nil {
+				t.Logf("Failed to write response: %v", err)
+			}
+		},
+	)
+	require.NoError(t, err)
+
+	config, err := httpserver.NewConfig(
+		getAvailablePort(t),
+		httpserver.Routes{*route},
+	)
+	require.NoError(t, err)
+
+	configs := map[string]*httpserver.Config{
+		"test-server": config,
+	}
+
+	// Apply initial configuration
+	select {
+	case runner.configSiphon <- configs:
+		// Sent successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Should be able to send initial config")
+	}
+
+	// Wait for server to start
+	require.Eventually(t, func() bool {
+		return runner.GetServerCount() == 1
+	}, time.Second, 10*time.Millisecond, "Server should start")
+
+	// Capture reference to the original server instance
+	runner.mu.RLock()
+	originalEntry := runner.currentEntries.get("test-server")
+	require.NotNil(t, originalEntry, "Server entry should exist")
+	require.NotNil(t, originalEntry.runner, "Server runner should exist")
+	originalRunner := originalEntry.runner
+	runner.mu.RUnlock()
+
+	// Wait for server to be fully ready
+	require.Eventually(t, func() bool {
+		return originalRunner.IsRunning()
+	}, time.Second, 10*time.Millisecond, "Server should be running")
+
+	// Apply the exact same configuration again
+	select {
+	case runner.configSiphon <- configs:
+		// Sent successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Should be able to send identical config")
+	}
+
+	// Wait for configuration processing to complete
+	require.Eventually(t, func() bool {
+		return runner.IsRunning() // Cluster should be back to running state
+	}, time.Second, 10*time.Millisecond, "Cluster should return to running state")
+
+	// Verify server count is still 1
+	assert.Equal(t, 1, runner.GetServerCount(), "Server count should remain 1")
+
+	// Verify the same server instance is still running
+	runner.mu.RLock()
+	currentEntry := runner.currentEntries.get("test-server")
+	require.NotNil(t, currentEntry, "Server entry should still exist")
+	require.NotNil(t, currentEntry.runner, "Server runner should still exist")
+	currentRunner := currentEntry.runner
+	runner.mu.RUnlock()
+
+	// This is the critical test: the runner instance should be the same
+	assert.Same(t, originalRunner, currentRunner,
+		"Server instance should not have been recreated for identical config")
+
+	// Apply the identical configuration one more time to be thorough
+	select {
+	case runner.configSiphon <- configs:
+		// Sent successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Should be able to send identical config again")
+	}
+
+	// Wait for configuration processing to complete
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, time.Second, 10*time.Millisecond, "Cluster should remain running")
+
+	// Verify everything is still the same
+	assert.Equal(t, 1, runner.GetServerCount(), "Server count should still be 1")
+
+	runner.mu.RLock()
+	finalEntry := runner.currentEntries.get("test-server")
+	require.NotNil(t, finalEntry, "Server entry should still exist")
+	require.NotNil(t, finalEntry.runner, "Server runner should still exist")
+	finalRunner := finalEntry.runner
+	runner.mu.RUnlock()
+
+	assert.Same(t, originalRunner, finalRunner,
+		"Server instance should still be the same after multiple identical configs")
+
+	// Stop runner
+	cancel()
+
+	select {
+	case err := <-runErr:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Runner did not stop within timeout")
+	}
+}
+
+func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// This test demonstrates the logic without the full integration complexity
+	// by testing the newEntries function directly
+
+	// Create initial configuration
+	route, err := httpserver.NewRoute(
+		"test",
+		"/test",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	)
+	require.NoError(t, err)
+
+	config, err := httpserver.NewConfig(
+		"127.0.0.1:0",
+		httpserver.Routes{*route},
+	)
+	require.NoError(t, err)
+
+	configs := map[string]*httpserver.Config{
+		"test-server": config,
+	}
+
+	logger := slog.Default()
+
+	// Test case 1: First application should mark server for start
+	entries1 := newEntries(nil, configs, logger)
+	toStart1, toStop1 := entries1.getPendingActions()
+
+	assert.Len(t, toStart1, 1, "First config should trigger one server start")
+	assert.Len(t, toStop1, 0, "First config should not trigger any stops")
+	assert.Contains(t, toStart1, "test-server", "test-server should be marked for start")
+
+	// Simulate the server being started by updating the entry with runtime info
+	entry := entries1.get("test-server")
+	require.NotNil(t, entry)
+	mockRunner := mocks.NewMockRunnableWithStateable()
+	mockRunner.On("IsRunning").Return(true)
+	mockRunner.On("GetState").Return("Running")
+	entry.runner = mockRunner
+	entry.action = actionNone // Clear action after "starting"
+
+	// Create committed entries as if the first config was processed
+	committedEntries := &entries{
+		servers: map[string]*serverEntry{
+			"test-server": {
+				id:     "test-server",
+				config: config,
+				runner: entry.runner,
+				action: actionNone,
+			},
+		},
+	}
+
+	// Test case 2: Applying identical config should result in no actions
+	entries2 := newEntries(committedEntries, configs, logger)
+	toStart2, toStop2 := entries2.getPendingActions()
+
+	assert.Len(t, toStart2, 0, "Identical config should not trigger any starts")
+	assert.Len(t, toStop2, 0, "Identical config should not trigger any stops")
+
+	// Verify the server entry action is set to actionNone
+	entry2 := entries2.get("test-server")
+	require.NotNil(t, entry2)
+	assert.Equal(t, actionNone, entry2.action, "Server with identical config should have no action")
+
+	// Test case 3: Applying identical config again should still result in no actions
+	entries3 := newEntries(entries2.commit().(*entries), configs, logger)
+	toStart3, toStop3 := entries3.getPendingActions()
+
+	assert.Len(t, toStart3, 0, "Multiple identical configs should not trigger any starts")
+	assert.Len(t, toStop3, 0, "Multiple identical configs should not trigger any stops")
 }
