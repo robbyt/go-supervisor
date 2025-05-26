@@ -19,6 +19,12 @@ import (
 func TestBootFailure(t *testing.T) {
 	t.Parallel()
 
+	t.Run("Missing config callback", func(t *testing.T) {
+		_, err := NewRunner()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config callback is required")
+	})
+
 	t.Run("Config callback returns nil", func(t *testing.T) {
 		callback := func() (*Config, error) { return nil, nil }
 		runner, err := NewRunner(
@@ -150,8 +156,8 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	t.Parallel()
 
 	// Create test server with a handler that exceeds the drain timeout
-	const sleepDuration = 5 * time.Second
-	const drainTimeout = 2 * time.Second
+	const sleepDuration = 3 * time.Second
+	const drainTimeout = 1 * time.Second
 
 	// Use unique port to avoid conflicts
 	listenPort := getAvailablePort(t, 9200)
