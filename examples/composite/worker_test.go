@@ -221,7 +221,7 @@ func TestWorker_Run_ContextCancel(t *testing.T) {
 // TestWorker_ReloadWithConfig tests applying valid and invalid configs via ReloadWithConfig.
 func TestWorker_ReloadWithConfig(t *testing.T) {
 	t.Parallel()
-	logger, _ := testLogger(t, false) // Don't capture logs to avoid race conditions
+	logger, _ := testLogger(t, false)
 
 	originalConfig := WorkerConfig{
 		Interval: 100 * time.Millisecond,
