@@ -79,21 +79,20 @@ func TestRunnerContextPersistence(t *testing.T) {
 			return runner.GetServerCount() == 1
 		}, time.Second, 10*time.Millisecond)
 
-		// Give a moment for any buggy context cancellation to occur
-		time.Sleep(100 * time.Millisecond)
-
 		// Verify the server context is still valid (not canceled)
 		mu.Lock()
 		require.Len(t, serverContexts, 1, "Should have created one server")
 		serverCtx := serverContexts[0]
 		mu.Unlock()
 
-		select {
-		case <-serverCtx.Done():
-			t.Fatal("Server context was canceled prematurely - this is the bug!")
-		default:
-			// Good - context is still active
-		}
+		assert.Never(t, func() bool {
+			select {
+			case <-serverCtx.Done():
+				return true
+			default:
+				return false
+			}
+		}, 100*time.Millisecond, 10*time.Millisecond)
 
 		// Verify server is still running
 		assert.Equal(t, 1, runner.GetServerCount(), "Server should still be running")
@@ -179,15 +178,14 @@ func TestRunnerContextPersistence(t *testing.T) {
 		// When we cancel the runner context, server should eventually stop
 		cancel()
 
-		// Wait a bit for propagation
-		time.Sleep(100 * time.Millisecond)
-
-		// Server context should now be canceled
-		select {
-		case <-serverCtx.Done():
-			// Good - context was canceled
-		default:
-			t.Fatal("Server context should be canceled when runner stops")
-		}
+		// Server context should be canceled when runner stops
+		assert.Eventually(t, func() bool {
+			select {
+			case <-serverCtx.Done():
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
 	})
 }

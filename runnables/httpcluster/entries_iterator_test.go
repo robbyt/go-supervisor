@@ -1,17 +1,10 @@
 package httpcluster
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-// testIteratorLogger is a shared test logger that discards output
-var testIteratorLogger = slog.New(
-	slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
 )
 
 // collectEntries collects all entries from the iterator into maps for testing
@@ -37,7 +30,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", createTestHTTPConfig(t, ":8001"), true)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, nil, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, nil),
 		)
 
 		assert.Len(t, entries, 1)
@@ -53,7 +46,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", createTestHTTPConfig(t, ":8001"), false)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, nil, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, nil),
 		)
 
 		assert.Len(t, entries, 0)
@@ -62,7 +55,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 
 	t.Run("nil old entry", func(t *testing.T) {
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", nil, nil, testIteratorLogger),
+			t, processExistingServer("server1", nil, nil),
 		)
 
 		assert.Len(t, entries, 0)
@@ -77,7 +70,7 @@ func TestProcessExistingServer_ConfigUnchanged(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", config, true)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, config, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, config),
 		)
 
 		assert.Len(t, entries, 1)
@@ -95,7 +88,7 @@ func TestProcessExistingServer_ConfigUnchanged(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", config, false)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, config, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, config),
 		)
 
 		assert.Len(t, entries, 1)
@@ -117,7 +110,7 @@ func TestProcessExistingServer_ConfigChanged(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", oldConfig, true)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, newConfig, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, newConfig),
 		)
 
 		assert.Len(t, entries, 2)
@@ -146,7 +139,7 @@ func TestProcessExistingServer_ConfigChanged(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", oldConfig, false)
 
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, newConfig, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, newConfig),
 		)
 
 		assert.Len(t, entries, 1)
@@ -168,7 +161,7 @@ func TestProcessExistingServer_IteratorBehavior(t *testing.T) {
 		newConfig := createTestHTTPConfig(t, ":8002")
 		oldEntry := createTestServerEntry(t, "server1", oldConfig, true)
 
-		iterator := processExistingServer("server1", oldEntry, newConfig, testIteratorLogger)
+		iterator := processExistingServer("server1", oldEntry, newConfig)
 
 		var yielded []string
 		iterator(func(key string, entry *serverEntry) bool {
@@ -185,7 +178,7 @@ func TestProcessExistingServer_IteratorBehavior(t *testing.T) {
 		newConfig := createTestHTTPConfig(t, ":8002")
 		oldEntry := createTestServerEntry(t, "server1", oldConfig, true)
 
-		iterator := processExistingServer("server1", oldEntry, newConfig, testIteratorLogger)
+		iterator := processExistingServer("server1", oldEntry, newConfig)
 
 		// Manually collect all entries
 		entries := make(map[string]*serverEntry)
@@ -202,7 +195,7 @@ func TestProcessExistingServer_IteratorBehavior(t *testing.T) {
 		config := createTestHTTPConfig(t, ":8001")
 		oldEntry := createTestServerEntry(t, "server1", config, true)
 
-		iterator := processExistingServer("server1", oldEntry, config, testIteratorLogger)
+		iterator := processExistingServer("server1", oldEntry, config)
 
 		var count int
 		for key, entry := range iterator {
@@ -222,7 +215,7 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 
 		// nil config should trigger removal
 		entries1, _ := collectEntries(
-			t, processExistingServer("server1", oldEntry, nil, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, nil),
 		)
 		assert.Len(t, entries1, 1)
 		assert.Equal(t, actionStop, entries1["server1"].action)
@@ -234,7 +227,7 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 
 		// Same config reference should be detected as unchanged
 		entries, _ := collectEntries(
-			t, processExistingServer("server1", oldEntry, config, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, config),
 		)
 		assert.Len(t, entries, 1)
 		assert.Equal(t, actionNone, entries["server1"].action)
@@ -247,7 +240,7 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 
 		// Different configs should trigger restart
 		entries, keys := collectEntries(
-			t, processExistingServer("server1", oldEntry, config2, testIteratorLogger),
+			t, processExistingServer("server1", oldEntry, config2),
 		)
 		assert.Len(t, entries, 2)
 		assert.Contains(t, keys, "server1:stop")

@@ -3,7 +3,6 @@ package httpcluster
 import (
 	"context"
 	"iter"
-	"log/slog"
 	"maps"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
@@ -41,40 +40,40 @@ type entries struct {
 	servers map[string]*serverEntry
 }
 
-// newEntries creates a new entries collection from the previous state and desired configuration.
-// Each entry is marked with the action needed during the commit phase.
-func newEntries(
-	previous *entries,
-	desiredConfigs map[string]*httpserver.Config,
-	logger *slog.Logger,
-) *entries {
-	logger = logger.WithGroup("newEntries")
+// newEntries creates a new entries collection from desired configuration.
+// This is used for initial creation only.
+func newEntries(desiredConfigs map[string]*httpserver.Config) *entries {
 	servers := make(map[string]*serverEntry)
 
-	// Process existing servers (mark for stop, or update)
-	if previous != nil {
-		for id, oldEntry := range previous.servers {
-			maps.Insert(servers, processExistingServer(id, oldEntry, desiredConfigs[id], logger))
-		}
-	}
-
-	// Process new servers
 	for id, config := range desiredConfigs {
 		if config == nil {
 			continue
 		}
-		if previous == nil || previous.servers[id] == nil {
-			// New server
-			servers[id] = &serverEntry{
-				id:     id,
-				config: config,
-				action: actionStart,
-			}
-			logger.Debug("New server marked for start", "id", id)
+		servers[id] = &serverEntry{
+			id:     id,
+			config: config,
+			action: actionStart,
 		}
 	}
 
 	return &entries{servers: servers}
+}
+
+// removeEntry creates a new entries collection with the specified entry completely removed.
+func (e *entries) removeEntry(id string) entriesManager {
+	_, exists := e.servers[id]
+	if !exists {
+		return e
+	}
+
+	newServers := make(map[string]*serverEntry, len(e.servers)-1)
+	for k, v := range e.servers {
+		if k != id {
+			newServers[k] = v
+		}
+	}
+
+	return &entries{servers: newServers}
 }
 
 // getPendingActions returns lists of server IDs grouped by their pending action.
@@ -118,20 +117,18 @@ func (e *entries) commit() entriesManager {
 	servers := make(map[string]*serverEntry)
 
 	for id, entry := range e.servers {
-		switch entry.action {
-		case actionStop:
+		if entry.action == actionStop {
 			// Don't copy stopped servers
 			continue
-		default:
-			// Copy entry with action cleared
-			servers[id] = &serverEntry{
-				id:     entry.id,
-				config: entry.config,
-				runner: entry.runner,
-				ctx:    entry.ctx,
-				cancel: entry.cancel,
-				action: actionNone,
-			}
+		}
+		// Copy entry with action cleared
+		servers[id] = &serverEntry{
+			id:     entry.id,
+			config: entry.config,
+			runner: entry.runner,
+			ctx:    entry.ctx,
+			cancel: entry.cancel,
+			action: actionNone,
 		}
 	}
 
@@ -209,11 +206,9 @@ func processExistingServer(
 	id string,
 	oldEntry *serverEntry,
 	desiredConfig *httpserver.Config,
-	logger *slog.Logger,
 ) iter.Seq2[string, *serverEntry] {
 	return func(yield func(string, *serverEntry) bool) {
 		if oldEntry == nil {
-			logger.Warn("Old entry object is nil", "id", id)
 			return
 		}
 
@@ -222,7 +217,6 @@ func processExistingServer(
 			if oldEntry.runner != nil {
 				newEntry := *oldEntry
 				newEntry.action = actionStop
-				logger.Debug("Server marked for stop", "id", id)
 				yield(id, &newEntry)
 			}
 			// If runner is nil, server was never started, so skip it
@@ -233,7 +227,6 @@ func processExistingServer(
 		if oldEntry.config.Equal(desiredConfig) {
 			newEntry := *oldEntry
 			newEntry.action = actionNone
-			logger.Debug("Server unchanged", "id", id)
 			yield(id, &newEntry)
 			return
 		}
@@ -254,17 +247,54 @@ func processExistingServer(
 				action: actionStart,
 			}
 
-			logger.Debug("Server marked for restart", "id", id)
 			yield(id, startEntry)
 			return
 		}
 
 		// Not running, just start with new config
-		logger.Debug("Server marked for start", "id", id)
 		yield(id, &serverEntry{
 			id:     id,
 			config: desiredConfig,
 			action: actionStart,
 		})
 	}
+}
+
+// buildPendingEntries creates a new entries collection based on the desired state.
+// It uses the current entries as the previous state and applies the same logic as newEntries.
+func (e *entries) buildPendingEntries(desired entriesManager) entriesManager {
+	// Extract configs from the desired entries
+	desiredEntries, ok := desired.(*entries)
+	if !ok {
+		return e
+	}
+
+	desiredConfigs := make(map[string]*httpserver.Config)
+	for id, entry := range desiredEntries.servers {
+		desiredConfigs[id] = entry.config
+	}
+
+	servers := make(map[string]*serverEntry)
+
+	// Process existing servers (mark for stop, or update)
+	for id, oldEntry := range e.servers {
+		maps.Insert(servers, processExistingServer(id, oldEntry, desiredConfigs[id]))
+	}
+
+	// Process new servers
+	for id, config := range desiredConfigs {
+		if config == nil {
+			continue
+		}
+		if e.servers[id] == nil {
+			// New server
+			servers[id] = &serverEntry{
+				id:     id,
+				config: config,
+				action: actionStart,
+			}
+		}
+	}
+
+	return &entries{servers: servers}
 }
