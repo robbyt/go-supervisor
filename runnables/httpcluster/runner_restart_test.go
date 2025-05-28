@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -182,13 +183,13 @@ func TestConcurrentServerManagement(t *testing.T) {
 	numServers := 3
 	serverPorts := make(map[string]string)
 
-	for i := 0; i < numServers; i++ {
+	for i := range numServers {
 		serverID := fmt.Sprintf("server%d", i)
 		serverPorts[serverID] = getRestartTestPort(t)
 	}
 
 	// Test adding servers one by one
-	for i := 0; i < numServers; i++ {
+	for i := range numServers {
 		config := make(map[string]*httpserver.Config)
 		// Add this server while keeping previous ones
 		for j := 0; j <= i; j++ {
@@ -213,7 +214,7 @@ func TestConcurrentServerManagement(t *testing.T) {
 		defer runner.mu.RUnlock()
 
 		runningCount := 0
-		for i := 0; i < numServers; i++ {
+		for i := range numServers {
 			serverID := fmt.Sprintf("server%d", i)
 			entry := runner.currentEntries.get(serverID)
 			if entry != nil && entry.runner != nil && entry.runner.IsRunning() {
@@ -227,7 +228,7 @@ func TestConcurrentServerManagement(t *testing.T) {
 	for i := numServers - 1; i >= 0; i-- {
 		config := make(map[string]*httpserver.Config)
 		// Keep only servers 0 to i-1
-		for j := 0; j < i; j++ {
+		for j := range i {
 			sid := fmt.Sprintf("server%d", j)
 			config[sid] = createRestartTestHTTPConfig(
 				t,
@@ -286,7 +287,7 @@ func TestConcurrentRestartStress(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < restartCount; i++ {
+		for i := range restartCount {
 			config := map[string]*httpserver.Config{
 				"server1": createRestartTestHTTPConfig(
 					t,
@@ -308,7 +309,7 @@ func TestConcurrentRestartStress(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < restartCount; i++ {
+		for i := range restartCount {
 			config := map[string]*httpserver.Config{
 				"server1": createRestartTestHTTPConfig(
 					t,
@@ -368,7 +369,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 			// Wait for runner to start
 			require.Eventually(b, func() bool {
 				return runner.IsRunning()
-			}, 2*time.Second, 10*time.Millisecond)
+			}, 2*time.Second, 100*time.Millisecond)
 
 			// Create server
 			port := getRestartTestPort(b)
@@ -385,7 +386,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 				defer runner.mu.RUnlock()
 				entry := runner.currentEntries.get(serverID)
 				return entry != nil && entry.runner != nil && entry.runner.IsRunning()
-			}, 5*time.Second, 10*time.Millisecond)
+			}, 5*time.Second, 100*time.Millisecond)
 
 			b.ResetTimer()
 
@@ -419,8 +420,7 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 	runner, err := NewRunner(WithRestartDelay(10 * time.Millisecond))
 	require.NoError(b, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	go func() {
 		err := runner.Run(ctx)
@@ -436,7 +436,7 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 	numServers := 3
 	configs := make(map[string]*httpserver.Config)
 
-	for i := 0; i < numServers; i++ {
+	for i := range numServers {
 		serverID := fmt.Sprintf("server%d", i)
 		port := getRestartTestPort(b)
 		configs[serverID] = createRestartTestHTTPConfig(b, port, "bench")
@@ -453,9 +453,11 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 
 	// Benchmark concurrent state checks
 	b.RunParallel(func(pb *testing.PB) {
-		i := 0
+		var i atomic.Int64
+		i.Store(0)
+
 		for pb.Next() {
-			serverID := fmt.Sprintf("server%d", i%numServers)
+			serverID := fmt.Sprintf("server%d", i.Load()%int64(numServers))
 
 			// Perform state check
 			runner.mu.RLock()
@@ -465,7 +467,7 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 			}
 			runner.mu.RUnlock()
 
-			i++
+			i.Add(1)
 		}
 	})
 
