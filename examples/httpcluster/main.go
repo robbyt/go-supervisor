@@ -71,11 +71,11 @@ func (cm *ConfigManager) getCurrentPort() string {
 // updatePort updates the cluster configuration with a new port
 func (cm *ConfigManager) updatePort(newPort string) error {
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
 
 	// Validate port format using the networking package helper
 	validatedPort, err := networking.ValidatePort(newPort)
 	if err != nil {
+		cm.mu.Unlock()
 		return fmt.Errorf("invalid port: %w", err)
 	}
 
@@ -90,6 +90,7 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		cm.commonMw...,
 	)
 	if err != nil {
+		cm.mu.Unlock()
 		return fmt.Errorf("failed to create status route: %w", err)
 	}
 
@@ -100,6 +101,7 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		cm.commonMw...,
 	)
 	if err != nil {
+		cm.mu.Unlock()
 		return fmt.Errorf("failed to create config route: %w", err)
 	}
 
@@ -110,15 +112,22 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		httpserver.WithDrainTimeout(DrainTimeout),
 	)
 	if err != nil {
+		cm.mu.Unlock()
 		return fmt.Errorf("failed to create config: %w", err)
 	}
 
-	// Send configuration update (will block until cluster is ready)
+	// Store the old port and update to new port before releasing lock
 	oldPort := cm.currentPort
+	cm.currentPort = newPort
+
+	// Release the mutex before blocking channel send
+	cm.mu.Unlock()
+
+	// Send configuration update (will block until cluster is ready)
 	cm.cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
 		"main": config,
 	}
-	cm.currentPort = newPort
+
 	if newPort != oldPort {
 		cm.logger.Info("Configuration updated", "old_port", oldPort, "new_port", newPort)
 	}
