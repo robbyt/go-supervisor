@@ -1315,7 +1315,9 @@ func TestReloadMembershipChanged(t *testing.T) {
 		runner.Reload()
 
 		// Wait for reload to complete
-		time.Sleep(50 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			return runner.GetState() == finitestate.StatusRunning
+		}, 1*time.Second, 10*time.Millisecond, "Runner should transition to Running state")
 
 		// Verify the config was updated with the new runnable
 		updatedConfig := runner.getConfig()
