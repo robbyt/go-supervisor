@@ -7,7 +7,6 @@ import (
 )
 
 // entriesManager defines the interface for managing server entries.
-// This interface allows for easy mocking in tests.
 type entriesManager interface {
 	// get returns a server entry by ID, or nil if not found.
 	get(id string) *serverEntry
@@ -40,6 +39,14 @@ type entriesManager interface {
 	// This is used during the commit phase to record that a server has been stopped.
 	// Returns nil if the server doesn't exist.
 	clearRuntime(id string) entriesManager
+
+	// removeEntry creates a new entries collection with the specified entry completely removed.
+	// This is used when a server fails to start and should be completely removed.
+	removeEntry(id string) entriesManager
+
+	// buildPendingEntries creates a new entries collection based on the desired state and the previous state.
+	// It marks the entries with the action needed during the commit phase.
+	buildPendingEntries(desired entriesManager) entriesManager
 }
 
 // httpServerRunner defines the interface for running an HTTP server.

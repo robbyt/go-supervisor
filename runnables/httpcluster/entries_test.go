@@ -2,19 +2,12 @@ package httpcluster
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"net/http"
 	"testing"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-// testLogger is a shared test logger that discards output
-var testLogger = slog.New(
-	slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}),
 )
 
 // createTestHTTPConfig creates a test httpserver config
@@ -67,7 +60,7 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 			"server2": createTestHTTPConfig(t, ":8002"),
 		}
 
-		entries := newEntries(nil, configs, testLogger)
+		entries := newEntries(configs)
 
 		assert.Equal(t, 2, entries.count())
 
@@ -91,8 +84,9 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 		configs := map[string]*httpserver.Config{
 			"server1": createTestHTTPConfig(t, ":8001"),
 		}
+		desiredEntries := newEntries(configs)
 
-		entries := newEntries(previous, configs, testLogger)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
@@ -119,7 +113,8 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 		// New config without server1
 		configs := map[string]*httpserver.Config{}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 1, entries.count()) // Server marked for stop
 		toStart, toStop := entries.getPendingActions()
@@ -149,7 +144,8 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 		// New config without server1
 		configs := map[string]*httpserver.Config{}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 0, entries.count()) // Server not copied (no runtime to stop)
 		toStart, toStop := entries.getPendingActions()
@@ -174,7 +170,8 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 			"server1": nil,
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
@@ -202,7 +199,8 @@ func TestNewEntries_ServerAddition(t *testing.T) {
 			"server2": createTestHTTPConfig(t, ":8002"), // New
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 2, entries.count())
 		toStart, toStop := entries.getPendingActions()
@@ -240,7 +238,8 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 			"server1": createTestHTTPConfig(t, ":8002"), // Changed port
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		// Should have both stop and start entries
 		assert.Equal(t, 2, entries.count())
@@ -280,7 +279,8 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 			"server1": createTestHTTPConfig(t, ":8002"), // Changed port
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		// Should just update config and mark for start
 		assert.Equal(t, 1, entries.count())
@@ -307,7 +307,8 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 			"server1": config, // Same config object
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
@@ -517,7 +518,8 @@ func TestEntriesImmutability(t *testing.T) {
 			"server1": createTestHTTPConfig(t, ":8002"), // Different config
 		}
 
-		newEntries := newEntries(original, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		newEntries := original.buildPendingEntries(desiredEntries).(*entries)
 
 		// Original should be unchanged
 		assert.Equal(t, 1, original.count())
@@ -586,7 +588,8 @@ func TestComplexScenarios(t *testing.T) {
 			// "remove" not in new config
 		}
 
-		entries := newEntries(previous, configs, testLogger)
+		desiredEntries := newEntries(configs)
+		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
 		// Should have 5 entries: keep(none) + remove(stop) + change(stop) + change:new(start) + add(start)
 		assert.Equal(t, 5, entries.count())
