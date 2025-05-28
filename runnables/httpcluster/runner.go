@@ -409,9 +409,13 @@ func (r *Runner) startServers(
 
 		// Wait for server to be ready
 		if !r.waitForIsRunning(ctx, r.deadlineServerStart, runner) {
-			logger.Error("Server failed to become ready")
+			logger.Error("Server failed to become ready",
+				"timeout", r.deadlineServerStart,
+				"state", runner.GetState())
 			// Cancel the server context to clean up
 			serverCancel()
+			// Stop the runner explicitly to ensure cleanup
+			runner.Stop()
 			// Remove entry completely since server failed to start
 			current = current.removeEntry(id)
 			continue
