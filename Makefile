@@ -18,7 +18,7 @@ test:
 ## bench: Run performance benchmarks
 .PHONY: bench
 bench:
-	go test -timeout 3m -run=^$$ -bench=. -benchmem ./...
+	go test -timeout 2m -run=^$$ -bench=. -benchmem ./...
 
 ## lint: Run golangci-lint code quality checks
 .PHONY: lint
