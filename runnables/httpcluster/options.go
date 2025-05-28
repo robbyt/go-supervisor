@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 )
@@ -36,9 +37,18 @@ func WithLogHandler(handler slog.Handler) Option {
 }
 
 // WithSiphonBuffer sets the buffer size for the configuration siphon channel.
-// A buffer of 0 (default) makes the channel synchronous.
+// A buffer of 0 (default) makes the channel synchronous, providing natural backpressure
+// and preventing rapid config updates that could cause server restart race conditions.
+// Values > 1 may cause race conditions during heavy update pressure and are not recommended.
 func WithSiphonBuffer(size int) Option {
 	return func(r *Runner) error {
+		if size > 1 {
+			r.logger.Warn(
+				"SiphonBuffer size > 1 may cause race conditions during heavy update pressure, keeping default 0 is recommended",
+				"size",
+				size,
+			)
+		}
 		r.configSiphon = make(chan map[string]*httpserver.Config, size)
 		return nil
 	}
@@ -71,6 +81,14 @@ func WithStateChanBufferSize(size int) Option {
 			return fmt.Errorf("state channel buffer size cannot be negative: %d", size)
 		}
 		r.stateChanBufferSize = size
+		return nil
+	}
+}
+
+// WithRestartDelay sets the delay between server restarts when configs change.
+func WithRestartDelay(delay time.Duration) Option {
+	return func(r *Runner) error {
+		r.restartDelay = delay
 		return nil
 	}
 }

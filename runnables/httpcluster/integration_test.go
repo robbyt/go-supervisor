@@ -3,7 +3,6 @@ package httpcluster
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"testing"
@@ -99,8 +98,10 @@ func TestIntegration_BasicServerLifecycle(t *testing.T) {
 		t.Fatal("Should be able to send empty config")
 	}
 
-	// Give time for server to stop
-	time.Sleep(100 * time.Millisecond)
+	// Wait for server to stop
+	assert.Eventually(t, func() bool {
+		return runner.GetServerCount() == 0
+	}, time.Second, 10*time.Millisecond, "Server should stop")
 
 	// Stop runner
 	cancel()
@@ -372,11 +373,10 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		t.Fatal("Should be able to send invalid config")
 	}
 
-	// Give time for processing
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify runner continues running
-	assert.True(t, runner.IsRunning())
+	// Wait for invalid config to be processed (should not create any servers)
+	assert.Eventually(t, func() bool {
+		return runner.GetServerCount() == 0 && runner.IsRunning()
+	}, time.Second, 10*time.Millisecond, "Invalid config should not create servers but runner should continue")
 
 	// Send multiple rapid config updates
 	route, err := httpserver.NewRoute(
@@ -406,11 +406,9 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		}
 	}
 
-	// Give time for processing
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify runner continues running
-	assert.True(t, runner.IsRunning())
+	assert.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, time.Second, 10*time.Millisecond)
 
 	// Stop runner
 	cancel()
@@ -587,10 +585,8 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 		"test-server": config,
 	}
 
-	logger := slog.Default()
-
 	// Test case 1: First application should mark server for start
-	entries1 := newEntries(nil, configs, logger)
+	entries1 := newEntries(configs)
 	toStart1, toStop1 := entries1.getPendingActions()
 
 	assert.Len(t, toStart1, 1, "First config should trigger one server start")
@@ -619,7 +615,8 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	}
 
 	// Test case 2: Applying identical config should result in no actions
-	entries2 := newEntries(committedEntries, configs, logger)
+	desiredEntries := newEntries(configs)
+	entries2 := committedEntries.buildPendingEntries(desiredEntries).(*entries)
 	toStart2, toStop2 := entries2.getPendingActions()
 
 	assert.Len(t, toStart2, 0, "Identical config should not trigger any starts")
@@ -631,7 +628,8 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	assert.Equal(t, actionNone, entry2.action, "Server with identical config should have no action")
 
 	// Test case 3: Applying identical config again should still result in no actions
-	entries3 := newEntries(entries2.commit().(*entries), configs, logger)
+	desiredEntries3 := newEntries(configs)
+	entries3 := entries2.commit().(*entries).buildPendingEntries(desiredEntries3).(*entries)
 	toStart3, toStop3 := entries3.getPendingActions()
 
 	assert.Len(t, toStart3, 0, "Multiple identical configs should not trigger any starts")

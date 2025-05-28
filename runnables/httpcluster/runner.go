@@ -12,13 +12,20 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
+const (
+	defaultDeadlineServerStart = 10 * time.Second
+	defaultRestartDelay        = 10 * time.Millisecond
+)
+
 // Runner manages multiple HTTP server instances as a cluster.
 // It implements supervisor.Runnable and supervisor.Stateable interfaces.
 type Runner struct {
 	mu sync.RWMutex
 
 	// runner factory creates the Runnable instances
-	runnerFactory runnerFactory
+	runnerFactory       runnerFactory
+	restartDelay        time.Duration
+	deadlineServerStart time.Duration
 
 	// Context management - similar to composite pattern
 	parentCtx context.Context // Set during construction
@@ -65,9 +72,11 @@ func defaultRunnerFactory(
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
-		runnerFactory: defaultRunnerFactory,
-		logger:        slog.Default().WithGroup("httpcluster.Runner"),
-		parentCtx:     context.Background(),
+		runnerFactory:       defaultRunnerFactory,
+		logger:              slog.Default().WithGroup("httpcluster.Runner"),
+		restartDelay:        defaultRestartDelay,
+		deadlineServerStart: defaultDeadlineServerStart,
+		parentCtx:           context.Background(),
 		configSiphon: make(
 			chan map[string]*httpserver.Config,
 		), // unbuffered by default
@@ -107,33 +116,35 @@ func (r *Runner) GetServerCount() int {
 	return r.currentEntries.count()
 }
 
-// waitForServerReady waits for an httpserver to reach Running state.
+// waitForIsRunning waits for an httpserver to reach Running state.
 // It returns true if the server was ready within the timeout deadline.
 // If the server is in error state, it returns false.
-func (r *Runner) waitForServerReady(
-	server httpServerRunner,
+func (r *Runner) waitForIsRunning(
 	ctx context.Context,
 	timeout time.Duration,
+	server httpServerRunner,
 ) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	initialRetry := 5 * time.Millisecond
+	maxRetry := 1 * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
 			return false
-		case <-ticker.C:
+		case <-time.After(initialRetry):
 			if server.IsRunning() {
 				return true
 			}
-			// Check if server is in error state
-			state := server.GetState()
-			if state == "Error" || state == "Stopped" {
+
+			s := server.GetState()
+			if s == "Error" || s == "Stopped" {
 				return false
 			}
+
+			// Exponentially increase the backoff delay
+			initialRetry = min(time.Duration(float64(initialRetry)*1.5), maxRetry)
 		}
 	}
 }
@@ -157,13 +168,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to booting state: %w", err)
 	}
 
-	// Set up run context - combines parent context and Run's context
+	// Set up local run context, share it to make it accessible to shutdown
 	r.mu.Lock()
 	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
 	r.runCtx = runCtx
 	r.runCancel = runCancel
 	r.mu.Unlock()
-	defer runCancel()
 
 	// Transition to running (no servers initially)
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
@@ -209,30 +220,29 @@ func (r *Runner) Stop() {
 
 // shutdown performs graceful shutdown of all servers.
 func (r *Runner) shutdown(ctx context.Context) error {
+	logger := r.logger.WithGroup("shutdown")
+	logger.Debug("Shutting down...")
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	if err := r.fsm.Transition(finitestate.StatusStopping); err != nil {
-		r.logger.Error("Failed to transition to stopping state", "error", err)
+		logger.Error("Failed to transition to stopping state", "error", err)
+		// continue anyway
 	}
 
 	// Create new entries marking all servers for stop
-	r.mu.Lock()
 	stopConfigs := make(map[string]*httpserver.Config)
 	// Empty map means all servers should be removed
-	pendingEntries := newEntries(r.currentEntries.(*entries), stopConfigs, r.logger)
-	r.mu.Unlock()
-
-	// Execute the stop actions
-	r.executeActions(ctx, pendingEntries)
-
-	// Commit the changes
-	r.mu.Lock()
-	r.currentEntries = pendingEntries.commit()
-	r.mu.Unlock()
+	desiredEntries := newEntries(stopConfigs)
+	pendingEntries := r.currentEntries.buildPendingEntries(desiredEntries)
+	updatedEntries := r.executeActions(ctx, pendingEntries)
+	r.currentEntries = updatedEntries.commit()
 
 	if err := r.fsm.Transition(finitestate.StatusStopped); err != nil {
-		r.logger.Error("Failed to transition to stopped state", "error", err)
+		logger.Error("Failed to transition to stopped state", "error", err)
 	}
 
 	return nil
@@ -244,6 +254,7 @@ func (r *Runner) processConfigUpdate(
 	newConfigs map[string]*httpserver.Config,
 ) error {
 	logger := r.logger.WithGroup("processConfigUpdate")
+	logger.Debug("Processing config update", "count", len(newConfigs))
 
 	// Check if we're in a state where we can process updates
 	if !r.IsRunning() {
@@ -251,15 +262,17 @@ func (r *Runner) processConfigUpdate(
 		return nil
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	// Transition to reloading state
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
 		return fmt.Errorf("failed to transition to reloading state: %w", err)
 	}
 
 	// Phase 1: Create new entries with pending actions
-	r.mu.RLock()
-	pendingEntries := newEntries(r.currentEntries.(*entries), newConfigs, r.logger)
-	r.mu.RUnlock()
+	desiredEntries := newEntries(newConfigs)
+	pendingEntries := r.currentEntries.buildPendingEntries(desiredEntries)
 
 	// Log pending actions
 	toStart, toStop := pendingEntries.getPendingActions()
@@ -271,9 +284,7 @@ func (r *Runner) processConfigUpdate(
 	updatedEntries := r.executeActions(ctx, pendingEntries)
 
 	// Commit: Finalize the entries state
-	r.mu.Lock()
 	r.currentEntries = updatedEntries.commit()
-	r.mu.Unlock()
 
 	// Transition back to running state using conditional transition
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusReloading, finitestate.StatusRunning); err != nil {
@@ -286,14 +297,32 @@ func (r *Runner) processConfigUpdate(
 
 // executeActions orchestrates server lifecycle changes by stopping and starting servers.
 func (r *Runner) executeActions(ctx context.Context, pending entriesManager) entriesManager {
+	logger := r.logger.WithGroup("executeActions")
 	current := pending
 	toStart, toStop := pending.getPendingActions()
 
 	// Phase 1: Stop servers that need to be stopped
-	current = r.stopServers(ctx, current, toStop)
+	if len(toStop) > 0 {
+		current = r.stopServers(ctx, current, toStop)
+
+		// Delay after stopping servers to allow OS to fully release sockets
+		// before binding to the same ports again
+		if len(toStart) > 0 && r.restartDelay > 0 {
+			logger.Debug("Waiting for ports to be released", "delay", r.restartDelay)
+			select {
+			case <-ctx.Done():
+				logger.Debug("Context cancelled during port release wait")
+				return current
+			case <-time.After(r.restartDelay):
+				// Continue after delay
+			}
+		}
+	}
 
 	// Phase 2: Start servers that need to be started
-	current = r.startServers(ctx, current, toStart)
+	if len(toStart) > 0 {
+		current = r.startServers(ctx, current, toStart)
+	}
 
 	return current
 }
@@ -312,12 +341,13 @@ func (r *Runner) stopServers(
 	// Stop all servers in parallel
 	for _, id := range toStop {
 		entry := current.get(id)
+		logger := logger.With("id", id)
 		if entry == nil || entry.runner == nil {
-			logger.Debug("Skipping stop - no running server", "id", id)
+			logger.Debug("Skipping stop for entry - does not exist or not running")
 			continue
 		}
 
-		logger.Debug("Stopping server", "id", id, "addr", entry.config.ListenAddr)
+		logger.Debug("Stopping server", "addr", entry.config.ListenAddr)
 		wg.Add(1)
 		go func(id string, entry *serverEntry) {
 			defer wg.Done()
@@ -325,16 +355,19 @@ func (r *Runner) stopServers(
 			if entry.cancel != nil {
 				entry.cancel()
 			}
+			logger.Debug("Server stopped", "addr", entry.config.ListenAddr)
 		}(id, entry)
 	}
 	wg.Wait()
 
 	// Clear runtime for stopped servers
 	for _, id := range toStop {
-		logger.Debug("Clearing runtime for stopped server", "id", id)
+		logger := logger.With("id", id)
+		logger.Debug("Clearing runtime for stopped server")
 		if updated := current.clearRuntime(id); updated != nil {
 			current = updated
 		}
+		logger.Debug("Runtime cleared for stopped server")
 	}
 
 	return current
@@ -351,17 +384,21 @@ func (r *Runner) startServers(
 
 	for _, id := range toStart {
 		entry := current.get(id)
+		logger := logger.With("id", id)
 		if entry == nil {
-			logger.Debug("Skipping start - no entry found", "id", id)
+			logger.Debug("Skipping start - no entry found")
 			continue
 		}
 
-		logger.Debug("Starting server", "id", id, "addr", entry.config.ListenAddr)
+		logger = logger.With("addr", entry.config.ListenAddr)
+		logger.Debug("Starting server")
 
 		// Create and start the server
 		runner, serverCtx, serverCancel, err := r.createAndStartServer(ctx, entry)
 		if err != nil {
-			logger.Error("Failed to create server", "id", id, "error", err)
+			logger.Error("Failed to create server", "error", err)
+			// Remove entry completely since server failed to create
+			current = current.removeEntry(id)
 			continue
 		}
 
@@ -371,18 +408,16 @@ func (r *Runner) startServers(
 		}
 
 		// Wait for server to be ready
-		if !r.waitForServerReady(runner, serverCtx, 10*time.Second) {
-			logger.Error("Server failed to become ready", "id", id)
+		if !r.waitForIsRunning(ctx, r.deadlineServerStart, runner) {
+			logger.Error("Server failed to become ready")
 			// Cancel the server context to clean up
 			serverCancel()
-			// Clear runtime info since server failed to start
-			if updated := current.clearRuntime(id); updated != nil {
-				current = updated
-			}
+			// Remove entry completely since server failed to start
+			current = current.removeEntry(id)
 			continue
 		}
 
-		logger.Debug("Server instance started successfully", "id", id, "state", runner.GetState())
+		logger.Debug("Server instance started")
 	}
 
 	return current
