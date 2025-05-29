@@ -384,13 +384,13 @@ func TestWorker_Execution_Timing(t *testing.T) {
 		initialInterval,
 	)
 
-	// Allow significant delta for scheduler jitter, GC, etc. (e.g., 60%)
+	// Allow delta for scheduler jitter, GC, etc. (e.g., 60%)
 	assert.InDelta(
 		t,
 		initialInterval.Seconds(),
 		measuredInterval1.Seconds(),
 		float64(initialInterval.Seconds())*0.6,
-		"Measured average interval [%v] significantly different from initial interval [%v]",
+		"Measured average interval [%v] different from initial interval [%v]",
 		measuredInterval1,
 		initialInterval,
 	)
@@ -501,14 +501,9 @@ func TestWorker_ReloadWithConfig_Concurrency(t *testing.T) {
 		finalConfig.Interval, readWorkerConfig(t, worker).Interval)
 
 	// Because ReloadWithConfig replaces the config in the channel if full,
-	// we expect the *last* successfully queued config to eventually be applied.
-	// This isn't strictly guaranteed to be `finalConfig` if the channel was full
-	// and the last goroutine's send happened *before* an earlier one was processed,
-	// but it's the most likely outcome.
-	// A more robust check waits for the *interval* to match the final one,
-	// as that's the primary observable effect managed by the Run loop.
-	// Skip exact interval match check - the test is flaky because the last reload may not be the one processed
-	// due to timing issues with 50 concurrent reloads
+	// we cannot guarantee which config will be applied when running concurrent reloads.
+	// The last goroutine's config might be replaced by an earlier one due to timing.
+	// Skip exact interval match check due to this race condition with concurrent reloads
 	t.Log("Skipping exact interval match check due to timing issues with concurrent reloads")
 
 	t.Logf(
@@ -702,4 +697,4 @@ func TestWorker_NewWorker_NilLogger(t *testing.T) {
 
 // We'll remove TestWorker_StartTicker_ChannelFullWarning since it introduces
 // race conditions with the log buffer and it's difficult to test this edge case safely.
-// This test was trying to cover a simple warning log path which is not critical functionality.
+// This test was trying to cover a warning log path.

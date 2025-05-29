@@ -324,7 +324,7 @@ func TestReload(t *testing.T) {
 		// This test is simplified to focus on the basic functionality
 		// without relying on actual network connections
 
-		// Create a simple test server with a handler
+		// Create a test server with a handler
 		initialHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}

@@ -107,19 +107,14 @@ func RunServer(
 	// Create a PIDZero supervisor and add the runner
 	sv, err := supervisor.New(
 		supervisor.WithContext(ctx),
-		supervisor.WithRunnables(runner),
-		supervisor.WithLogHandler(logHandler))
+		supervisor.WithLogHandler(logHandler),
+		supervisor.WithRunnables(runner))
 	if err != nil {
 		customCancel()
 		return nil, nil, fmt.Errorf("failed to create supervisor: %w", err)
 	}
 
-	// Create a cleanup function for proper teardown
-	cleanup := func() {
-		customCancel()
-	}
-
-	return sv, cleanup, nil
+	return sv, customCancel, nil
 }
 
 func main() {
@@ -140,12 +135,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	sv, cleanup, err := RunServer(ctx, handler, routes)
+	sv, cancel, err := RunServer(ctx, handler, routes)
 	if err != nil {
 		slog.Error("Failed to setup server", "error", err)
 		os.Exit(1)
 	}
-	defer cleanup()
+	defer cancel()
 
 	// Start the supervisor - this will block until shutdown
 	slog.Info("Starting supervisor with HTTP server on " + ListenOn)

@@ -293,7 +293,7 @@ func (r *Runner) boot() error {
 		return fmt.Errorf("%w: %w", ErrServerBoot, err)
 	}
 
-	// Get the actual listening address (especially important for auto-assigned ports)
+	// Get the actual listening address for auto-assigned ports
 	actualAddr := listenAddr
 	r.serverMutex.RLock()
 	if tcpAddr, ok := r.server.(interface{ Addr() net.Addr }); ok && tcpAddr.Addr() != nil {

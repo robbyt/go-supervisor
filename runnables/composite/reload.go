@@ -15,7 +15,7 @@ type ReloadableWithConfig interface {
 
 // Reload updates the configuration and handles runnables appropriately.
 // If membership changes (different set of runnables), all existing runnables are stopped
-// and the new set is started to ensure proper lifecycle management.
+// and the new set of runnables is started.
 func (r *Runner[T]) Reload() {
 	logger := r.logger.WithGroup("Reload")
 	logger.Debug("Reloading...")

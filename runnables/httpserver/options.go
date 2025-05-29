@@ -41,7 +41,7 @@ func WithConfigCallback(callback ConfigCallback) Option {
 }
 
 // WithConfig sets the initial configuration for the Runner instance.
-// This option is a simple wrapper for the WithConfigCallback option, allowing you to pass a Config
+// This option wraps the WithConfigCallback option, allowing you to pass a Config
 // instance directly instead of a callback function. This is useful when you have a static
 // configuration that doesn't require dynamic loading or reloading.
 func WithConfig(cfg *Config) Option {

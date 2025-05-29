@@ -516,7 +516,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 	currentRunner := currentEntry.runner
 	runner.mu.RUnlock()
 
-	// This is the critical test: the runner instance should be the same
+	// Verify the runner instance should be the same
 	assert.Same(t, originalRunner, currentRunner,
 		"Server instance should not have been recreated for identical config")
 

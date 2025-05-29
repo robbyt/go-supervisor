@@ -129,7 +129,7 @@ func TestMembershipChangesBasic(t *testing.T) {
 		{Runnable: worker2, Config: worker2.config},
 	}
 
-	// Create simple config callback that always returns the current entries
+	// Create config callback that returns the current entries
 	configCh := make(chan []composite.RunnableEntry[*TestWorker], 1)
 	configCh <- configEntries // Initial configuration
 

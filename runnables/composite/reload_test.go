@@ -240,7 +240,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 	})
 
 	t.Run("reload with updated configurations", func(t *testing.T) {
-		// Setup mock runnables with proper blocking behavior
+		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Reload").Once()
@@ -371,7 +371,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 	})
 
 	t.Run("reload with no config changes", func(t *testing.T) {
-		// Setup mock runnables with proper blocking behavior
+		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1")
 		mockRunnable1.On("Reload").Once()
@@ -495,7 +495,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 			return NewConfig("test", initialEntries)
 		}
 
-		// Create runner with proper context
+		// Create runner with context
 		ctx := t.Context()
 		runner, err := NewRunner(
 			configCallback,
