@@ -17,14 +17,15 @@ var (
 func GetRandomPort(tb testing.TB) int {
 	tb.Helper()
 	portMutex.Lock()
-	defer portMutex.Unlock()
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
+		portMutex.Unlock()
 		tb.Fatalf("Failed to get random port: %v", err)
 	}
 
 	err = listener.Close()
 	if err != nil {
+		portMutex.Unlock()
 		tb.Fatalf("Failed to close listener: %v", err)
 	}
 
@@ -32,9 +33,11 @@ func GetRandomPort(tb testing.TB) int {
 	p := addr.Port
 	// Check if the port is already used
 	if _, ok := usedPorts[p]; ok {
+		portMutex.Unlock()
 		return GetRandomPort(tb)
 	}
 	usedPorts[p] = struct{}{}
+	portMutex.Unlock()
 	return p
 }
 
