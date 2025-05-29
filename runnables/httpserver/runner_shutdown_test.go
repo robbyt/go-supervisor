@@ -105,6 +105,155 @@ func (m *mockHttpServer) Shutdown(ctx context.Context) error {
 	return m.shutdownErr
 }
 
+// TestShutdownFSMTransitions tests the FSM state transitions during shutdown
+func TestShutdownFSMTransitions(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRoute("test", "/test", handler)
+	require.NoError(t, err)
+
+	t.Run("successful_fsm_transitions", func(t *testing.T) {
+		mockServer := &mockHttpServer{}
+
+		port := getAvailablePort(t, 8900)
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(port, Routes{*route})
+		}
+
+		runner, err := NewRunner(WithConfigCallback(cfgCallback))
+		require.NoError(t, err)
+
+		// Set FSM to Running state (normally done by Run method)
+		err = runner.fsm.Transition("Booting")
+		require.NoError(t, err)
+		err = runner.fsm.Transition("Running")
+		require.NoError(t, err)
+
+		runner.server = mockServer
+
+		// Call shutdown and verify state transitions
+		err = runner.shutdown(context.Background())
+		assert.NoError(t, err)
+
+		// Verify final state is Stopped
+		assert.Equal(t, "Stopped", runner.fsm.GetState())
+	})
+
+	t.Run("stopserver_error_sets_error_state", func(t *testing.T) {
+		customErr := errors.New("stopserver failure")
+		mockServer := &mockHttpServer{
+			shutdownErr: customErr,
+		}
+
+		port := getAvailablePort(t, 9000)
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(port, Routes{*route})
+		}
+
+		runner, err := NewRunner(WithConfigCallback(cfgCallback))
+		require.NoError(t, err)
+
+		// Set FSM to Running state
+		err = runner.fsm.Transition("Booting")
+		require.NoError(t, err)
+		err = runner.fsm.Transition("Running")
+		require.NoError(t, err)
+
+		runner.server = mockServer
+
+		// Call shutdown and expect error
+		err = runner.shutdown(context.Background())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrGracefulShutdown)
+
+		// Verify error state is set
+		assert.Equal(t, "Error", runner.fsm.GetState())
+	})
+
+	t.Run("duplicate_stopping_transition_succeeds", func(t *testing.T) {
+		mockServer := &mockHttpServer{}
+
+		port := getAvailablePort(t, 9100)
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(port, Routes{*route})
+		}
+
+		runner, err := NewRunner(WithConfigCallback(cfgCallback))
+		require.NoError(t, err)
+
+		// Set FSM to Running state
+		err = runner.fsm.Transition("Booting")
+		require.NoError(t, err)
+		err = runner.fsm.Transition("Running")
+		require.NoError(t, err)
+
+		runner.server = mockServer
+
+		// Force FSM into Stopping state, then call shutdown which will try to transition to Stopping again
+		// This should cause the first transition to fail, but continue
+		err = runner.fsm.Transition("Stopping")
+		require.NoError(t, err)
+
+		// Call shutdown - initial FSM transition will fail but shutdown should continue
+		err = runner.shutdown(context.Background())
+		assert.NoError(t, err)
+
+		// Verify final state is Stopped
+		assert.Equal(t, "Stopped", runner.fsm.GetState())
+	})
+
+	t.Run("initial_fsm_transition_error_continues_shutdown", func(t *testing.T) {
+		mockServer := &mockHttpServer{}
+
+		port := getAvailablePort(t, 9200)
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(port, Routes{*route})
+		}
+
+		runner, err := NewRunner(WithConfigCallback(cfgCallback))
+		require.NoError(t, err)
+
+		// Start in Error state to cause initial transition to fail
+		err = runner.fsm.Transition("Error")
+		require.NoError(t, err)
+
+		runner.server = mockServer
+
+		// Call shutdown - initial FSM transition will fail but shutdown should continue
+		err = runner.shutdown(context.Background())
+		assert.NoError(t, err)
+
+		// Verify final state is Stopped despite initial transition failure
+		assert.Equal(t, "Stopped", runner.fsm.GetState())
+	})
+
+	t.Run("shutdown_when_server_nil", func(t *testing.T) {
+		port := getAvailablePort(t, 9300)
+		cfgCallback := func() (*Config, error) {
+			return NewConfig(port, Routes{*route})
+		}
+
+		runner, err := NewRunner(WithConfigCallback(cfgCallback))
+		require.NoError(t, err)
+
+		// Don't set a server (leave it nil)
+		// Set FSM to Running state
+		err = runner.fsm.Transition("Booting")
+		require.NoError(t, err)
+		err = runner.fsm.Transition("Running")
+		require.NoError(t, err)
+
+		// Call shutdown with nil server
+		err = runner.shutdown(context.Background())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrServerNotRunning)
+
+		// Verify error state is set
+		assert.Equal(t, "Error", runner.fsm.GetState())
+	})
+}
+
 // mockCountingServer counts the number of times Shutdown is called
 type mockCountingServer struct {
 	mockHttpServer
@@ -187,7 +336,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 
 // TestServerCleanupResetsOnRestart tests that serverCloseOnce is properly reset
 // when the server is restarted, allowing it to be shut down again.
-func TestServerCleanupResetsOnRestart(t *testing.T) {
+func TestStopServerResetsOnRestart(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
