@@ -216,7 +216,7 @@ func (p *PIDZero) startStateMonitor() {
 
 						prev, loaded := p.stateMap.Swap(r, state)
 						if !loaded {
-							// The state map entry for this runnable should have been created elsewhere
+							// The state map entry for this runnable was expected to be created in startRunnable
 							p.logger.Warn(
 								"Unexpected State map entry created",
 								"runnable", r,

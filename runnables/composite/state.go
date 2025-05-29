@@ -32,8 +32,8 @@ func (r *Runner[T]) setStateError() {
 
 // GetChildStates returns a map of child runnable names to their states.
 func (r *Runner[T]) GetChildStates() map[string]string {
-	// No need for runnables lock, just reading config and querying state
-	// which doesn't modify any internal state
+	// Runnables lock not required, reading config and querying state
+	// does not modify any internal state
 
 	states := make(map[string]string)
 	cfg := r.getConfig()

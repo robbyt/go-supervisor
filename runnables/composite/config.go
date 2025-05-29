@@ -8,7 +8,7 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
-// runnable is a local alias to ensure the sub-runnables implement the
+// runnable is a local alias constraining sub-runnables to implement the
 // supervisor.Runnable interface.
 type runnable interface {
 	supervisor.Runnable

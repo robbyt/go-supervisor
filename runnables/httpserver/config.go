@@ -107,7 +107,7 @@ func WithRequestContext(ctx context.Context) ConfigOption {
 }
 
 // WithConfigCopy creates a ConfigOption that copies most settings from the source config
-// except for ListenAddr and Routes which must be provided directly to NewConfig.
+// except for ListenAddr and Routes which are provided directly to NewConfig.
 func WithConfigCopy(src *Config) ConfigOption {
 	return func(dst *Config) {
 		if src == nil {
@@ -126,7 +126,7 @@ func WithConfigCopy(src *Config) ConfigOption {
 	}
 }
 
-// NewConfig creates a new Config with the required address and routes
+// NewConfig creates a new Config with the address and routes
 // plus any optional configuration via functional options
 func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error) {
 	if len(routes) == 0 {

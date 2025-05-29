@@ -98,13 +98,13 @@ func (r *Runner[T]) reloadMembershipChanged(newConfig *Config[T]) error {
 // reloadConfig handles the case where the membership of runnables has not changed.
 func (r *Runner[T]) reloadConfig(logger *slog.Logger, newConfig *Config[T]) {
 	logger = logger.WithGroup("reloadConfig")
-	// No membership change, just update config and reload existing runnables
+	// No membership change, update config and reload existing runnables
 	r.configMu.Lock()
 	r.setConfig(newConfig)
 	r.configMu.Unlock()
 
 	// Reload configs of existing runnables
-	// No need to lock the runnables mutex as we're not changing membership
+	// Runnables mutex not locked as membership is not changing
 	for _, entry := range newConfig.Entries {
 		if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
 			// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config

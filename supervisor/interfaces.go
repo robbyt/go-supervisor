@@ -23,13 +23,13 @@ import (
 
 // Runnable represents a service that can be run and stopped.
 type Runnable interface {
-	fmt.Stringer // Runnables needs a String() method to be identifiable in logs
+	fmt.Stringer // Runnables implement a String() method to be identifiable in logs
 
 	// Run starts the service with the given context and returns an error if it fails.
-	// Run must be a blocking call that runs the work unit until it is stopped.
+	// Run is a blocking call that runs the work unit until it is stopped.
 	Run(ctx context.Context) error
 	// Stop signals the service to stop.
-	// Stop must be a blocking call that stops the work unit.
+	// Stop is a blocking call that stops the work unit.
 	Stop()
 }
 

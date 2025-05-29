@@ -35,7 +35,7 @@ type serverEntry struct {
 var _ entriesManager = (*entries)(nil)
 
 // entries is an immutable collection of server entries with pending actions.
-// Once created, it should not be modified - only replaced with a new instance.
+// Once created, it is not modified - only replaced with a new instance.
 type entries struct {
 	servers map[string]*serverEntry
 }
@@ -59,7 +59,7 @@ func newEntries(desiredConfigs map[string]*httpserver.Config) *entries {
 	return &entries{servers: servers}
 }
 
-// removeEntry creates a new entries collection with the specified entry completely removed.
+// removeEntry creates a new entries collection with the specified entry removed.
 func (e *entries) removeEntry(id string) entriesManager {
 	_, exists := e.servers[id]
 	if !exists {
@@ -111,7 +111,7 @@ func (e *entries) countByAction(a action) int {
 }
 
 // commit creates a new entries collection with all actions marked as complete.
-// This should be called after all pending actions have been executed.
+// Called after all pending actions have been executed.
 // It removes entries marked for stop and clears all action flags.
 func (e *entries) commit() entriesManager {
 	servers := make(map[string]*serverEntry)
@@ -212,7 +212,7 @@ func processExistingServer(
 			return
 		}
 
-		// Case 1: Server should be removed
+		// Case 1: Server is removed
 		if desiredConfig == nil {
 			if oldEntry.runner != nil {
 				newEntry := *oldEntry
@@ -233,7 +233,7 @@ func processExistingServer(
 
 		// Case 3: Config changed - need to restart
 		if oldEntry.runner != nil {
-			// Running server needs restart
+			// Running server marked for restart (stop then start)
 			stopEntry := *oldEntry
 			stopEntry.action = actionStop
 

@@ -16,7 +16,7 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
-// Interface guards to ensure all of these are implemented
+// Interface guards verify implementation at compile time
 var (
 	_ supervisor.Runnable   = (*Runner)(nil)
 	_ supervisor.Reloadable = (*Runner)(nil)
