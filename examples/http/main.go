@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// Port the http server should bind to
+	// Port the http server binds to
 	ListenOn = ":8080"
 
 	// How long the supervisor waits for the HTTP server to drain before forcefully shutting down
@@ -71,7 +71,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	// API routes need their middlewares passed explicitly with the updated function
+	// API routes have their middlewares passed to the updated function
 	apiRoute, err := httpserver.NewWildcardRoute("/api", wildcardHandler, commonMw...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wildcard route: %w", err)

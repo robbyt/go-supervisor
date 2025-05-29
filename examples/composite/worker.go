@@ -82,7 +82,7 @@ func NewWorker(config WorkerConfig, logger *slog.Logger) (*Worker, error) {
 	}, nil
 }
 
-// String returns the worker's name and interval safely.
+// String returns the worker's name and interval.
 func (w *Worker) String() string {
 	return fmt.Sprintf("Worker{config: %s}", w.getConfig())
 }
@@ -222,14 +222,14 @@ func (w *Worker) ReloadWithConfig(config any) {
 	}
 }
 
-// getConfig returns the worker's current configuration safely.
+// getConfig returns the worker's current configuration.
 func (w *Worker) getConfig() WorkerConfig {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.config
 }
 
-// setConfig updates the internal configuration state safely.
+// setConfig updates the internal configuration state.
 // It returns the *previous* config object.
 func (w *Worker) setConfig(newConfig WorkerConfig) (oldCfg WorkerConfig) {
 	w.mu.Lock()

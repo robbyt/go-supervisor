@@ -36,7 +36,7 @@ type Runner[T runnable] struct {
 //   - configCallback: Required. A function that returns the initial configuration and is called during any reload operations.
 //   - opts: Optional. A variadic list of Option functions to customize the Runner behavior.
 //
-// The configCallback must not be nil and will be invoked by Run() to load the initial configuration.
+// The configCallback cannot be nil and will be invoked by Run() to load the initial configuration.
 func NewRunner[T runnable](
 	configCallback ConfigCallback[T],
 	opts ...Option[T],
@@ -60,7 +60,7 @@ func NewRunner[T runnable](
 		opt(r)
 	}
 
-	// Validate requirements
+	// Validate configuration
 	if r.configCallback == nil {
 		return nil, fmt.Errorf(
 			"%w: config callback is required",
@@ -175,7 +175,7 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		return fmt.Errorf("%w: configuration is unavailable", ErrConfigMissing)
 	}
 
-	// If there are no entries, just log and return successfully instead of error
+	// If there are no entries, log and return without error
 	if len(cfg.Entries) == 0 {
 		logger.Debug("No runnables found in configuration")
 		return nil
@@ -183,7 +183,7 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 
 	logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
 
-	// Use a temporary WaitGroup to ensure all goroutines are launched.
+	// Use a temporary WaitGroup to track that all goroutines have started.
 	var startWg sync.WaitGroup
 	startWg.Add(len(cfg.Entries))
 	for i, e := range cfg.Entries {

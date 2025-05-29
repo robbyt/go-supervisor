@@ -21,7 +21,7 @@ type entriesManager interface {
 	getPendingActions() (toStart, toStop []string)
 
 	// commit creates a new entries collection with all actions marked as complete.
-	// This should be called after all pending actions have been executed.
+	// Called after all pending actions have been executed.
 	// It removes entries marked for stop and clears all action flags.
 	commit() entriesManager
 
@@ -40,8 +40,8 @@ type entriesManager interface {
 	// Returns nil if the server doesn't exist.
 	clearRuntime(id string) entriesManager
 
-	// removeEntry creates a new entries collection with the specified entry completely removed.
-	// This is used when a server fails to start and should be completely removed.
+	// removeEntry creates a new entries collection with the specified entry removed.
+	// This is used when a server fails to start and is removed from the collection.
 	removeEntry(id string) entriesManager
 
 	// buildPendingEntries creates a new entries collection based on the desired state and the previous state.

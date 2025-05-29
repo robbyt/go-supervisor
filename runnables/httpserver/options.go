@@ -31,8 +31,8 @@ func WithContext(ctx context.Context) Option {
 	}
 }
 
-// WithConfigCallback sets the function that will be called to load or reload configuration. Using
-// this option or WithConfig is required to initialize the Runner instance, because it provides the
+// WithConfigCallback sets the function that will be called to load or reload configuration.
+// Either this option or WithConfig initializes the Runner instance by providing the
 // configuration for the HTTP server managed by the Runner.
 func WithConfigCallback(callback ConfigCallback) Option {
 	return func(r *Runner) {

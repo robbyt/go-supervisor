@@ -237,7 +237,6 @@ func (p *PIDZero) Run() error {
 }
 
 // blockUntilRunnableReady blocks until the runnable is in a running state.
-// This requires implementing the Stateable interface so the runnable can be monitored.
 func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 	startupCtx, cancel := context.WithTimeout(p.ctx, p.startupTimeout)
 	defer cancel()
@@ -343,7 +342,7 @@ func (p *PIDZero) Shutdown() {
 					"elapsed", time.Since(shutdownStart))
 			}
 		} else {
-			// No timeout configured, just wait
+			// No timeout configured, wait indefinitely
 			p.wg.Wait()
 		}
 

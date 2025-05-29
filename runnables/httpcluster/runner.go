@@ -305,7 +305,7 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 	if len(toStop) > 0 {
 		current = r.stopServers(ctx, current, toStop)
 
-		// Delay after stopping servers to allow OS to fully release sockets
+		// Delay after stopping servers to allow OS to release sockets
 		// before binding to the same ports again
 		if len(toStart) > 0 && r.restartDelay > 0 {
 			logger.Debug("Waiting for ports to be released", "delay", r.restartDelay)
@@ -397,7 +397,7 @@ func (r *Runner) startServers(
 		runner, serverCtx, serverCancel, err := r.createAndStartServer(ctx, entry)
 		if err != nil {
 			logger.Error("Failed to create server", "error", err)
-			// Remove entry completely since server failed to create
+			// Remove entry since server failed to create
 			current = current.removeEntry(id)
 			continue
 		}
@@ -414,9 +414,8 @@ func (r *Runner) startServers(
 				"state", runner.GetState())
 			// Cancel the server context to clean up
 			serverCancel()
-			// Stop the runner explicitly to ensure cleanup
 			runner.Stop()
-			// Remove entry completely since server failed to start
+			// Remove entry since server failed to start
 			current = current.removeEntry(id)
 			continue
 		}

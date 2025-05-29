@@ -32,7 +32,6 @@ func applyMiddlewares(
 }
 
 // NewRoute creates a new Route with the given name, path, and handler.
-// The name must be unique, the path must be non-empty, and the handler must not be nil.
 func NewRoute(name string, path string, handler http.HandlerFunc) (*Route, error) {
 	if name == "" {
 		return nil, errors.New("name cannot be empty")

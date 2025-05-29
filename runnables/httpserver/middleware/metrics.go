@@ -7,7 +7,7 @@ import (
 )
 
 // MetricCollector creates a middleware that collects metrics about HTTP requests.
-// This is a placeholder implementation that should be extended to integrate with
+// This is a placeholder implementation that can be extended to integrate with
 // your metrics collection system.
 func MetricCollector() Middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
@@ -31,7 +31,7 @@ func MetricCollector() Middleware {
 			// httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, strconv.Itoa(rw.statusCode)).Inc()
 			// httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration.Seconds())
 
-			// For now, just log the metrics
+			// Log the metrics
 			slog.Debug("HTTP request metrics",
 				"method", r.Method,
 				"path", r.URL.Path,
