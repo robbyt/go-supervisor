@@ -27,7 +27,7 @@ func (m *MockConfigCallback) Call() (*Config, error) {
 	return args.Get(0).(*Config), args.Error(1)
 }
 
-// Helper function to create a modified config
+// Helper function to create a modified Config with a single route
 func createModifiedConfigForMock(t *testing.T, addr string) *Config {
 	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/modified")}
@@ -36,7 +36,7 @@ func createModifiedConfigForMock(t *testing.T, addr string) *Config {
 	return cfg
 }
 
-// Helper function to create a simple test config
+// createSimpleConfigForMock creates a test Config with a single route
 func createSimpleConfigForMock(t *testing.T, addr string) *Config {
 	t.Helper()
 	routes := Routes{createTestRouteForMock(t, "/")}
@@ -45,7 +45,7 @@ func createSimpleConfigForMock(t *testing.T, addr string) *Config {
 	return cfg
 }
 
-// Helper function to create a test route
+// Helper function to create a test Route
 func createTestRouteForMock(t *testing.T, path string) Route {
 	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {

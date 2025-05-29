@@ -171,7 +171,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 
 	// With the current implementation using a separate serverMutex,
 	// both calls might succeed since we set server = nil outside sync.Once
-	// The important thing to verify is that the shutdown was only called once
+	// Verify that the shutdown was only called once
 	for _, err := range errorResults {
 		// Either err is nil or it's ErrServerNotRunning
 		if err != nil {

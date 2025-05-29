@@ -150,7 +150,7 @@ func TestPortBindingRaceCondition(t *testing.T) {
 					t,
 					numCycles,
 					successCount,
-					"All restarts should succeed with proper delay",
+					"All restarts should succeed with delay",
 				)
 			} else {
 				// With zero delay, we expect some failures due to port binding race
@@ -343,7 +343,7 @@ func TestConcurrentRestartStress(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "Both servers should be running after concurrent restarts")
 }
 
-// BenchmarkServerRestarts measures performance of server restarts with proper delays
+// BenchmarkServerRestarts measures performance of server restarts with delays
 func BenchmarkServerRestarts(b *testing.B) {
 	benchmarks := []struct {
 		name         string

@@ -99,7 +99,7 @@ func TestPIDZero_StartShutdownManager_ContextCancel(t *testing.T) {
 
 	select {
 	case <-waitChan:
-		// WaitGroup finished cleanly, indicating proper cleanup
+		// WaitGroup finished cleanly
 	case <-time.After(1 * time.Second):
 		t.Fatal("WaitGroup did not finish within the timeout after context cancellation")
 	}

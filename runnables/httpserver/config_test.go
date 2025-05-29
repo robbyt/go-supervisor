@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Simple ResponseRecorder for testing
+// testResponseRecorder implements http.ResponseWriter for testing
 type testResponseRecorder struct {
 	Headers http.Header
 	Body    []byte
@@ -160,7 +160,7 @@ func TestConfigEqual(t *testing.T) {
 func TestConfigGetMux(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Creates proper ServeMux", func(t *testing.T) {
+	t.Run("Creates ServeMux", func(t *testing.T) {
 		var handlerCalled bool
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			handlerCalled = true

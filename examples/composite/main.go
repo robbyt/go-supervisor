@@ -47,7 +47,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Simple config callback that randomizes intervals on reload
+	// Config callback that randomizes intervals on reload
 	configCallback := func() (*composite.Config[*Worker], error) {
 		// Create entries array with our workers
 		newEntries := make([]composite.RunnableEntry[*Worker], 2)
