@@ -145,7 +145,6 @@ func TestMembershipChangesBasic(t *testing.T) {
 
 	runner, err := composite.NewRunner[*TestWorker](
 		configCallback,
-		composite.WithContext[*TestWorker](ctx),
 		composite.WithLogHandler[*TestWorker](logger.Handler()),
 	)
 	require.NoError(t, err)

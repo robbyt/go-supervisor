@@ -59,66 +59,6 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		mockFSM.AssertExpectations(t)
 	})
 
-	t.Run("parent context cancellation", func(t *testing.T) {
-		t.Parallel()
-
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			// Wait until context is cancelled
-			<-args.Get(0).(context.Context).Done()
-		}).Return(nil)
-		mockRunnable1.On("Stop").Maybe()
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-		}
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return NewConfig("test", entries)
-		}
-
-		// Create runner with a cancellable parent context
-		parentCtx, parentCancel := context.WithCancel(context.Background())
-		defer parentCancel()
-
-		runner, err := NewRunner(
-			configCallback,
-			WithContext[*mocks.Runnable](parentCtx),
-		)
-		require.NoError(t, err)
-
-		// Run in goroutine
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- runner.Run(context.Background())
-		}()
-
-		// Wait for states to transition to Running
-		require.Eventually(t, func() bool {
-			return runner.GetState() == finitestate.StatusRunning
-		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
-
-		// Cancel the parent context
-		parentCancel()
-
-		// Wait for Run to complete
-		var runErr error
-		select {
-		case runErr = <-errCh:
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("timeout waiting for Run to complete")
-		}
-
-		// Verify clean shutdown
-		assert.NoError(t, runErr)
-		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
-		mockRunnable1.AssertExpectations(t)
-	})
-
 	t.Run("child runnable error propagation", func(t *testing.T) {
 		t.Parallel()
 
@@ -158,7 +98,8 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		mockFSM := new(MockStateMachine)
 		mockFSM.On("Transition", finitestate.StatusBooting).Return(nil)
 		mockFSM.On("Transition", finitestate.StatusRunning).Return(nil)
-		mockFSM.On("TransitionBool", finitestate.StatusStopping).Return(true)
+		mockFSM.On("TransitionIfCurrentState", finitestate.StatusRunning, finitestate.StatusStopping).
+			Return(nil)
 		mockFSM.On("Transition", finitestate.StatusStopped).Return(errors.New("transition error"))
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil)
 		mockFSM.On("GetState").Return(finitestate.StatusStopping).Maybe()
@@ -249,7 +190,8 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		mockFSM := new(MockStateMachine)
 		mockFSM.On("Transition", finitestate.StatusBooting).Return(nil)
 		mockFSM.On("Transition", finitestate.StatusRunning).Return(nil)
-		mockFSM.On("TransitionBool", finitestate.StatusStopping).Return(true)
+		mockFSM.On("TransitionIfCurrentState", finitestate.StatusRunning, finitestate.StatusStopping).
+			Return(nil)
 		mockFSM.On("Transition", finitestate.StatusStopped).Return(nil).Maybe()
 		mockFSM.On("GetState").Return(finitestate.StatusStopping).Maybe()
 

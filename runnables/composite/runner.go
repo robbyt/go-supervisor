@@ -21,12 +21,13 @@ type Runner[T runnable] struct {
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
-	runnablesMu sync.Mutex // Protects runnable operations (start/stop)
+	runnablesMu sync.RWMutex
 	fsm         finitestate.Machine
 
-	runCtx       context.Context // set by Run() to track THIS instance run context
-	parentCtx    context.Context // set by NewRunner() to track the parent context
-	parentCancel context.CancelFunc
+	// will be set by Run()
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	serverErrors chan error
 	logger       *slog.Logger
 }
@@ -41,18 +42,12 @@ func NewRunner[T runnable](
 	configCallback ConfigCallback[T],
 	opts ...Option[T],
 ) (*Runner[T], error) {
-	// Setup defaults
 	logger := slog.Default().WithGroup("composite.Runner")
-	parentCtx, parentCancel := context.WithCancel(context.Background())
 	r := &Runner[T]{
 		currentConfig:  atomic.Pointer[Config[T]]{},
 		configCallback: configCallback,
-
-		runCtx:       context.Background(), // will be replaced in Run()
-		parentCtx:    parentCtx,
-		parentCancel: parentCancel,
-		serverErrors: make(chan error, 1),
-		logger:       logger,
+		serverErrors:   make(chan error, 1),
+		logger:         logger,
 	}
 
 	// Apply options, to override defaults if provided
@@ -95,9 +90,10 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	// store the Run context and cancel function in the runner so that Reload() and Stop() can use them later
 	r.runnablesMu.Lock()
-	// store the Run context in the runner so that Reload() can use it later
-	r.runCtx = runCtx
+	r.ctx = runCtx
+	r.cancel = runCancel
 	r.runnablesMu.Unlock()
 
 	// Transition from New to Booting
@@ -121,25 +117,18 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	select {
 	case <-runCtx.Done():
 		r.logger.Debug("Local context canceled")
-	case <-r.parentCtx.Done():
-		r.logger.Debug("Parent context canceled")
 	case err := <-r.serverErrors:
 		r.setStateError()
 		return fmt.Errorf("%w: %w", ErrRunnableFailed, err)
 	}
 
-	// Try to transition to Stopping state
-	if !r.fsm.TransitionBool(finitestate.StatusStopping) {
-		if r.fsm.GetState() == finitestate.StatusStopping {
-			r.logger.Debug("Already in Stopping state, continuing shutdown")
-		} else {
-			r.setStateError()
-			return fmt.Errorf("failed to transition to Stopping state")
-		}
+	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusRunning, finitestate.StatusStopping); err != nil {
+		// This error is expected if we're already stopping, so only log at debug level
+		r.logger.Debug("Not transitioning to Stopping state", "error", err)
 	}
 
 	// Stop all child runnables
-	if err := r.stopRunnables(); err != nil {
+	if err := r.stopAllRunnables(); err != nil {
 		r.setStateError()
 		return fmt.Errorf("failed to stop runnables: %w", err)
 	}
@@ -154,14 +143,17 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	return nil
 }
 
-// Stop will cancel the parent context, causing all child runnables to stop.
+// Stop will cancel the context, causing all child runnables to stop.
 func (r *Runner[T]) Stop() {
-	// Only transition to Stopping if we're currently Running
-	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusRunning, finitestate.StatusStopping); err != nil {
-		// This error is expected if we're already stopping, so only log at debug level
-		r.logger.Debug("Not transitioning to Stopping state", "error", err)
+	r.runnablesMu.RLock()
+	cancel := r.cancel
+	r.runnablesMu.RUnlock()
+
+	if cancel == nil {
+		r.logger.Warn("Cancel function is nil, skipping Stop")
+		return
 	}
-	r.parentCancel()
+	cancel()
 }
 
 // boot starts all child runnables in the order they're defined.
@@ -227,8 +219,8 @@ func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 	}
 }
 
-// stopRunnables stops all child runnables in reverse order (last to first).
-func (r *Runner[T]) stopRunnables() error {
+// stopAllRunnables stops all child runnables in reverse order (last to first).
+func (r *Runner[T]) stopAllRunnables() error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 

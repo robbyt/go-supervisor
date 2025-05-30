@@ -109,7 +109,6 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		ctx := context.Background()
 		runner, err := NewRunner(
 			configCallback,
-			WithContext[*mocks.Runnable](ctx),
 			WithLogHandler[*mocks.Runnable](handler),
 		)
 		require.NoError(t, err)
@@ -195,10 +194,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		// Create runner and set state to Running
 		ctx := t.Context()
-		runner, err := NewRunner(
-			configCallback,
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		require.Equal(t, 0, callbackCalls)
 
@@ -292,10 +288,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		// Create runner and set state to Running
 		ctx := t.Context()
-		runner, err := NewRunner(
-			configCallback,
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		assert.Equal(t, 0, callbackCalls)
 
@@ -404,10 +397,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		// Create runner
 		ctx := t.Context()
-		runner, err := NewRunner(
-			configCallback,
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		require.Equal(t, 0, callbackCalls, "Callback should not be called during creation")
 
@@ -497,10 +487,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		// Create runner with context
 		ctx := t.Context()
-		runner, err := NewRunner(
-			configCallback,
-			WithContext[*MockReloadableWithConfig](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 		assert.Equal(t, 0, callbackCalls)
 
@@ -1038,8 +1025,7 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
-		logger := runner.logger.WithGroup("test")
-		runner.reloadConfig(logger, config)
+		runner.reloadSkipRestart(config)
 
 		// Verify reloadable interface methods were called
 		mockRunnable1.AssertExpectations(t)
@@ -1078,8 +1064,7 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
-		logger := runner.logger.WithGroup("test")
-		runner.reloadConfig(logger, config)
+		runner.reloadSkipRestart(config)
 
 		// Verify ReloadWithConfig was called with correct configs
 		mockReloadable1.AssertExpectations(t)
@@ -1128,9 +1113,8 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call reloadConfig on both runners
-		logger := runner1.logger.WithGroup("test")
-		runner1.reloadConfig(logger, config1)
-		runner2.reloadConfig(logger, config2)
+		runner1.reloadSkipRestart(config1)
+		runner2.reloadSkipRestart(config2)
 
 		// Verify expectations
 		mockRunnable.AssertExpectations(t)
@@ -1185,15 +1169,13 @@ func TestReloadMembershipChanged(t *testing.T) {
 		newConfig, err := NewConfig("test", newEntries)
 		require.NoError(t, err)
 
-		ctx := t.Context()
-
 		// Create callback that initially returns oldEntries
 		configCallback := func() (*Config[*mocks.Runnable], error) {
 			return initialConfig, nil
 		}
 
 		// Create runner
-		runner, err := NewRunner(configCallback, WithContext[*mocks.Runnable](ctx))
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Make sure initial config is loaded
@@ -1202,13 +1184,12 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Equal(t, 2, len(initialConfigLoaded.Entries))
 
 		// Set runCtx (normally done by Run)
-		runCtx := t.Context()
 		runner.runnablesMu.Lock()
-		runner.runCtx = runCtx
+		runner.ctx = t.Context()
 		runner.runnablesMu.Unlock()
 
 		// Call reloadMembershipChanged directly
-		err = runner.reloadMembershipChanged(newConfig)
+		err = runner.reloadWithRestart(newConfig)
 		require.NoError(t, err)
 
 		// Verify config was updated
@@ -1247,14 +1228,13 @@ func TestReloadMembershipChanged(t *testing.T) {
 		require.NoError(t, err)
 
 		// Set runCtx (normally done by Run)
-		runCtx := t.Context()
 		runner.runnablesMu.Lock()
-		runner.runCtx = runCtx
+		runner.ctx = t.Context()
 		runner.runnablesMu.Unlock()
 
 		// Call reloadMembershipChanged
 		// This should fail because getConfig() returns nil in stopRunnables
-		err = runner.reloadMembershipChanged(newConfig)
+		err = runner.reloadWithRestart(newConfig)
 
 		// Verify error
 		require.Error(t, err)
@@ -1292,13 +1272,10 @@ func TestReloadMembershipChanged(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// setup a new context for the runner that will be cancelled in bit
-		ctx, cancel := context.WithCancel(context.Background())
-
 		// Run in a goroutine to avoid blocking
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- runner.Run(ctx)
+			errCh <- runner.Run(t.Context())
 		}()
 
 		// Wait for the runner to start
@@ -1326,7 +1303,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Same(t, mockRunnable, updatedConfig.Entries[0].Runnable)
 
 		// Clean shutdown
-		cancel()
+		runner.Stop()
 
 		// Wait for runner to complete
 		select {
@@ -1352,32 +1329,25 @@ func TestReloadMembershipChanged(t *testing.T) {
 		newConfig, err := NewConfig("test", newEntries)
 		require.NoError(t, err)
 
-		// context for the runner
-		ctx := t.Context()
-
 		// Create callback that returns the config
 		configCallback := func() (*Config[*mocks.Runnable], error) {
 			return initialConfig, nil
 		}
 
 		// Create runner
-		runner, err := NewRunner(configCallback,
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
 		// Make sure initial config is loaded
 		runner.currentConfig.Store(initialConfig)
 
 		// Set runCtx (normally done by Run)
-		runCtx, runCancel := context.WithCancel(context.Background())
-		defer runCancel()
 		runner.runnablesMu.Lock()
-		runner.runCtx = runCtx
+		runner.ctx = t.Context()
 		runner.runnablesMu.Unlock()
 
 		// Call reloadMembershipChanged directly - should no longer error with empty entries
-		err = runner.reloadMembershipChanged(newConfig)
+		err = runner.reloadWithRestart(newConfig)
 		require.NoError(t, err)
 
 		// Verify config was updated
@@ -1529,17 +1499,16 @@ func TestHasMembershipChanged(t *testing.T) {
 		}
 
 		ctx := context.Background() // Use a clean context instead of t.Context()
-		runner, err := NewRunner(configCallback,
-			WithContext[*mocks.Runnable](ctx),
-		)
+		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		runCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+		runner.runnablesMu.Lock()
+		runner.ctx = ctx
+		runner.runnablesMu.Unlock()
 
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- runner.Run(runCtx)
+			errCh <- runner.Run(ctx)
 		}()
 
 		// Verify runner reaches Running state
@@ -1571,7 +1540,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		assert.Equal(t, mockRunnable4, config.Entries[1].Runnable)
 
 		// Clean shutdown before verification
-		cancel()
+		runner.Stop()
 
 		// Wait for runner to complete
 		require.Eventually(t, func() bool {
