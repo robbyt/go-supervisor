@@ -9,10 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GOCACHE: "/tmp/go-cache"
-  GOMODCACHE: "/tmp/go-mod-cache"
-
 jobs:
   build:
     runs-on: ubuntu-latest
