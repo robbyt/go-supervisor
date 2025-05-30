@@ -21,7 +21,7 @@ type Runner[T runnable] struct {
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
-	runnablesMu sync.RWMutex
+	runnablesMu sync.Mutex
 	fsm         finitestate.Machine
 
 	// will be set by Run()
@@ -145,9 +145,9 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 
 // Stop will cancel the context, causing all child runnables to stop.
 func (r *Runner[T]) Stop() {
-	r.runnablesMu.RLock()
+	r.runnablesMu.Lock()
 	cancel := r.cancel
-	r.runnablesMu.RUnlock()
+	r.runnablesMu.Unlock()
 
 	if cancel == nil {
 		r.logger.Warn("Cancel function is nil, skipping Stop")
