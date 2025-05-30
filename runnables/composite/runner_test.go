@@ -77,17 +77,6 @@ func TestNewRunner(t *testing.T) {
 			},
 			expectError: false,
 		},
-		{
-			name: "with custom context",
-			callback: func() (*Config[*mocks.Runnable], error) {
-				entries := []RunnableEntry[*mocks.Runnable]{}
-				return NewConfig("test", entries)
-			},
-			opts: []Option[*mocks.Runnable]{
-				WithContext[*mocks.Runnable](context.Background()),
-			},
-			expectError: false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -470,17 +459,33 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		// Setup mock runnables and config
 		_, configCallback := setupMocksAndConfig()
 
-		// Create runner and manually set state to Running
+		// Create runner
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
+
+		// Set up cancel function as Run() would
+		ctx, cancel := context.WithCancel(t.Context())
+		runner.runnablesMu.Lock()
+		runner.ctx = ctx
+		runner.cancel = cancel
+		runner.runnablesMu.Unlock()
+
 		err = runner.fsm.SetState(finitestate.StatusRunning)
 		require.NoError(t, err)
 
-		// Call Stop - just testing the state transition
+		// Call Stop - should just cancel the context, not change state
 		runner.Stop()
 
-		// Verify state transition
-		assert.Equal(t, finitestate.StatusStopping, runner.GetState())
+		// Verify state did not change (Stop only cancels context)
+		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+		// Verify context was cancelled
+		select {
+		case <-ctx.Done():
+			// Good, context was cancelled
+		default:
+			t.Error("Context should be cancelled after Stop()")
+		}
 	})
 
 	t.Run("stop from non-running state", func(t *testing.T) {

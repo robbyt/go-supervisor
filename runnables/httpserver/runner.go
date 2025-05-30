@@ -227,7 +227,7 @@ func (r *Runner) boot() error {
 	r.serverCloseOnce = sync.Once{}
 	r.serverMutex.Unlock()
 
-	r.logger.Info("Starting HTTP server",
+	r.logger.Debug("Starting HTTP server",
 		"listenOn", listenAddr,
 		"readTimeout", serverCfg.ReadTimeout,
 		"writeTimeout", serverCfg.WriteTimeout,
