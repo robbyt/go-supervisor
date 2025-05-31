@@ -27,10 +27,9 @@ type Runner struct {
 	restartDelay        time.Duration
 	deadlineServerStart time.Duration
 
-	// Context management - similar to composite pattern
-	parentCtx context.Context // Set during construction
-	runCtx    context.Context // Set during Run()
-	runCancel context.CancelFunc
+	// Set by Run()
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// Configuration siphon channel
 	configSiphon chan map[string]*httpserver.Config
@@ -76,7 +75,6 @@ func NewRunner(opts ...Option) (*Runner, error) {
 		logger:              slog.Default().WithGroup("httpcluster.Runner"),
 		restartDelay:        defaultRestartDelay,
 		deadlineServerStart: defaultDeadlineServerStart,
-		parentCtx:           context.Background(),
 		configSiphon: make(
 			chan map[string]*httpserver.Config,
 		), // unbuffered by default
@@ -172,8 +170,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.mu.Lock()
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-	r.runCtx = runCtx
-	r.runCancel = runCancel
+	r.ctx = runCtx
+	r.cancel = runCancel
 	r.mu.Unlock()
 
 	// Transition to running (no servers initially)
@@ -187,10 +185,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			return r.shutdown(runCtx)
-
-		case <-r.parentCtx.Done():
-			logger.Debug("Parent context cancelled, initiating shutdown")
 			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
@@ -214,7 +208,7 @@ func (r *Runner) Stop() {
 	logger.Debug("Stopping")
 
 	r.mu.Lock()
-	r.runCancel()
+	r.cancel()
 	r.mu.Unlock()
 }
 
