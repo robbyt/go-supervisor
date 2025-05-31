@@ -22,7 +22,7 @@ func TestContextValuePropagation(t *testing.T) {
 	type contextKey string
 	const testKey contextKey = "test-key"
 	const testValue = "test-value"
-	parentCtx := context.WithValue(context.Background(), testKey, testValue)
+	parentCtx := context.WithValue(t.Context(), testKey, testValue)
 
 	// Create a cancellable context to test cancellation propagation
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -66,7 +66,6 @@ func TestContextValuePropagation(t *testing.T) {
 
 	// Create the runner
 	runner, err := NewRunner(
-		WithContext(ctx),
 		WithConfigCallback(cfgCallback),
 	)
 	require.NoError(t, err)

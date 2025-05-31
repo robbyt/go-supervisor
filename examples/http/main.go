@@ -81,27 +81,22 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 }
 
 // RunServer initializes and runs the HTTP server with supervisor
-// Returns the supervisor and a cleanup function
 func RunServer(
 	ctx context.Context,
 	logHandler slog.Handler,
 	routes []httpserver.Route,
-) (*supervisor.PIDZero, func(), error) {
+) (*supervisor.PIDZero, error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
 		return httpserver.NewConfig(ListenOn, routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
-	// Create the HTTP server runner with a custom context
-	customCtx, customCancel := context.WithCancel(ctx)
-
+	// Create the HTTP server runner
 	runner, err := httpserver.NewRunner(
-		httpserver.WithContext(customCtx),
 		httpserver.WithConfigCallback(configCallback),
 		httpserver.WithLogHandler(logHandler))
 	if err != nil {
-		customCancel()
-		return nil, nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
 	}
 
 	// Create a PIDZero supervisor and add the runner
@@ -110,11 +105,10 @@ func RunServer(
 		supervisor.WithLogHandler(logHandler),
 		supervisor.WithRunnables(runner))
 	if err != nil {
-		customCancel()
-		return nil, nil, fmt.Errorf("failed to create supervisor: %w", err)
+		return nil, fmt.Errorf("failed to create supervisor: %w", err)
 	}
 
-	return sv, customCancel, nil
+	return sv, nil
 }
 
 func main() {
@@ -135,12 +129,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	sv, cancel, err := RunServer(ctx, handler, routes)
+	sv, err := RunServer(ctx, handler, routes)
 	if err != nil {
 		slog.Error("Failed to setup server", "error", err)
 		os.Exit(1)
 	}
-	defer cancel()
 
 	// Start the supervisor - this will block until shutdown
 	slog.Info("Starting supervisor with HTTP server on " + ListenOn)

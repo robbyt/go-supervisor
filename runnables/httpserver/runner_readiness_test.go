@@ -28,7 +28,7 @@ func TestServerReadinessProbe(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("probe_timeout", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
 		err := runner.serverReadinessProbe(ctx, "test.invalid:80")

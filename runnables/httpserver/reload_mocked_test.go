@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -203,7 +202,6 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 
 		// Create the Runner with the config callback
 		runner, err := NewRunner(
-			WithContext(context.Background()),
 			WithConfigCallback(configCallback),
 		)
 		require.NoError(t, err)

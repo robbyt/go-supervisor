@@ -30,10 +30,9 @@ func TestRunServer(t *testing.T) {
 	require.NoError(t, err, "Failed to build routes")
 	require.NotEmpty(t, routes, "Routes should not be empty")
 
-	sv, cleanup, err := RunServer(ctx, logHandler, routes)
+	sv, err := RunServer(ctx, logHandler, routes)
 	require.NoError(t, err, "RunServer should not return an error")
 	require.NotNil(t, sv, "Supervisor should not be nil")
-	require.NotNil(t, cleanup, "Cleanup function should not be nil")
 
 	// Start the server in a goroutine to avoid blocking the test
 	errCh := make(chan error, 1)
@@ -54,8 +53,8 @@ func TestRunServer(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "Status: OK\n", string(body))
 
-	// Clean up
-	cleanup()
+	// Stop the supervisor
+	sv.Shutdown()
 
 	// Check that Run() didn't return an error
 	select {
@@ -88,7 +87,6 @@ func TestRunServerInvalidPort(t *testing.T) {
 
 	// Create HTTP server runner with invalid port
 	runner, err := httpserver.NewRunner(
-		httpserver.WithContext(ctx),
 		httpserver.WithConfigCallback(configCallback),
 		httpserver.WithLogHandler(logHandler.WithGroup("httpserver")),
 	)
