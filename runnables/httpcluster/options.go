@@ -1,7 +1,6 @@
 package httpcluster
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -11,14 +10,6 @@ import (
 
 // Option is a function that configures a Runner.
 type Option func(*Runner) error
-
-// WithContext sets the parent context for the cluster.
-func WithContext(ctx context.Context) Option {
-	return func(r *Runner) error {
-		r.parentCtx = ctx
-		return nil
-	}
-}
 
 // WithLogger sets the logger for the cluster.
 func WithLogger(logger *slog.Logger) Option {

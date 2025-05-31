@@ -241,7 +241,6 @@ func createHTTPCluster(
 	// Create the httpcluster
 	cluster, err := httpcluster.NewRunner(
 		httpcluster.WithLogger(logger.WithGroup("httpcluster")),
-		httpcluster.WithContext(ctx),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create httpcluster: %w", err)

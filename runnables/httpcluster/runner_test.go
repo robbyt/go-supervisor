@@ -89,7 +89,6 @@ func TestNewRunner(t *testing.T) {
 		require.NotNil(t, runner)
 
 		assert.NotNil(t, runner.logger)
-		assert.NotNil(t, runner.parentCtx)
 		assert.NotNil(t, runner.configSiphon)
 		assert.NotNil(t, runner.currentEntries)
 		assert.NotNil(t, runner.fsm)
@@ -97,13 +96,10 @@ func TestNewRunner(t *testing.T) {
 	})
 
 	t.Run("with options", func(t *testing.T) {
-		ctx := t.Context()
 		runner, err := NewRunner(
-			WithContext(ctx),
 			WithSiphonBuffer(1),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, ctx, runner.parentCtx)
 
 		cfg := make(map[string]*httpserver.Config)
 		select {
@@ -558,7 +554,7 @@ func TestRunnerExecuteActions(t *testing.T) {
 		ctx := t.Context()
 
 		runner.mu.Lock()
-		runner.runCtx = ctx
+		runner.ctx = ctx
 		runner.mu.Unlock()
 
 		mockEntries := &MockEntriesManager{}
@@ -603,35 +599,6 @@ func TestRunnerExecuteActions(t *testing.T) {
 
 func TestRunnerContextManagement(t *testing.T) {
 	t.Parallel()
-	t.Run("parent context cancellation", func(t *testing.T) {
-		parentCtx, parentCancel := context.WithCancel(t.Context())
-
-		runner, err := NewRunner(WithContext(parentCtx))
-		require.NoError(t, err)
-
-		runCtx := context.Background()
-
-		runErr := make(chan error, 1)
-		go func() {
-			runErr <- runner.Run(runCtx)
-		}()
-
-		// Wait for running
-		require.Eventually(t, func() bool {
-			return runner.IsRunning()
-		}, time.Second, 10*time.Millisecond)
-
-		// Cancel parent context
-		parentCancel()
-
-		// Should stop gracefully
-		select {
-		case err := <-runErr:
-			assert.NoError(t, err)
-		case <-time.After(time.Second):
-			t.Fatal("Runner should stop when parent context cancelled")
-		}
-	})
 
 	t.Run("run context setup", func(t *testing.T) {
 		runner, err := NewRunner()
@@ -652,8 +619,8 @@ func TestRunnerContextManagement(t *testing.T) {
 
 		// Check run context is set
 		runner.mu.RLock()
-		runCtx := runner.runCtx
-		runCancel := runner.runCancel
+		runCtx := runner.ctx
+		runCancel := runner.cancel
 		runner.mu.RUnlock()
 
 		assert.NotNil(t, runCtx)
