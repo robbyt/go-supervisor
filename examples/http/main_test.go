@@ -88,7 +88,6 @@ func TestRunServerInvalidPort(t *testing.T) {
 
 	// Create HTTP server runner with invalid port
 	runner, err := httpserver.NewRunner(
-		httpserver.WithContext(ctx),
 		httpserver.WithConfigCallback(configCallback),
 		httpserver.WithLogHandler(logHandler.WithGroup("httpserver")),
 	)

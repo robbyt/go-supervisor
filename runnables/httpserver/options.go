@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"log/slog"
 )
 
@@ -17,16 +16,6 @@ func WithLogHandler(handler slog.Handler) Option {
 	return func(r *Runner) {
 		if handler != nil {
 			r.logger = slog.New(handler.WithGroup("httpserver.Runner"))
-		}
-	}
-}
-
-// WithContext sets a custom context for the Runner instance.
-// This allows for more granular control over cancellation and timeouts.
-func WithContext(ctx context.Context) Option {
-	return func(r *Runner) {
-		if ctx != nil {
-			r.ctx, r.cancel = context.WithCancel(ctx)
 		}
 	}
 }

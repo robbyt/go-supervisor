@@ -28,7 +28,6 @@ func TestBootFailure(t *testing.T) {
 	t.Run("Config callback returns nil", func(t *testing.T) {
 		callback := func() (*Config, error) { return nil, nil }
 		runner, err := NewRunner(
-			WithContext(context.Background()),
 			WithConfigCallback(callback),
 		)
 
@@ -40,7 +39,6 @@ func TestBootFailure(t *testing.T) {
 	t.Run("Config callback returns error", func(t *testing.T) {
 		callback := func() (*Config, error) { return nil, errors.New("failed to load config") }
 		runner, err := NewRunner(
-			WithContext(context.Background()),
 			WithConfigCallback(callback),
 		)
 
@@ -63,7 +61,6 @@ func TestBootFailure(t *testing.T) {
 		}
 
 		runner, err := NewRunner(
-			WithContext(context.Background()),
 			WithConfigCallback(callback),
 		)
 
@@ -114,7 +111,6 @@ func TestCustomServerCreator(t *testing.T) {
 
 	// Create the runner
 	runner, err := NewRunner(
-		WithContext(context.Background()),
 		WithConfigCallback(cfgCallback),
 	)
 	require.NoError(t, err)
@@ -177,7 +173,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
-	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 
 	// Channel to capture Run's completion
@@ -259,7 +255,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
-	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 
 	// Channel to capture Run's completion
@@ -326,7 +322,7 @@ func TestServerErr(t *testing.T) {
 
 	// Create two server configs using the same port
 	cfg1 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
-	server1, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfg1))
+	server1, err := NewRunner(WithConfigCallback(cfg1))
 	require.NoError(t, err)
 
 	// Start the first server
@@ -347,7 +343,7 @@ func TestServerErr(t *testing.T) {
 
 	// Create a second server with the same port
 	cfg2 := func() (*Config, error) { return NewConfig(port, hConfig, WithDrainTimeout(0)) }
-	server2, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfg2))
+	server2, err := NewRunner(WithConfigCallback(cfg2))
 	require.NoError(t, err)
 
 	// The second server should fail to start with "address already in use"
@@ -380,7 +376,7 @@ func TestServerLifecycle(t *testing.T) {
 		return NewConfig(listenPort, Routes{*route}, WithDrainTimeout(1*time.Second))
 	}
 
-	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 
 	// Run the server in a goroutine
@@ -445,7 +441,7 @@ func TestString(t *testing.T) {
 			return NewConfig(listenPort, hConfig, WithDrainTimeout(0))
 		}
 
-		server, err := NewRunner(WithContext(t.Context()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 
 		// Test string representation before starting
@@ -490,7 +486,6 @@ func TestString(t *testing.T) {
 		}
 		testName := "TestServer"
 		server, err := NewRunner(
-			WithContext(t.Context()),
 			WithConfigCallback(cfgCallback),
 			WithName(testName),
 		)

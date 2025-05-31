@@ -58,7 +58,7 @@ func TestRapidReload(t *testing.T) {
 	}
 
 	// Create the Runner instance
-	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 	require.NotNil(t, server)
 
@@ -170,7 +170,7 @@ func TestReload(t *testing.T) {
 		}
 
 		// Create the Runner instance
-		server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 		require.NotNil(t, server)
 
@@ -233,7 +233,7 @@ func TestReload(t *testing.T) {
 		}
 
 		// Create the Runner instance
-		server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 		require.NotNil(t, server)
 
@@ -299,7 +299,7 @@ func TestReload(t *testing.T) {
 
 		// Create the Runner instance but don't start it - leaving it in New state
 		// This will make the Reloading transition fail since it's not valid from New state
-		server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 		require.NotNil(t, server)
 
@@ -360,7 +360,6 @@ func TestReload(t *testing.T) {
 
 		// Create a new runner with our callback
 		updatedServer, err := NewRunner(
-			WithContext(context.Background()),
 			WithConfigCallback(newCfgCallback),
 		)
 		require.NoError(t, err)
@@ -411,7 +410,7 @@ func TestReload(t *testing.T) {
 		}
 
 		// Set up the runner with the callback
-		server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 
 		// Store the initial config
@@ -452,7 +451,7 @@ func TestReload(t *testing.T) {
 		}
 
 		// Create the Runner instance
-		server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+		server, err := NewRunner(WithConfigCallback(cfgCallback))
 		require.NoError(t, err)
 		require.NotNil(t, server)
 

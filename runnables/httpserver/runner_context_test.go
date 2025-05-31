@@ -66,7 +66,6 @@ func TestContextValuePropagation(t *testing.T) {
 
 	// Create the runner
 	runner, err := NewRunner(
-		WithContext(ctx),
 		WithConfigCallback(cfgCallback),
 	)
 	require.NoError(t, err)

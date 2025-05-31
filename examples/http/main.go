@@ -92,15 +92,11 @@ func RunServer(
 		return httpserver.NewConfig(ListenOn, routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
-	// Create the HTTP server runner with a custom context
-	customCtx, customCancel := context.WithCancel(ctx)
-
+	// Create the HTTP server runner
 	runner, err := httpserver.NewRunner(
-		httpserver.WithContext(customCtx),
 		httpserver.WithConfigCallback(configCallback),
 		httpserver.WithLogHandler(logHandler))
 	if err != nil {
-		customCancel()
 		return nil, nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
 	}
 
@@ -110,11 +106,10 @@ func RunServer(
 		supervisor.WithLogHandler(logHandler),
 		supervisor.WithRunnables(runner))
 	if err != nil {
-		customCancel()
 		return nil, nil, fmt.Errorf("failed to create supervisor: %w", err)
 	}
 
-	return sv, customCancel, nil
+	return sv, func() {}, nil
 }
 
 func main() {

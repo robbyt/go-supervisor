@@ -298,12 +298,10 @@ func TestContextPropagation(t *testing.T) {
 		return NewConfig(listenPort, hConfig, WithDrainTimeout(2*time.Second))
 	}
 
-	// Create a new context that we'll cancel to trigger shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Context for the server Run method
+	ctx := context.Background()
 
 	server, err := NewRunner(
-		WithContext(ctx),
 		WithConfigCallback(cfgCallback),
 	)
 	require.NoError(t, err)
@@ -313,7 +311,7 @@ func TestContextPropagation(t *testing.T) {
 
 	// Start the server in a goroutine
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(ctx)
 		runComplete <- err
 	}()
 
@@ -346,7 +344,7 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	// Initiate server shutdown
-	cancel() // This should cancel the context passed to the server
+	server.Stop() // This should cancel the server's context
 
 	// Verify that the handler's context was canceled
 	select {
