@@ -63,9 +63,14 @@ func TestRapidReload(t *testing.T) {
 	require.NotNil(t, server)
 
 	// Start the server
+	// Use a background context here because this test needs to control
+	// the server lifecycle independent of test timeouts
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	done := make(chan error, 1)
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(serverCtx)
 		done <- err
 	}()
 	t.Cleanup(func() {
@@ -79,7 +84,7 @@ func TestRapidReload(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create context for state monitoring
-	stateCtx, stateCancel := context.WithCancel(context.Background())
+	stateCtx, stateCancel := context.WithCancel(t.Context())
 	defer stateCancel()
 	stateChan := server.GetStateChan(stateCtx)
 
@@ -175,9 +180,14 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, server)
 
 		// Start the server with valid config
+		// Use a background context here because this test needs to control
+		// the server lifecycle independent of test timeouts
+		serverCtx, serverCancel := context.WithCancel(context.Background())
+		defer serverCancel()
+
 		done := make(chan error, 1)
 		go func() {
-			err := server.Run(context.Background())
+			err := server.Run(serverCtx)
 			done <- err
 		}()
 
@@ -238,9 +248,14 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, server)
 
 		// Start the server
+		// Use a background context here because this test needs to control
+		// the server lifecycle independent of test timeouts
+		serverCtx, serverCancel := context.WithCancel(context.Background())
+		defer serverCancel()
+
 		errChan := make(chan error, 1)
 		go func() {
-			err := server.Run(context.Background())
+			err := server.Run(serverCtx)
 			errChan <- err
 			close(errChan)
 		}()
@@ -456,9 +471,14 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, server)
 
 		// Start the server
+		// Use a background context here because this test needs to control
+		// the server lifecycle independent of test timeouts
+		serverCtx, serverCancel := context.WithCancel(context.Background())
+		defer serverCancel()
+
 		done := make(chan error, 1)
 		go func() {
-			err := server.Run(context.Background())
+			err := server.Run(serverCtx)
 			done <- err
 		}()
 		t.Cleanup(func() {
@@ -474,7 +494,7 @@ func TestReload(t *testing.T) {
 		server.Reload()
 
 		// Setup state monitoring
-		stateCtx, stateCancel := context.WithCancel(context.Background())
+		stateCtx, stateCancel := context.WithCancel(t.Context())
 		defer stateCancel()
 		stateChan := server.GetStateChan(stateCtx)
 

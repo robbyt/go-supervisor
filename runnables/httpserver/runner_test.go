@@ -68,7 +68,7 @@ func TestBootFailure(t *testing.T) {
 		assert.NotNil(t, runner)
 
 		// Test actual run
-		err = runner.Run(context.Background())
+		err = runner.Run(t.Context())
 		assert.Error(t, err)
 		// With our readiness probe, the error format is different but should be propagated properly
 		assert.ErrorIs(t, err, ErrServerBoot)
@@ -181,7 +181,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 
 	// Start the server in a goroutine
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(t.Context())
 		done <- err
 	}()
 
@@ -263,7 +263,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 
 	// Start the server in a goroutine
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(t.Context())
 		done <- err
 	}()
 
@@ -347,7 +347,7 @@ func TestServerErr(t *testing.T) {
 	require.NoError(t, err)
 
 	// The second server should fail to start with "address already in use"
-	err = server2.Run(context.Background())
+	err = server2.Run(t.Context())
 	require.Error(t, err)
 	// The error contains ErrServerBoot, but we can't use ErrorIs here directly
 	// because of how the error is wrapped
@@ -382,7 +382,7 @@ func TestServerLifecycle(t *testing.T) {
 	// Run the server in a goroutine
 	done := make(chan error, 1)
 	go func() {
-		err := server.Run(context.Background())
+		err := server.Run(t.Context())
 		done <- err
 	}()
 
@@ -451,7 +451,7 @@ func TestString(t *testing.T) {
 		// Start the server
 		done := make(chan error, 1)
 		go func() {
-			err := server.Run(context.Background())
+			err := server.Run(t.Context())
 			done <- err
 		}()
 

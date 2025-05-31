@@ -299,7 +299,7 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	// Context for the server Run method
-	ctx := context.Background()
+	ctx := t.Context()
 
 	server, err := NewRunner(
 		WithConfigCallback(cfgCallback),

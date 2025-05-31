@@ -52,7 +52,7 @@ func TestGetStateChan(t *testing.T) {
 	})
 
 	// Create a context with timeout for safety
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 
 	// Get the state channel
