@@ -46,7 +46,8 @@ type Runner struct {
 	serverMutex     sync.RWMutex
 	serverErrors    chan error
 
-	fsm    finitestate.Machine
+	fsm finitestate.Machine
+	// Set during Run()
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger *slog.Logger
@@ -57,16 +58,11 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	// Set default logger
 	logger := slog.Default().WithGroup("httpserver.Runner")
 
-	// Initialize with a background context by default
-	ctx, cancel := context.WithCancel(context.Background())
-
 	r := &Runner{
 		name:            "",
 		config:          atomic.Pointer[Config]{},
 		serverCloseOnce: sync.Once{},
 		serverErrors:    make(chan error, 1),
-		ctx:             ctx,
-		cancel:          cancel,
 		logger:          logger,
 	}
 
@@ -121,6 +117,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	// Store the context and cancel function
+	r.mutex.Lock()
+	r.ctx = runCtx
+	r.cancel = runCancel
+	r.mutex.Unlock()
+
 	// Transition from New to Booting
 	err := r.fsm.Transition(finitestate.StatusBooting)
 	if err != nil {
@@ -145,9 +147,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	select {
 	case <-runCtx.Done():
-		r.logger.Debug("Local context canceled")
-	case <-r.ctx.Done():
-		r.logger.Debug("Parent context canceled")
+		r.logger.Debug("Context canceled")
 	case err := <-r.serverErrors:
 		r.setStateError()
 		return fmt.Errorf("%w: %w", ErrHttpServer, err)
@@ -159,7 +159,16 @@ func (r *Runner) Run(ctx context.Context) error {
 // Stop signals the HTTP server to shut down by canceling its context.
 func (r *Runner) Stop() {
 	r.logger.Debug("Stopping HTTP server")
-	r.cancel()
+
+	r.mutex.RLock()
+	cancel := r.cancel
+	r.mutex.RUnlock()
+
+	if cancel == nil {
+		r.logger.Warn("Cancel function is nil, skipping Stop")
+		return
+	}
+	cancel()
 }
 
 // serverReadinessProbe verifies the HTTP server is accepting connections by
@@ -307,6 +316,7 @@ func (r *Runner) getConfig() *Config {
 // It uses sync.Once to ensure shutdown occurs only once per server instance.
 func (r *Runner) stopServer(ctx context.Context) error {
 	var shutdownErr error
+	//nolint:contextcheck // We intentionally use context.Background() for shutdown timeout
 	r.serverCloseOnce.Do(func() {
 		r.serverMutex.RLock()
 		defer r.serverMutex.RUnlock()
@@ -325,7 +335,7 @@ func (r *Runner) stopServer(ctx context.Context) error {
 		}
 
 		r.logger.Debug("Waiting for graceful HTTP server shutdown...", "timeout", drainTimeout)
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, drainTimeout)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainTimeout)
 		defer shutdownCancel()
 
 		localErr := r.server.Shutdown(shutdownCtx)

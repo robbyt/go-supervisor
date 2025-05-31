@@ -63,7 +63,6 @@ func defaultRunnerFactory(
 	return httpserver.NewRunner(
 		httpserver.WithName(id),
 		httpserver.WithConfig(cfg),
-		httpserver.WithContext(ctx),
 		httpserver.WithLogHandler(handler),
 	)
 }

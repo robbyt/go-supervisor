@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,47 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// Define a custom type for context keys to avoid string collision
-type contextKey string
-
-// TestWithContext verifies the WithContext option works correctly
-func TestWithContext(t *testing.T) {
-	t.Parallel()
-	// Create a custom context with a value using the type-safe key
-	testKey := contextKey("test-key")
-	customCtx := context.WithValue(context.Background(), testKey, "test-value")
-	// Create a server with the custom context
-	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
-	require.NoError(t, err)
-	hConfig := Routes{*route}
-	cfgCallback := func() (*Config, error) {
-		return NewConfig(":0", hConfig, WithDrainTimeout(1*time.Second))
-	}
-	server, err := NewRunner(WithContext(context.Background()),
-		WithConfigCallback(cfgCallback),
-		WithContext(customCtx))
-	require.NoError(t, err)
-	// Verify the custom context was applied
-	actualValue := server.ctx.Value(testKey)
-	assert.Equal(t, "test-value", actualValue, "Context value should be preserved")
-	// Verify cancellation works through server.Stop()
-	done := make(chan struct{})
-	go func() {
-		<-server.ctx.Done()
-		close(done)
-	}()
-	// Call Stop to cancel the internal context
-	server.Stop()
-	// Wait for the server context to be canceled or timeout
-	select {
-	case <-done:
-		// Success, context was canceled
-	case <-time.After(1 * time.Second):
-		t.Fatal("Context cancellation not propagated")
-	}
-}
 
 func TestWithLogHandler(t *testing.T) {
 	t.Parallel()
@@ -69,7 +27,6 @@ func TestWithLogHandler(t *testing.T) {
 	}
 	// Create a server with the custom logger
 	server, err := NewRunner(
-		WithContext(context.Background()),
 		WithConfigCallback(cfgCallback),
 		WithLogHandler(customHandler),
 	)
@@ -95,7 +52,6 @@ func TestWithConfig(t *testing.T) {
 	require.NoError(t, err)
 	// Create a server with the static config
 	server, err := NewRunner(
-		WithContext(context.Background()),
 		WithConfig(staticConfig),
 	)
 	require.NoError(t, err)
@@ -143,7 +99,6 @@ func TestWithServerCreator(t *testing.T) {
 	}
 	// Create a server with the config that has a custom server creator
 	server, err := NewRunner(
-		WithContext(context.Background()),
 		WithConfigCallback(cfgCallback),
 	)
 	require.NoError(t, err)

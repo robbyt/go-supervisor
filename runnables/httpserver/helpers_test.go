@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -44,7 +43,7 @@ func createTestServer(
 		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
 	}
 
-	server, err := NewRunner(WithContext(context.Background()), WithConfigCallback(cfgCallback))
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 	require.NotNil(t, server)
 

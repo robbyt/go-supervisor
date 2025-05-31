@@ -41,7 +41,7 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 	require.NoError(t, err)
 
 	errChan := make(chan error, 1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	go func() {
@@ -125,7 +125,7 @@ func TestRunnerRaceConditions(t *testing.T) {
 	require.NoError(t, err)
 
 	errChan := make(chan error, 1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	go func() {
