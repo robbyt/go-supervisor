@@ -1,7 +1,6 @@
 package httpcluster
 
 import (
-	"context"
 	"log/slog"
 	"testing"
 
@@ -74,18 +73,15 @@ func TestOptionApplicationOrder(t *testing.T) {
 
 	// Test that multiple options are applied correctly
 	logger := slog.Default().WithGroup("test")
-	ctx := context.Background()
 
 	runner, err := NewRunner(
 		WithLogger(logger),
-		WithContext(ctx),
 		WithStateChanBufferSize(15),
 		WithSiphonBuffer(3),
 	)
 	require.NoError(t, err)
 
 	assert.Equal(t, logger, runner.logger)
-	assert.Equal(t, ctx, runner.parentCtx)
 	assert.Equal(t, 15, runner.stateChanBufferSize)
 	assert.Equal(t, 3, cap(runner.configSiphon))
 }
