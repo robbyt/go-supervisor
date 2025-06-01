@@ -63,7 +63,7 @@ func TestMetricCollector(t *testing.T) {
 	t.Run("captures status code in responseWriter", func(t *testing.T) {
 		// Setup direct responseWriter (without middleware)
 		rec := httptest.NewRecorder()
-		rw := &responseWriter{
+		rw := &ResponseWriter{
 			ResponseWriter: rec,
 			statusCode:     http.StatusOK, // Default
 		}

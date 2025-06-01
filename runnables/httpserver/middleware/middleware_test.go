@@ -12,7 +12,7 @@ import (
 func TestResponseWriter(t *testing.T) {
 	t.Run("WriteHeader sets status code", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rw := &responseWriter{
+		rw := &ResponseWriter{
 			ResponseWriter: rec,
 			statusCode:     http.StatusOK, // Default
 		}
@@ -30,7 +30,7 @@ func TestResponseWriter(t *testing.T) {
 
 	t.Run("Write sets written flag", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rw := &responseWriter{
+		rw := &ResponseWriter{
 			ResponseWriter: rec,
 			statusCode:     http.StatusOK,
 			written:        false,
@@ -51,7 +51,7 @@ func TestResponseWriter(t *testing.T) {
 
 	t.Run("Write doesn't change written flag if already set", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rw := &responseWriter{
+		rw := &ResponseWriter{
 			ResponseWriter: rec,
 			statusCode:     http.StatusOK,
 			written:        true, // Already set
@@ -69,7 +69,7 @@ func TestResponseWriter(t *testing.T) {
 		// Create a test middleware that uses the responseWriter
 		testMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
-				rw := &responseWriter{
+				rw := &ResponseWriter{
 					ResponseWriter: w,
 					statusCode:     http.StatusOK,
 				}
@@ -98,5 +98,45 @@ func TestResponseWriter(t *testing.T) {
 		// Verify response
 		assert.Equal(t, http.StatusCreated, rec.Code)
 		assert.Equal(t, "Created", rec.Body.String())
+	})
+
+	t.Run("Status() returns correct status", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rw := &ResponseWriter{
+			ResponseWriter: rec,
+			statusCode:     http.StatusOK,
+		}
+
+		// No WriteHeader called yet
+		assert.Equal(t, http.StatusOK, rw.Status())
+
+		rw.WriteHeader(http.StatusTeapot)
+		assert.Equal(t, http.StatusTeapot, rw.Status())
+	})
+
+	t.Run("BytesWritten() returns correct count", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rw := &ResponseWriter{
+			ResponseWriter: rec,
+			statusCode:     http.StatusOK,
+		}
+
+		// No bytes written yet
+		assert.Equal(t, 0, rw.BytesWritten())
+
+		_, err := rw.Write([]byte("foo"))
+		assert.NoError(t, err)
+		_, err = rw.Write([]byte("barbaz"))
+		assert.NoError(t, err)
+		assert.Equal(t, 9, rw.BytesWritten())
+	})
+
+	t.Run("Status() and BytesWritten() default values", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rw := &ResponseWriter{
+			ResponseWriter: rec,
+		}
+		assert.Equal(t, 0, rw.Status())
+		assert.Equal(t, 0, rw.BytesWritten())
 	})
 }
