@@ -18,7 +18,7 @@ func Logger(logger *slog.Logger) Middleware {
 			start := time.Now()
 
 			// Create a response writer wrapper to capture status code
-			rw := &responseWriter{
+			rw := &ResponseWriter{
 				ResponseWriter: w,
 				statusCode:     http.StatusOK, // Default status code
 			}
