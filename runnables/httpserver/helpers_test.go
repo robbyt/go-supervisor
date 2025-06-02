@@ -7,25 +7,45 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// getAvailablePort finds and returns an available TCP port.
+// getAvailablePort finds an available port starting from the given base port.
+// It returns a port string in the format ":port".
 func getAvailablePort(t *testing.T, basePort int) string {
 	t.Helper()
-	for port := basePort; port <= 65535; port++ {
-		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	for port := basePort; port < basePort+100; port++ {
+		addr := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port))
+		listener, err := net.Listen("tcp", addr)
 		if err == nil {
-			assert.NoError(t, listener.Close())
+			defer func() {
+				if err := listener.Close(); err != nil {
+					t.Logf("Failed to close listener: %v", err)
+				}
+			}()
 			return fmt.Sprintf(":%d", port)
 		}
 	}
-	t.FailNow()
+	t.Fatalf("Could not find an available port starting from %d", basePort)
 	return ""
 }
 
-// createTestServer creates a new server for testing but doesn't start it
+// waitForState waits for the server to reach the expected state within the timeout.
+func waitForState(
+	t *testing.T,
+	server interface{ GetState() string },
+	expectedState string,
+	timeout time.Duration,
+	message string,
+) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return server.GetState() == expectedState
+	}, timeout, 10*time.Millisecond, message)
+}
+
+// createTestServer creates a test server with the given handler, path, and drain timeout.
+// It returns a configured Runner instance and the listen address.
 func createTestServer(
 	t *testing.T,
 	handler http.HandlerFunc,
@@ -34,36 +54,22 @@ func createTestServer(
 ) (*Runner, string) {
 	t.Helper()
 
-	listenPort := getAvailablePort(t, 8000)
-	route, err := NewRoute("v1", path, handler)
-	require.NoError(t, err)
-	hConfig := Routes{*route}
+	// Get an available port
+	port := getAvailablePort(t, 8000)
 
-	cfgCallback := func() (*Config, error) {
-		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
+	// Create a route
+	route, err := NewRouteFromHandlerFunc("test", path, handler)
+	require.NoError(t, err)
+	routes := Routes{*route}
+
+	// Create config callback
+	configCallback := func() (*Config, error) {
+		return NewConfig(port, routes, WithDrainTimeout(drainTimeout))
 	}
 
-	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	// Create the runner
+	runner, err := NewRunner(WithConfigCallback(configCallback))
 	require.NoError(t, err)
-	require.NotNil(t, server)
 
-	return server, listenPort
-}
-
-// waitForState waits for the server to reach a specific state
-// with improved diagnostics when failures occur
-func waitForState(
-	t *testing.T,
-	server *Runner,
-	targetState string,
-	timeout time.Duration,
-	message string,
-) {
-	t.Helper()
-
-	require.Eventually(t, func() bool {
-		state := server.GetState()
-		t.Logf("Current state: %s, Expected: %s", state, targetState)
-		return state == targetState
-	}, timeout, 10*time.Millisecond, message)
+	return runner, port
 }

@@ -1,14 +1,33 @@
-package middleware
+package logger
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
+
+// setupRequest creates a basic HTTP request for testing
+func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	return rec, req
+}
+
+// setupLogBuffer creates a logger that writes to a buffer for testing
+func setupLogBuffer(t *testing.T, level slog.Level) (*bytes.Buffer, *slog.Logger) {
+	t.Helper()
+	buffer := &bytes.Buffer{}
+	handler := slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: level})
+	logger := slog.New(handler)
+	return buffer, logger
+}
 
 // createTestHandler returns a handler that writes a response
 func createTestHandler(t *testing.T, checkResponse bool) http.HandlerFunc {
@@ -35,8 +54,10 @@ func executeHandlerWithLogger(
 	req *http.Request,
 ) {
 	t.Helper()
-	wrappedHandler := Logger(logger)(handler)
-	wrappedHandler(rec, req)
+	// Create a route with logger middleware and the handler
+	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logger))
+	assert.NoError(t, err)
+	route.ServeHTTP(rec, req)
 }
 
 // setupDetailedRequest creates a test HTTP request with user agent and remote addr

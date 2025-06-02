@@ -1,12 +1,21 @@
-package middleware
+package metrics
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
+
+// setupRequest creates a basic HTTP request for testing
+func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	return rec, req
+}
 
 // createStatusHandler returns a handler that returns a specific status code and message
 func createStatusHandler(t *testing.T, status int, message string) http.HandlerFunc {
@@ -27,9 +36,10 @@ func executeHandlerWithMetrics(
 	req *http.Request,
 ) {
 	t.Helper()
-	metricsMiddleware := MetricCollector()
-	wrappedHandler := metricsMiddleware(handler)
-	wrappedHandler(rec, req)
+	// Create a route with metrics middleware and the handler
+	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New())
+	assert.NoError(t, err)
+	route.ServeHTTP(rec, req)
 }
 
 func TestMetricCollector(t *testing.T) {
@@ -57,27 +67,5 @@ func TestMetricCollector(t *testing.T) {
 		// Verify
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 		assert.Equal(t, "Error", rec.Body.String())
-	})
-
-	// This is a more direct test of the responseWriter in the metrics middleware
-	t.Run("captures status code in responseWriter", func(t *testing.T) {
-		// Setup direct responseWriter (without middleware)
-		rec := httptest.NewRecorder()
-		rw := &ResponseWriter{
-			ResponseWriter: rec,
-			statusCode:     http.StatusOK, // Default
-		}
-
-		// Execute direct writes
-		rw.WriteHeader(http.StatusCreated)
-		n, err := rw.Write([]byte("Created"))
-
-		// Verify
-		assert.NoError(t, err)
-		assert.Equal(t, 7, n)
-		assert.Equal(t, http.StatusCreated, rw.statusCode)
-		assert.True(t, rw.written)
-		assert.Equal(t, http.StatusCreated, rec.Code)
-		assert.Equal(t, "Created", rec.Body.String())
 	})
 }

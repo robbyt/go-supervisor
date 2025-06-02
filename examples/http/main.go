@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
@@ -37,20 +40,20 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	}
 
 	// Create middleware for the routes
-	logger := slog.New(logHandler)
-	loggingMw := middleware.Logger(logger.WithGroup("http"))
-	recoveryMw := middleware.PanicRecovery(logger.WithGroup("recovery"))
-	metricsMw := middleware.MetricCollector()
+	lgr := slog.New(logHandler)
+	loggingMw := logger.New(lgr.WithGroup("http"))
+	recoveryMw := recovery.New(lgr.WithGroup("recovery"))
+	metricsMw := metrics.New()
 
 	// Common middleware stack for all routes
-	commonMw := []middleware.Middleware{
+	commonMw := []httpserver.HandlerFunc{
 		recoveryMw,
 		loggingMw,
 		metricsMw,
 	}
 
 	// Create routes with common middleware attached to each
-	indexRoute, err := httpserver.NewRouteWithMiddleware(
+	indexRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"index",
 		"/",
 		indexHandler,
@@ -61,7 +64,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	}
 
 	// Status route to provide a health check
-	statusRoute, err := httpserver.NewRouteWithMiddleware(
+	statusRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"status",
 		"/status",
 		statusHandler,
@@ -71,8 +74,12 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	// API routes have their middlewares passed to the updated function
-	apiRoute, err := httpserver.NewWildcardRoute("/api", wildcardHandler, commonMw...)
+	// API routes with wildcard middleware and handler conversion
+	wildcardMw := wildcard.New("/api/")
+	apiHandlers := append(commonMw, wildcardMw, func(rp *httpserver.RequestProcessor) {
+		wildcardHandler(rp.Writer(), rp.Request())
+	})
+	apiRoute, err := httpserver.NewWildcardRoute("/api", apiHandlers...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wildcard route: %w", err)
 	}

@@ -14,7 +14,8 @@ import (
 	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/robbyt/go-supervisor/runnables/httpcluster"
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
@@ -38,7 +39,7 @@ type PortRequest struct {
 type ConfigManager struct {
 	cluster     *httpcluster.Runner
 	logger      *slog.Logger
-	commonMw    []middleware.Middleware
+	commonMw    []httpserver.HandlerFunc
 	currentPort string
 	mu          sync.RWMutex
 }
@@ -54,10 +55,10 @@ func NewConfigManager(cluster *httpcluster.Runner, logger *slog.Logger) *ConfigM
 }
 
 // createCommonMiddleware creates the middleware stack used by all routes
-func createCommonMiddleware(logger *slog.Logger) []middleware.Middleware {
-	return []middleware.Middleware{
-		middleware.PanicRecovery(logger.WithGroup("recovery")),
-		middleware.Logger(logger.WithGroup("http")),
+func createCommonMiddleware(lgr *slog.Logger) []httpserver.HandlerFunc {
+	return []httpserver.HandlerFunc{
+		recovery.New(lgr.WithGroup("recovery")),
+		logger.New(lgr.WithGroup("http")),
 	}
 }
 
@@ -83,7 +84,7 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 	newPort = validatedPort
 
 	// Create routes
-	statusRoute, err := httpserver.NewRouteWithMiddleware(
+	statusRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"status",
 		"/status",
 		cm.createStatusHandler(),
@@ -94,7 +95,7 @@ func (cm *ConfigManager) updatePort(newPort string) error {
 		return fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	configRoute, err := httpserver.NewRouteWithMiddleware(
+	configRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"config",
 		"/",
 		cm.createConfigHandler(),

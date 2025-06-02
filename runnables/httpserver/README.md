@@ -37,9 +37,9 @@ func main() {
         fmt.Fprintf(w, "Status: OK")
     }
     
-    // Create routes
-    indexRoute, _ := httpserver.NewRoute("index", "/", indexHandler)
-    statusRoute, _ := httpserver.NewRoute("status", "/status", statusHandler)
+    // Create routes from standard HTTP handlers
+    indexRoute, _ := httpserver.NewRouteFromHandlerFunc("index", "/", indexHandler)
+    statusRoute, _ := httpserver.NewRouteFromHandlerFunc("status", "/status", statusHandler)
     
     routes := httpserver.Routes{*indexRoute, *statusRoute}
     
@@ -69,74 +69,136 @@ func main() {
 }
 ```
 
-## Using Middleware
+## Route Creation
 
-The HTTP server supports middleware chains for request processing:
+The httpserver package provides multiple ways to create routes:
 
 ```go
-// Import the middleware package
-import "github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
+// Preferred: From standard http.HandlerFunc with middleware
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api", "/api", handler, middleware1, middleware2,
+)
 
-// Create a route with middleware
-route, _ := httpserver.NewRouteWithMiddlewares(
-    "index",
-    "/",
-    indexHandler,
-    middleware.LoggingMiddleware,
-    middleware.RecoveryMiddleware,
-    middleware.MetricsMiddleware,
+// Deprecated: Legacy route creation (calls NewRouteFromHandlerFunc)
+route, _ := httpserver.NewRoute("api", "/api", handler)
+```
+
+## Using Middleware
+
+The HTTP server uses a Gin-like middleware pattern where handlers and middleware share the same signature:
+
+```go
+// Import specific middleware packages
+import (
+    "github.com/robbyt/go-supervisor/runnables/httpserver"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
+)
+
+// Create a route with middleware chain
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api",
+    "/api/users",
+    handler,                         // Your standard HTTP handler
+    logger.New(slog.Default()),      // Logging middleware
+    recovery.New(slog.Default()),    // Panic recovery middleware
 )
 ```
 
-### Built-in Middlewares
+### Built-in Middleware
 
-All middlewares are in the `middleware` package (`runnables/httpserver/middleware`):
+The httpserver package includes several built-in middleware implementations, each in its own subpackage under `runnables/httpserver/middleware/`. Browse that directory to see all available middleware.
 
-- `LoggingMiddleware`: Logs request method, path, status code, and duration
-- `RecoveryMiddleware`: Recovers from panics in handlers with stack trace logging
-- `MetricsMiddleware`: Tracks request counts and response codes
-- `StateMiddleware`: Adds server state information to response headers
-- `WildcardMiddleware`: Provides prefix-based routing for catch-all handlers
-
-All middleware components have 100% test coverage and follow a consistent design pattern with wrapped response writers.
-
-### Custom Middleware
-
-You can create custom middleware functions following the same pattern as the built-in middlewares:
+Example using the logger middleware:
 
 ```go
 import (
+    "log/slog"
     "net/http"
     
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
+    "github.com/robbyt/go-supervisor/runnables/httpserver"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
 )
 
-// For simple middleware without response writer wrapping
-func MyCustomMiddleware(next http.HandlerFunc) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Do something before request handling
-        next(w, r)
-        // Do something after request handling
+func main() {
+    // Create your handler
+    apiHandler := func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte(`{"status": "ok"}`))
+    }
+    
+    // Create route with logger middleware
+    route, _ := httpserver.NewRouteFromHandlerFunc(
+        "api",
+        "/api",
+        apiHandler,                       // Standard HTTP handler
+        logger.New(slog.Default()),       // Logs requests with slog
+    )
+    
+    // Use the route in your server configuration
+    routes := httpserver.Routes{*route}
+    // ... rest of server setup
+}
+```
+
+### Creating Custom Middleware
+
+External packages can easily create custom middleware by importing httpserver and returning a `HandlerFunc`:
+
+```go
+package mymiddleware
+
+import (
+    "net/http"
+    "strings"
+    "time"
+    "github.com/robbyt/go-supervisor/runnables/httpserver"
+)
+
+// New creates a custom timing middleware
+func New() httpserver.HandlerFunc {
+    return func(rp *httpserver.RequestProcessor) {
+        start := time.Now()
+        
+        // Continue processing the request
+        rp.Next()
+        
+        // After request is processed
+        duration := time.Since(start)
+        
+        // Access request and response information
+        req := rp.Request()
+        writer := rp.Writer()
+        
+        // Add custom header with processing time
+        writer.Header().Set("X-Process-Time", duration.String())
     }
 }
 
-// For middleware that needs to capture response details
-func MyAdvancedMiddleware(next http.HandlerFunc) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Wrap the response writer to capture status code and written bytes
-        rw := middleware.NewResponseWriter(w)
+// Example with configuration
+func NewWithPrefix(prefix string) httpserver.HandlerFunc {
+    return func(rp *httpserver.RequestProcessor) {
+        req := rp.Request()
         
-        // Do something before request handling
-        next(rw, r)
+        // Check path prefix
+        if !strings.HasPrefix(req.URL.Path, prefix) {
+            http.NotFound(rp.Writer(), req)
+            rp.Abort() // Stop processing
+            return
+        }
         
-        // After handling, we can access status code and written bytes
-        statusCode := rw.Status()
-        bytesWritten := rw.BytesWritten()
-        
-        // ...
+        // Continue to next handler
+        rp.Next()
     }
 }
 ```
+
+The `RequestProcessor` provides:
+- `Next()` - Continue to the next handler in the chain
+- `Abort()` - Stop processing the request
+- `IsAborted()` - Check if processing was aborted
+- `Request()` - Access the *http.Request
+- `Writer()` - Access the ResponseWriter with status/size tracking
 
 ## Configuration Reloading
 

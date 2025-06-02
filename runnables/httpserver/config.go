@@ -203,11 +203,12 @@ func (c *Config) Equal(other *Config) bool {
 }
 
 // getMux creates and returns a new http.ServeMux with all configured routes registered.
-// Each route's Path is mapped to its Handler function.
+// Each route's Path is mapped to its handler chain via ServeHTTP.
 func (c *Config) getMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	for _, route := range c.Routes {
-		mux.HandleFunc(route.Path, route.Handler)
+		r := route // capture loop variable
+		mux.Handle(r.Path, &r)
 	}
 	return mux
 }

@@ -7,93 +7,95 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
 )
 
-// Route represents a single HTTP route with a name, path, and handler function.
+// Route represents a single HTTP route with a name, path, and handler chain.
 type Route struct {
-	name    string // internal identifier for the route, used for equality checks
-	Path    string
-	Handler http.HandlerFunc
+	name     string // internal identifier for the route, used for equality checks
+	Path     string
+	Handlers []HandlerFunc
 }
 
-// applyMiddlewares wraps a handler with multiple middleware functions.
-// The first middleware in the list is the outermost wrapper (executed first).
-func applyMiddlewares(
-	handler http.HandlerFunc,
-	middlewares ...middleware.Middleware,
-) http.HandlerFunc {
-	// Apply middlewares in reverse order so the first middleware is outermost
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
-	}
-	return handler
-}
-
-// NewRoute creates a new Route with the given name, path, and handler.
-func NewRoute(name string, path string, handler http.HandlerFunc) (*Route, error) {
+// newRoute is a private/internal constructor used by the other route creation functions.
+func newRoute(name, path string, handlers ...HandlerFunc) (*Route, error) {
 	if name == "" {
 		return nil, errors.New("name cannot be empty")
 	}
-
 	if path == "" {
 		return nil, errors.New("path cannot be empty")
 	}
-
-	if handler == nil {
-		return nil, errors.New("handler cannot be nil")
+	if len(handlers) == 0 {
+		return nil, errors.New("at least one handler required")
 	}
 
 	return &Route{
-		name:    name,
-		Path:    path,
-		Handler: handler,
+		name:     name,
+		Path:     path,
+		Handlers: handlers,
 	}, nil
 }
 
-// NewRouteWithMiddleware creates a new Route with the given name, path, handler,
-// and applies the provided middlewares to the handler in the order they are provided.
+// NewRouteFromHandlerFunc creates a new Route with the given name, path, and handler. Optionally, it can include middleware functions.
+// This is the preferred way to create routes in the httpserver package.
+func NewRouteFromHandlerFunc(
+	name string,
+	path string,
+	handler http.HandlerFunc,
+	middlewares ...HandlerFunc,
+) (*Route, error) {
+	if handler == nil {
+		return nil, errors.New("handler cannot be nil")
+	}
+	h := func(rp *RequestProcessor) {
+		handler.ServeHTTP(rp.Writer(), rp.Request())
+	}
+	middlewares = append(middlewares, h)
+	return newRoute(name, path, middlewares...)
+}
+
+// NewRoute creates a new Route with the given name, path, and handler.
+// Deprecated: Use NewRouteFromHandlerFunc instead.
+func NewRoute(name string, path string, handler http.HandlerFunc) (*Route, error) {
+	return NewRouteFromHandlerFunc(name, path, handler)
+}
+
+// NewRouteWithMiddleware creates a new Route with the given name, path, and handler, along with optional middleware.
+// Deprecated: Use NewRouteFromHandlerFunc instead.
 func NewRouteWithMiddleware(
 	name string,
 	path string,
 	handler http.HandlerFunc,
-	middlewares ...middleware.Middleware,
+	middlewares ...HandlerFunc,
 ) (*Route, error) {
-	if name == "" {
-		return nil, errors.New("name cannot be empty")
+	return NewRouteFromHandlerFunc(name, path, handler, middlewares...)
+}
+
+// ServeHTTP adapts the route to work with standard http.Handler
+func (r *Route) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	rp := &RequestProcessor{
+		writer:   newResponseWriter(w),
+		request:  req,
+		handlers: r.Handlers,
+		index:    -1,
 	}
 
-	if path == "" {
-		return nil, errors.New("path cannot be empty")
-	}
-
-	if handler == nil {
-		return nil, errors.New("handler cannot be nil")
-	}
-
-	wrappedHandler := applyMiddlewares(handler, middlewares...)
-
-	return &Route{
-		name:    name,
-		Path:    path,
-		Handler: wrappedHandler,
-	}, nil
+	rp.Next()
 }
 
 // NewWildcardRoute creates a route that handles everything under /prefix/*.
 // Clients calling /prefix/foo/bar will match this route.
-func NewWildcardRoute(
-	prefix string,
-	handler http.HandlerFunc,
-	middlewares ...middleware.Middleware,
-) (*Route, error) {
+func NewWildcardRoute(prefix string, handlers ...HandlerFunc) (*Route, error) {
 	logger := slog.Default().WithGroup("httpserver.NewWildcardRoute")
 	if prefix == "" {
 		return nil, errors.New("prefix cannot be empty")
 	}
-	if handler == nil {
-		return nil, errors.New("handler cannot be nil")
+	if len(handlers) == 0 {
+		return nil, errors.New("at least one handler required")
+	}
+	for _, handler := range handlers {
+		if handler == nil {
+			return nil, errors.New("handler cannot be nil")
+		}
 	}
 
 	if !strings.HasPrefix(prefix, "/") {
@@ -106,17 +108,26 @@ func NewWildcardRoute(
 		prefix = prefix + "/"
 	}
 
-	// Create the wildcard middleware
-	wildcardMiddleware := middleware.WildcardRouter(prefix)
+	// Create wildcard handler that strips prefix
+	wildcardHandler := func(rp *RequestProcessor) {
+		req := rp.Request()
+		if !strings.HasPrefix(req.URL.Path, prefix) {
+			http.NotFound(rp.Writer(), req)
+			rp.Abort()
+			return
+		}
+		// Strip the prefix from the path
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
+		rp.Next()
+	}
 
-	// Combine the wildcard middleware with any additional middlewares
-	allMiddlewares := append([]middleware.Middleware{wildcardMiddleware}, middlewares...)
+	// Prepend wildcard handler to the handlers
+	allHandlers := append([]HandlerFunc{wildcardHandler}, handlers...)
 
-	return NewRouteWithMiddleware(
+	return newRoute(
 		fmt.Sprintf("wildcard:%s", prefix),
 		prefix,
-		handler,
-		allMiddlewares...,
+		allHandlers...,
 	)
 }
 

@@ -1,10 +1,11 @@
-package middleware
+package wildcard
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,6 +20,14 @@ func createPathEchoHandler(t *testing.T) http.HandlerFunc {
 	}
 }
 
+// setupRequest creates a basic HTTP request for testing
+func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	return rec, req
+}
+
 // executeHandlerWithWildcard runs the provided handler with the WildcardRouter middleware
 func executeHandlerWithWildcard(
 	t *testing.T,
@@ -28,8 +37,13 @@ func executeHandlerWithWildcard(
 	req *http.Request,
 ) {
 	t.Helper()
-	wrappedHandler := WildcardRouter(prefix)(handler)
-	wrappedHandler(rec, req)
+	// Create a route with wildcard functionality using NewWildcardRoute
+	h := func(rp *httpserver.RequestProcessor) {
+		handler.ServeHTTP(rp.Writer(), rp.Request())
+	}
+	route, err := httpserver.NewWildcardRoute(prefix, h)
+	assert.NoError(t, err)
+	route.ServeHTTP(rec, req)
 }
 
 func TestWildcardRouter(t *testing.T) {
@@ -45,7 +59,7 @@ func TestWildcardRouter(t *testing.T) {
 
 		// Verify
 		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "/users", rec.Body.String()) // Prefix should be stripped
+		assert.Equal(t, "users", rec.Body.String()) // Prefix should be stripped
 	})
 
 	t.Run("returns 404 for non-matching prefix", func(t *testing.T) {
@@ -61,16 +75,14 @@ func TestWildcardRouter(t *testing.T) {
 
 	t.Run("handles root paths correctly", func(t *testing.T) {
 		// Setup
-		rec, req := setupRequest(t, "GET", "/api")
+		rec, req := setupRequest(t, "GET", "/api/")
 
 		// Execute
 		executeHandlerWithWildcard(t, handler, "/api", rec, req)
 
 		// Verify
 		assert.Equal(t, http.StatusOK, rec.Code)
-		// The expected path can be empty because StripPrefix with an exact match
-		// can result in an empty path, which http.ServeMux internally
-		// treats as "/"
+		// The expected path should be empty because stripping "/api/" from "/api/" leaves ""
 		assert.Equal(t, "", rec.Body.String())
 	})
 }
