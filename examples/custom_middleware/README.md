@@ -6,7 +6,7 @@ This example demonstrates how to create custom middleware for the httpserver pac
 
 - Creating a custom middleware that transforms HTTP responses
 - Using built-in middleware from the httpserver package
-- Proper middleware ordering and composition
+- Correct middleware ordering and composition
 - Separation of concerns between middleware layers
 
 ## Key Components
@@ -15,13 +15,12 @@ This example demonstrates how to create custom middleware for the httpserver pac
 A custom middleware that ensures all responses are JSON formatted. Non-JSON responses are wrapped in `{"response": "content"}` while valid JSON passes through unchanged.
 
 ### Headers Middleware
-Uses the built-in headers middleware to set appropriate Content-Type, CORS, and security headers.
+Uses the built-in headers middleware to set Content-Type, CORS, and security headers.
 
 ## Running the Example
 
 ```bash
-cd examples/custom_middleware
-go run main.go
+go run ./examples/custom_middleware
 ```
 
 The server starts on `:8081` with several endpoints to demonstrate the middleware behavior.
@@ -44,4 +43,4 @@ The example demonstrates why middleware order matters:
 4. **Metrics** - Collect request metrics
 5. **Headers** - Set response headers before handler
 
-See the code comments in `main.go` for detailed explanations.
+See the code comments in `main.go`.
