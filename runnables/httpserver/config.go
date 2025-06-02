@@ -207,8 +207,7 @@ func (c *Config) Equal(other *Config) bool {
 func (c *Config) getMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	for _, route := range c.Routes {
-		r := route // capture loop variable
-		mux.Handle(r.Path, &r)
+		mux.Handle(route.Path, &route)
 	}
 	return mux
 }
