@@ -1,16 +1,14 @@
 # HTTP Server Runnable
 
-This package provides a ready-to-use HTTP server implementation that integrates with the go-supervisor framework. The HTTP server runnable supports configuration reloading, state management, and graceful shutdown.
+A production-ready HTTP server that integrates with go-supervisor for lifecycle management.
 
-## Features
+## Why Use This?
 
-- Configurable HTTP routes with path matching
-- Middleware support for request processing
-- Dynamic route configuration and hot reloading
-- Graceful shutdown with configurable timeout
-- State reporting and monitoring
-- Wildcard route support for catch-all handlers
-- Built-in middlewares for common tasks
+Building HTTP servers that handle shutdown gracefully is complex. When a process receives a termination signal, it needs to stop accepting new connections while allowing in-flight requests to complete. This package solves that problem by providing an HTTP server that:
+
+- Integrates with go-supervisor's shutdown coordination
+- Reloads configuration without dropping connections
+- Reports its internal state for monitoring
 
 ## Basic Usage
 
@@ -45,7 +43,7 @@ func main() {
     
     // Create config callback
     configCallback := func() (*httpserver.Config, error) {
-        return httpserver.NewConfig(":8080", 5*time.Second, routes)
+        return httpserver.NewConfig(":8080", routes, httpserver.WithDrainTimeout(5*time.Second))
     }
     
     // Create HTTP server runner
@@ -57,7 +55,7 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
     super, _ := supervisor.New(
-        supervisor.WithRunnables(hRunner), // Remove the spread operator '...'
+        supervisor.WithRunnables(hRunner),
         supervisor.WithContext(ctx),
     )
     
@@ -69,199 +67,80 @@ func main() {
 }
 ```
 
-## Route Creation
+## Middleware
 
-The httpserver package provides multiple ways to create routes:
+The HTTP server uses a middleware pattern where handlers process requests in a chain. Middleware can intercept requests, modify responses, or abort processing.
 
-```go
-// Preferred: From standard http.HandlerFunc with middleware
-route, _ := httpserver.NewRouteFromHandlerFunc(
-    "api", "/api", handler, middleware1, middleware2,
-)
+### Why Middleware Order Matters
 
-// Deprecated: Legacy route creation (calls NewRouteFromHandlerFunc)
-route, _ := httpserver.NewRoute("api", "/api", handler)
-```
-
-## Using Middleware
-
-The HTTP server uses a Gin-like middleware pattern where handlers and middleware share the same signature:
+Middleware forms a processing pipeline where each step can affect subsequent steps. The order determines both request flow (first → last) and response flow (last → first).
 
 ```go
-// Import specific middleware packages
-import (
-    "github.com/robbyt/go-supervisor/runnables/httpserver"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
-)
-
-// Create a route with middleware chain
-route, _ := httpserver.NewRouteFromHandlerFunc(
-    "api",
-    "/api/users",
-    handler,                         // Your standard HTTP handler
-    logger.New(slog.Default()),      // Logging middleware
-    recovery.New(slog.Default()),    // Panic recovery middleware
-)
-```
-
-### Built-in Middleware
-
-The httpserver package includes several built-in middleware implementations, each in its own subpackage under `runnables/httpserver/middleware/`. Common examples include:
-
-- `recovery` - Panic recovery middleware (logs panics if logger provided, silent if nil) 
-- `logger` - Request logging middleware
-- `headers` - HTTP header management (CORS, security, etc.)
-- `metrics` - Request metrics collection
-
-Example using built-in middleware:
-
-```go
-import (
-    "log/slog"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
-    headersMw "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
-)
-
-// Create route with multiple middleware
-lgr := slog.Default()
-route, _ := httpserver.NewRouteFromHandlerFunc(
-    "api",
-    "/api",
-    apiHandler,                       // Standard HTTP handler
-    recovery.New(lgr),                // Handle panics (nil for silent recovery)
-    headersMw.Security(),             // Add security headers (no params)
-    logger.New(lgr),                  // Log requests (requires logger)
-    metrics.New(),                    // Collect metrics (no params)
-)
-```
-
-### Middleware Execution Order
-
-**Middleware order is critical.** Middleware executes in the order specified, forming a chain where:
-- **Request flow**: First middleware → Second middleware → ... → Handler
-- **Response flow**: Handler → ... → Second middleware → First middleware
-
-```go
-// Correct ordering example
-lgr := slog.Default()
+// Recovery must be first to catch panics from all subsequent middleware
+// Headers set early ensure they're present even if later middleware fails
+// Logging captures the actual request after security filtering
+// Content headers set last prevent handlers from overriding them
 
 middlewares := []httpserver.HandlerFunc{
-    recovery.New(lgr),        // 1. MUST be first - catches panics (nil for silent)
-    headersMw.Security(),     // 2. Set security headers early (no params)
-    logger.New(lgr),          // 3. Log requests being processed (requires logger)
-    metrics.New(),            // 4. Collect metrics (no params)
-    headersMw.JSON(),         // 5. Set content-type headers last (no params)
+    recovery.New(lgr),        // Catches panics - must wrap everything
+    headersMw.Security(),     // Security headers - always applied
+    logger.New(lgr),          // Logs what actually gets processed
+    metrics.New(),            // Measures performance
+    headersMw.JSON(),         // Sets content type - easily overridden
 }
-
-route, _ := httpserver.NewRouteFromHandlerFunc(
-    "api", "/api", handler, middlewares...,
-)
-```
-
-**Common ordering rules:**
-1. **Recovery first** - Must be outermost to catch panics from all middleware/handlers
-2. **Security headers early** - Ensures they're always set, even if later middleware fails  
-3. **Logging after security** - Logs the actual request being processed
-4. **Content headers last** - Prevents handlers from overriding important headers
-
-**Example of request/response flow:**
-```
-Request:  recovery → security → logging → headers → handler
-Response: handler → headers → logging → security → recovery
 ```
 
 ### Creating Custom Middleware
 
-External packages can easily create custom middleware by importing httpserver and returning a `HandlerFunc`:
+Middleware receives a `RequestProcessor` that controls request flow:
 
 ```go
 package mymiddleware
 
 import (
     "net/http"
-    "strings"
     "time"
     "github.com/robbyt/go-supervisor/runnables/httpserver"
 )
 
-// New creates a custom timing middleware
+// New creates a timing middleware
 func New() httpserver.HandlerFunc {
     return func(rp *httpserver.RequestProcessor) {
         start := time.Now()
         
-        // Continue processing the request
+        // Continue processing
         rp.Next()
         
-        // After request is processed
+        // Measure after request completes
         duration := time.Since(start)
-        
-        // Access request and response information
-        req := rp.Request()
-        writer := rp.Writer()
-        
-        // Add custom header with processing time
-        writer.Header().Set("X-Process-Time", duration.String())
-    }
-}
-
-// Example with configuration
-func NewWithPrefix(prefix string) httpserver.HandlerFunc {
-    return func(rp *httpserver.RequestProcessor) {
-        req := rp.Request()
-        
-        // Check path prefix
-        if !strings.HasPrefix(req.URL.Path, prefix) {
-            http.NotFound(rp.Writer(), req)
-            rp.Abort() // Stop processing
-            return
-        }
-        
-        // Continue to next handler
-        rp.Next()
+        rp.Writer().Header().Set("X-Process-Time", duration.String())
     }
 }
 ```
 
 The `RequestProcessor` provides:
-- `Next()` - Continue to the next handler in the chain
-- `Abort()` - Stop processing the request
-- `IsAborted()` - Check if processing was aborted
-- `Request()` - Access the *http.Request
-- `Writer()` - Access the ResponseWriter with status/size tracking
+- `Next()` - Continue to the next handler
+- `Abort()` - Stop processing
+- `Request()` - Access the HTTP request
+- `Writer()` - Access the response writer
 
 ## Configuration Reloading
 
-The HTTP server runnable implements the `supervisor.Reloadable` interface. The `go-supervisor`
-instance managing this runnable will automatically trigger its `Reload()` method when the
-supervisor receives a `SIGHUP` signal.
+The server implements hot reloading for configuration changes. When the supervisor receives SIGHUP or `Reload()` is called, the server:
 
-When `Reload()` is called (either by the supervisor via a HUP signal or programmatically), the
-runner calls the configuration callback function to fetch the latest configuration. If the
-configuration has changed, the underlying HTTP server may be gracefully shut down if ports changed,
-or the routes will be reloaded if the configuration is the same.
+1. Fetches new configuration via the callback
+2. Updates routes without dropping connections
+3. Restarts the server only if the listen address changes
 
+This enables zero-downtime updates for most configuration changes.
 
-```go
-// Trigger a reload
-if runner, ok := service.(*httpserver.Runner); ok {
-    runner.Reload()
-}
-```
+## State Monitoring
 
-## State Management
+The server reports its lifecycle state through the `Stateable` interface. States progress through:
 
-The HTTP server implements the `Stateable` interface and reports its state as one of:
-- "New"
-- "Booting"
-- "Running"
-- "Stopping"
-- "Stopped"
-- "Error"
+- "New" → "Booting" → "Running" → "Stopping" → "Stopped"
 
-You can monitor state changes:
+Error states can occur at any point. Monitor state changes to coordinate with other services or implement health checks:
 
 ```go
 stateChan := runner.GetStateChan(ctx)
@@ -274,73 +153,23 @@ go func() {
 
 ## Configuration Options
 
-The HTTP server runner uses a functional options pattern - see godoc for complete documentation of each option. Common usage patterns:
+The server supports various timeouts and custom server creation:
 
 ```go
-// Dynamic configuration with a callback function (supports hot reloading)
-runner, _ := httpserver.NewRunner(
-    httpserver.WithContext(context.Background()),
-    httpserver.WithConfigCallback(configCallback),
-)
-
-// Static configuration (simpler when hot reloading isn't needed)
-config, _ := httpserver.NewConfig(
-    ":8080",            // Listen address
-    routes,              // HTTP routes
-    httpserver.WithDrainTimeout(5*time.Second), // Optional settings
-)
-runner, _ := httpserver.NewRunner(
-    httpserver.WithContext(context.Background()),
-    httpserver.WithConfig(config),
-)
-```
-
-## Server Configuration with Functional Options
-
-The HTTP server config uses the Functional Options pattern, which provides a clean and flexible way to configure server settings. The pattern allows for sensible defaults while making it easy to customize specific settings.
-
-### Basic Configuration
-
-The `NewConfig` function now accepts an address, routes, and optional configuration options:
-
-```go
-// Create a config with just the required parameters (uses default timeouts)
+// Basic configuration with defaults
 config, _ := httpserver.NewConfig(":8080", routes)
 
-// Create a config with custom drain timeout
-config, _ := httpserver.NewConfig(
-    ":8080",            // Listen address
-    routes,              // HTTP routes
-    httpserver.WithDrainTimeout(10*time.Second),
-)
-
-// Create a config with multiple custom settings
+// Custom timeouts for different deployment scenarios
 config, _ := httpserver.NewConfig(
     ":8080",
     routes,
-    httpserver.WithDrainTimeout(10*time.Second),
-    httpserver.WithReadTimeout(30*time.Second),
-    httpserver.WithWriteTimeout(30*time.Second),
-    httpserver.WithIdleTimeout(2*time.Minute),
+    httpserver.WithDrainTimeout(10*time.Second),  // Graceful shutdown period
+    httpserver.WithReadTimeout(30*time.Second),   // Prevent slow clients
+    httpserver.WithWriteTimeout(30*time.Second),  // Prevent slow writes
+    httpserver.WithIdleTimeout(2*time.Minute),    // Clean up idle connections
 )
-```
 
-### Available Configuration Options
-
-The following functional options can be used with `NewConfig`:
-
-- `WithDrainTimeout(timeout time.Duration)`: Sets the drain timeout for graceful shutdown
-- `WithReadTimeout(timeout time.Duration)`: Sets the read timeout for the HTTP server
-- `WithWriteTimeout(timeout time.Duration)`: Sets the write timeout for the HTTP server
-- `WithIdleTimeout(timeout time.Duration)`: Sets the idle connection timeout for the HTTP server
-- `WithServerCreator(creator ServerCreator)`: Sets a custom server creator function
-
-### Custom Server Creator
-
-You can provide a custom server creation function to configure advanced HTTP server settings:
-
-```go
-// Create a custom server creator
+// Custom server for TLS or HTTP/2
 customServerCreator := func(addr string, handler http.Handler, cfg *httpserver.Config) httpserver.HttpServer {
     return &http.Server{
         Addr:         addr,
@@ -348,69 +177,19 @@ customServerCreator := func(addr string, handler http.Handler, cfg *httpserver.C
         ReadTimeout:  cfg.ReadTimeout,
         WriteTimeout: cfg.WriteTimeout,
         IdleTimeout:  cfg.IdleTimeout,
-        // Add any additional custom settings here
+        TLSConfig:    &tls.Config{
+            MinVersion: tls.VersionTLS12,
+        },
     }
 }
 
-// Use the custom server creator in the config
 config, _ := httpserver.NewConfig(
-    ":8080",
+    ":8443",
     routes,
     httpserver.WithServerCreator(customServerCreator),
 )
 ```
 
-### TLS Configuration Example
+## Examples
 
-```go
-// Create a server with TLS configuration
-tlsServerCreator := func(addr string, handler http.Handler, cfg *httpserver.Config) httpserver.HttpServer {
-    return &http.Server{
-        Addr:         addr,
-        Handler:      handler,
-        ReadTimeout:  cfg.ReadTimeout,
-        WriteTimeout: cfg.WriteTimeout,
-        IdleTimeout:  cfg.IdleTimeout,
-        TLSConfig: &tls.Config{
-            MinVersion: tls.VersionTLS12,
-            CurvePreferences: []tls.CurveID{
-                tls.CurveP256,
-                tls.X25519,
-            },
-        },
-    }
-}
-
-// Use the TLS server creator
-runner, _ := httpserver.NewRunner(
-    httpserver.WithConfigCallback(configCallback),
-    httpserver.WithServerCreator(tlsServerCreator),
-)
-```
-
-### HTTP/2 Support Example
-
-```go
-// Create a server with HTTP/2 support
-http2ServerCreator := func(addr string, handler http.Handler) httpserver.HttpServer {
-    server := &http.Server{
-        Addr:    addr,
-        Handler: handler,
-    }
-    
-    // Enable HTTP/2 support
-    http2.ConfigureServer(server, &http2.Server{})
-    
-    return server
-}
-
-// Use the HTTP/2 server creator
-runner, _ := httpserver.NewRunner(
-    httpserver.WithConfigCallback(configCallback),
-    httpserver.WithServerCreator(http2ServerCreator),
-)
-```
-
-## Full Example
-
-See `examples/http/main.go` for a complete example.
+See `examples/http/` for a basic implementation or `examples/custom_middleware/` for advanced middleware usage.

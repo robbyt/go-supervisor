@@ -1,113 +1,47 @@
-# JSON API Example
+# Custom Middleware Example
 
-This example demonstrates a JSON API server using the go-supervisor package with two key middlewares:
+This example demonstrates how to create custom middleware for the httpserver package.
 
-1. **Headers Middleware** (reusable) - Sets HTTP headers for JSON responses, CORS, and security
-2. **JSON Enforcer Middleware** (example) - Ensures all responses are JSON formatted
+## What It Shows
 
-## Features
+- Creating a custom middleware that transforms HTTP responses
+- Using built-in middleware from the httpserver package
+- Proper middleware ordering and composition
+- Separation of concerns between middleware layers
 
-- **Automatic JSON Response Conversion**: Non-JSON responses are wrapped in `{"response": "original content"}`
-- **JSON Response Preservation**: Valid JSON responses are left unchanged
-- **Headers Management**: Automatic JSON content-type, CORS, and security headers
-- **Multiple Response Types**: Demonstrates text, JSON, HTML, and error responses
-- **Comprehensive Middleware Stack**: Recovery, logging, metrics, headers, and JSON enforcement
+## Key Components
 
-## Endpoints
+### JSON Enforcer Middleware
+A custom middleware that ensures all responses are JSON formatted. Non-JSON responses are wrapped in `{"response": "content"}` while valid JSON passes through unchanged.
 
-- `GET /` - Plain text response (converted to JSON)
-- `GET /api/data` - JSON response (preserved as-is)  
-- `GET /html` - HTML response (converted to JSON)
-- `GET /error` - Error response (converted to JSON)
-- `GET /status` - Service status (JSON)
-
-## Middleware Architecture
-
-### Headers Middleware (`@runnables/httpserver/middleware/headers`)
-
-A reusable middleware package that provides:
-
-```go
-// Set JSON headers
-headersMw.JSON()
-
-// Set CORS headers
-headersMw.CORS("*", "GET,POST,PUT,DELETE,OPTIONS", "Content-Type,Authorization")
-
-// Set security headers
-headersMw.Security()
-
-// Add custom headers
-headersMw.Add("X-API-Version", "v1.0")
-```
-
-### JSON Enforcer Middleware (`@examples/jsonapi/middleware`)
-
-An example middleware that ensures all responses are JSON:
-
-```go
-// Wrap handlers to enforce JSON responses
-middleware.WrapHandlerForJSON(handler)
-```
+### Headers Middleware
+Uses the built-in headers middleware to set appropriate Content-Type, CORS, and security headers.
 
 ## Running the Example
 
 ```bash
-cd examples/jsonapi
+cd examples/custom_middleware
 go run main.go
 ```
 
-The server will start on `:8081` and display available endpoints.
+The server starts on `:8081` with several endpoints to demonstrate the middleware behavior.
 
-## Testing
+## Endpoints
 
-```bash
-cd examples/jsonapi
-go test -v ./...
-```
+- `GET /` - Returns plain text (wrapped in JSON)
+- `GET /api/data` - Returns JSON (preserved as-is)  
+- `GET /html` - Returns HTML (wrapped in JSON)
+- `GET /error` - Returns 404 error (wrapped in JSON)
+- `GET /panic` - Triggers panic recovery middleware
 
-Tests cover:
-- JSON validation logic
-- Response wrapping behavior
-- Handler integration
-- Middleware composition
-- Header management
-- Status code preservation
+## Middleware Ordering
 
-## Example Responses
+The example demonstrates why middleware order matters:
 
-### Text Response (/)
-**Request:** `GET /`
-**Response:**
-```json
-{"response": "Welcome to the JSON API example server!"}
-```
+1. **Recovery** - Must be first to catch panics
+2. **Security** - Set security headers early
+3. **Logging** - Log all requests
+4. **Metrics** - Collect request metrics
+5. **Headers** - Set response headers before handler
 
-### JSON Response (/api/data)  
-**Request:** `GET /api/data`
-**Response:**
-```json
-{"message": "This is already JSON", "status": "success", "timestamp": "2024-01-01T12:00:00Z"}
-```
-
-### HTML Response (/html)
-**Request:** `GET /html`  
-**Response:**
-```json
-{"response": "<html><body><h1>Hello from HTML</h1><p>This will be converted to JSON!</p></body></html>"}
-```
-
-### Error Response (/error)
-**Request:** `GET /error`
-**Response:** (HTTP 404)
-```json
-{"response": "The requested resource was not found"}
-```
-
-## Key Implementation Details
-
-1. **Handler Wrapping**: JSON enforcement happens at the handler level using `WrapHandlerForJSON()`
-2. **Response Detection**: Uses JSON validation to determine if content is already JSON
-3. **Status Code Preservation**: Maintains original HTTP status codes while converting content
-4. **Middleware Composition**: Demonstrates layering multiple middleware types
-5. **Header Management**: Shows systematic header application across different route types
+See the code comments in `main.go` for detailed explanations.
