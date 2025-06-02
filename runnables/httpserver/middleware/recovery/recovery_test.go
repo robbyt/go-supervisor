@@ -88,29 +88,22 @@ func TestRecoveryMiddleware(t *testing.T) {
 		assert.Contains(t, logOutput, "method=GET")
 	})
 
-	t.Run("recovers from panic with nil logger (uses default)", func(t *testing.T) {
-		// Save and restore default logger
-		defaultLogger := slog.Default()
-		defer slog.SetDefault(defaultLogger)
-
-		// Setup with nil logger (will use default)
-		logBuffer, testLogger := setupLogBuffer(t, slog.LevelError)
-		slog.SetDefault(testLogger)
-
+	t.Run("recovers from panic silently with nil logger", func(t *testing.T) {
+		// Setup
 		rec, req := setupRequest(t, "POST", "/api/test")
-		handler := createPanicHandler(t, "test panic with default logger")
+		handler := createPanicHandler(t, "test panic with nil logger")
 
-		// Execute with nil logger
+		// Execute with nil logger - should recover silently
 		executeHandlerWithRecovery(t, handler, nil, rec, req)
 
-		// Verify response
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Verify response - should still return 500 error
+		resp := rec.Result()
+		body, err := io.ReadAll(resp.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+		assert.Equal(t, "Internal Server Error\n", string(body))
 
-		// Verify log output
-		logOutput := logBuffer.String()
-		assert.Contains(t, logOutput, "httpserver")
-		assert.Contains(t, logOutput, "HTTP handler panic recovered")
-		assert.Contains(t, logOutput, "test panic with default logger")
+		// No log verification since recovery should be silent
 	})
 
 	t.Run("passes through normal requests", func(t *testing.T) {

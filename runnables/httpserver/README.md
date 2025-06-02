@@ -107,38 +107,70 @@ route, _ := httpserver.NewRouteFromHandlerFunc(
 
 ### Built-in Middleware
 
-The httpserver package includes several built-in middleware implementations, each in its own subpackage under `runnables/httpserver/middleware/`. Browse that directory to see all available middleware.
+The httpserver package includes several built-in middleware implementations, each in its own subpackage under `runnables/httpserver/middleware/`. Common examples include:
 
-Example using the logger middleware:
+- `recovery` - Panic recovery middleware (logs panics if logger provided, silent if nil) 
+- `logger` - Request logging middleware
+- `headers` - HTTP header management (CORS, security, etc.)
+- `metrics` - Request metrics collection
+
+Example using built-in middleware:
 
 ```go
 import (
     "log/slog"
-    "net/http"
-    
-    "github.com/robbyt/go-supervisor/runnables/httpserver"
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
+    headersMw "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
 )
 
-func main() {
-    // Create your handler
-    apiHandler := func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte(`{"status": "ok"}`))
-    }
-    
-    // Create route with logger middleware
-    route, _ := httpserver.NewRouteFromHandlerFunc(
-        "api",
-        "/api",
-        apiHandler,                       // Standard HTTP handler
-        logger.New(slog.Default()),       // Logs requests with slog
-    )
-    
-    // Use the route in your server configuration
-    routes := httpserver.Routes{*route}
-    // ... rest of server setup
+// Create route with multiple middleware
+lgr := slog.Default()
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api",
+    "/api",
+    apiHandler,                       // Standard HTTP handler
+    recovery.New(lgr),                // Handle panics (nil for silent recovery)
+    headersMw.Security(),             // Add security headers (no params)
+    logger.New(lgr),                  // Log requests (requires logger)
+    metrics.New(),                    // Collect metrics (no params)
+)
+```
+
+### Middleware Execution Order
+
+**Middleware order is critical.** Middleware executes in the order specified, forming a chain where:
+- **Request flow**: First middleware → Second middleware → ... → Handler
+- **Response flow**: Handler → ... → Second middleware → First middleware
+
+```go
+// Correct ordering example
+lgr := slog.Default()
+
+middlewares := []httpserver.HandlerFunc{
+    recovery.New(lgr),        // 1. MUST be first - catches panics (nil for silent)
+    headersMw.Security(),     // 2. Set security headers early (no params)
+    logger.New(lgr),          // 3. Log requests being processed (requires logger)
+    metrics.New(),            // 4. Collect metrics (no params)
+    headersMw.JSON(),         // 5. Set content-type headers last (no params)
 }
+
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api", "/api", handler, middlewares...,
+)
+```
+
+**Common ordering rules:**
+1. **Recovery first** - Must be outermost to catch panics from all middleware/handlers
+2. **Security headers early** - Ensures they're always set, even if later middleware fails  
+3. **Logging after security** - Logs the actual request being processed
+4. **Content headers last** - Prevents handlers from overriding important headers
+
+**Example of request/response flow:**
+```
+Request:  recovery → security → logging → headers → handler
+Response: handler → headers → logging → security → recovery
 ```
 
 ### Creating Custom Middleware

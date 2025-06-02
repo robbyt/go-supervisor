@@ -22,11 +22,6 @@ func New() httpserver.HandlerFunc {
 		req := rp.Request()
 		writer := rp.Writer()
 
-		// TODO: Actually record metrics using a metrics library like prometheus
-		// Example:
-		// httpRequestsTotal.WithLabelValues(req.Method, req.URL.Path, strconv.Itoa(writer.Status())).Inc()
-		// httpRequestDuration.WithLabelValues(req.Method, req.URL.Path).Observe(duration.Seconds())
-
 		// Log the metrics
 		slog.Debug("HTTP request metrics",
 			"method", req.Method,

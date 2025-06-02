@@ -1,3 +1,13 @@
+// Package main demonstrates a basic HTTP server using go-supervisor.
+// This example shows the core functionality of the httpserver runnable:
+//
+//   - Creating simple HTTP routes with handlers
+//   - Setting up the HTTP server with go-supervisor
+//   - Graceful shutdown and configuration reloading
+//   - Clean separation between route definition and server management
+//
+// For examples with middleware chains, custom error handling, and
+// advanced features, see the custom_middleware example.
 package main
 
 import (
@@ -9,10 +19,6 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
@@ -24,93 +30,69 @@ const (
 	DrainTimeout = 5 * time.Second
 )
 
-// buildRoutes will setup various HTTP routes for this example server
-func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
-	// Create HTTP handlers functions
+// buildRoutes sets up basic HTTP routes for this example server
+func buildRoutes() ([]httpserver.Route, error) {
+	// Index handler and route creation
 	indexHandler := func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Welcome to the go-supervisor example HTTP server!\n")
 	}
-
-	statusHandler := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Status: OK\n")
-	}
-
-	wildcardHandler := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "You requested: %s\n", r.URL.Path)
-	}
-
-	// Create middleware for the routes
-	lgr := slog.New(logHandler)
-	loggingMw := logger.New(lgr.WithGroup("http"))
-	recoveryMw := recovery.New(lgr.WithGroup("recovery"))
-	metricsMw := metrics.New()
-
-	// Common middleware stack for all routes
-	commonMw := []httpserver.HandlerFunc{
-		recoveryMw,
-		loggingMw,
-		metricsMw,
-	}
-
-	// Create routes with common middleware attached to each
-	indexRoute, err := httpserver.NewRouteFromHandlerFunc(
-		"index",
-		"/",
-		indexHandler,
-		commonMw...,
-	)
+	indexRoute, err := httpserver.NewRouteFromHandlerFunc("index", "/", indexHandler)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create index route: %w", err)
 	}
 
-	// Status route to provide a health check
-	statusRoute, err := httpserver.NewRouteFromHandlerFunc(
-		"status",
-		"/status",
-		statusHandler,
-		commonMw...,
-	)
+	// Status handler and route creation - simple health check
+	statusHandler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Status: OK\n")
+	}
+	statusRoute, err := httpserver.NewRouteFromHandlerFunc("status", "/status", statusHandler)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	// API routes with wildcard middleware and handler conversion
-	wildcardMw := wildcard.New("/api/")
-	apiHandlers := append(commonMw, wildcardMw, func(rp *httpserver.RequestProcessor) {
-		wildcardHandler(rp.Writer(), rp.Request())
-	})
-	apiRoute, err := httpserver.NewWildcardRoute("/api", apiHandlers...)
+	// About handler and route creation
+	aboutHandler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "This is a basic HTTP server example using go-supervisor.\n")
+		fmt.Fprintf(w, "It demonstrates:\n")
+		fmt.Fprintf(w, "- Simple route handling\n")
+		fmt.Fprintf(w, "- Graceful shutdown\n")
+		fmt.Fprintf(w, "- Configuration reloading\n")
+	}
+	aboutRoute, err := httpserver.NewRouteFromHandlerFunc("about", "/about", aboutHandler)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create wildcard route: %w", err)
+		return nil, fmt.Errorf("failed to create about route: %w", err)
 	}
 
-	return httpserver.Routes{*indexRoute, *statusRoute, *apiRoute}, nil
+	// Return the slice of routes
+	return httpserver.Routes{*indexRoute, *statusRoute, *aboutRoute}, nil
 }
 
-// RunServer initializes and runs the HTTP server with supervisor
-func RunServer(
-	ctx context.Context,
-	logHandler slog.Handler,
+func createHTTPServer(
 	routes []httpserver.Route,
-) (*supervisor.PIDZero, error) {
+	logHandler slog.Handler,
+) (*httpserver.Runner, error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
 		return httpserver.NewConfig(ListenOn, routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
 	// Create the HTTP server runner
-	runner, err := httpserver.NewRunner(
+	return httpserver.NewRunner(
 		httpserver.WithConfigCallback(configCallback),
 		httpserver.WithLogHandler(logHandler))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP server runner: %w", err)
-	}
+}
 
+// createSupervisor initializes go-supervisor with the provided runnable
+func createSupervisor(
+	ctx context.Context,
+	logHandler slog.Handler,
+	runnable supervisor.Runnable,
+) (*supervisor.PIDZero, error) {
 	// Create a PIDZero supervisor and add the runner
 	sv, err := supervisor.New(
 		supervisor.WithContext(ctx),
 		supervisor.WithLogHandler(logHandler),
-		supervisor.WithRunnables(runner))
+		supervisor.WithRunnables(runnable))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create supervisor: %w", err)
 	}
@@ -119,33 +101,45 @@ func RunServer(
 }
 
 func main() {
-	// Configure the custom logger
+	// Configure the logger
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-		// AddSource: true,
+		Level: slog.LevelInfo,
 	})
 	slog.SetDefault(slog.New(handler))
 
 	// Create base context
 	ctx := context.Background()
 
-	// Run the server
-	routes, err := buildRoutes(handler)
+	// Build routes
+	routes, err := buildRoutes()
 	if err != nil {
 		slog.Error("Failed to build routes", "error", err)
 		os.Exit(1)
 	}
 
-	sv, err := RunServer(ctx, handler, routes)
+	// Create the HTTP server
+	httpServer, err := createHTTPServer(routes, handler)
+	if err != nil {
+		slog.Error("Failed to create HTTP server", "error", err)
+		os.Exit(1)
+	}
+
+	// Create the supervisor
+	sv, err := createSupervisor(ctx, handler, httpServer)
 	if err != nil {
 		slog.Error("Failed to setup server", "error", err)
 		os.Exit(1)
 	}
 
 	// Start the supervisor - this will block until shutdown
-	slog.Info("Starting supervisor with HTTP server on " + ListenOn)
+	slog.Info("Starting HTTP server", "address", ListenOn)
+	slog.Info("Try these endpoints:",
+		"index", "http://localhost:8080/",
+		"status", "http://localhost:8080/status",
+		"about", "http://localhost:8080/about")
+
 	if err := sv.Run(); err != nil {
-		slog.Error("Supervisor failed", "error", err)
+		slog.Error("Server stopped", "error", err)
 		os.Exit(1)
 	}
 }
