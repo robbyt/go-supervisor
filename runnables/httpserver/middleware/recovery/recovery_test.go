@@ -20,26 +20,25 @@ func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder
 	return rec, req
 }
 
-// setupLogBuffer creates a logger that writes to a buffer for testing
-func setupLogBuffer(t *testing.T, level slog.Level) (*bytes.Buffer, *slog.Logger) {
+// setupLogBuffer creates a handler that writes to a buffer for testing
+func setupLogBuffer(t *testing.T, level slog.Level) (*bytes.Buffer, slog.Handler) {
 	t.Helper()
 	buffer := &bytes.Buffer{}
 	handler := slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: level})
-	logger := slog.New(handler)
-	return buffer, logger
+	return buffer, handler
 }
 
 // executeHandlerWithRecovery runs the provided handler with the PanicRecovery middleware
 func executeHandlerWithRecovery(
 	t *testing.T,
 	handler http.HandlerFunc,
-	logger *slog.Logger,
+	logHandler slog.Handler,
 	rec *httptest.ResponseRecorder,
 	req *http.Request,
 ) {
 	t.Helper()
 	// Create a route with recovery middleware and the handler
-	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logger))
+	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logHandler))
 	assert.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
@@ -64,14 +63,14 @@ func createSuccessHandler(t *testing.T) http.HandlerFunc {
 }
 
 func TestRecoveryMiddleware(t *testing.T) {
-	t.Run("recovers from panic with custom logger", func(t *testing.T) {
+	t.Run("recovers from panic with custom handler", func(t *testing.T) {
 		// Setup
-		logBuffer, logger := setupLogBuffer(t, slog.LevelError)
+		logBuffer, logHandler := setupLogBuffer(t, slog.LevelError)
 		rec, req := setupRequest(t, "GET", "/test")
 		handler := createPanicHandler(t, "test panic")
 
 		// Execute
-		executeHandlerWithRecovery(t, handler, logger, rec, req)
+		executeHandlerWithRecovery(t, handler, logHandler, rec, req)
 
 		// Verify response
 		resp := rec.Result()
@@ -88,12 +87,12 @@ func TestRecoveryMiddleware(t *testing.T) {
 		assert.Contains(t, logOutput, "method=GET")
 	})
 
-	t.Run("recovers from panic silently with nil logger", func(t *testing.T) {
+	t.Run("recovers from panic silently with nil handler", func(t *testing.T) {
 		// Setup
 		rec, req := setupRequest(t, "POST", "/api/test")
-		handler := createPanicHandler(t, "test panic with nil logger")
+		handler := createPanicHandler(t, "test panic with nil handler")
 
-		// Execute with nil logger - should recover silently
+		// Execute with nil handler - should recover silently
 		executeHandlerWithRecovery(t, handler, nil, rec, req)
 
 		// Verify response - should still return 500 error

@@ -53,10 +53,9 @@ const (
 // buildRoutes sets up various HTTP routes for this JSON API example server
 func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	// Create middleware stack
-	l := slog.New(logHandler)
-	recoveryMw := recovery.New(l.WithGroup("recovery"))
+	recoveryMw := recovery.New(logHandler.WithGroup("recovery"))
 	securityMw := headersMw.Security()
-	loggingMw := logger.New(l.WithGroup("example"))
+	loggingMw := logger.New(logHandler.WithGroup("example"))
 	metricsMw := metrics.New()
 
 	// Sets JSON response headers

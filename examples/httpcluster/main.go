@@ -56,9 +56,10 @@ func NewConfigManager(cluster *httpcluster.Runner, logger *slog.Logger) *ConfigM
 
 // createCommonMiddleware creates the middleware stack used by all routes
 func createCommonMiddleware(lgr *slog.Logger) []httpserver.HandlerFunc {
+	handler := lgr.Handler()
 	return []httpserver.HandlerFunc{
-		recovery.New(lgr.WithGroup("recovery")),
-		logger.New(lgr.WithGroup("http")),
+		recovery.New(handler.WithGroup("recovery")),
+		logger.New(handler.WithGroup("http")),
 	}
 }
 

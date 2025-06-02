@@ -9,10 +9,12 @@ import (
 
 // New creates a middleware that logs information about HTTP requests.
 // It logs the request method, path, status code, and response time.
-func New(logger *slog.Logger) httpserver.HandlerFunc {
-	if logger == nil {
-		logger = slog.Default().WithGroup("httpserver")
+func New(handler slog.Handler) httpserver.HandlerFunc {
+	if handler == nil {
+		handler = slog.Default().Handler()
 	}
+
+	logger := slog.New(handler).WithGroup("httpserver")
 
 	return func(rp *httpserver.RequestProcessor) {
 		start := time.Now()
