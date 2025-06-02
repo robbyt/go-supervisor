@@ -85,6 +85,94 @@ func TestNewRoute(t *testing.T) {
 	}
 }
 
+func TestNewRoute_Internal(t *testing.T) {
+	t.Parallel()
+
+	testHandler := func(rp *RequestProcessor) {
+		rp.Writer().WriteHeader(http.StatusOK)
+	}
+
+	tests := []struct {
+		name        string
+		routeName   string
+		path        string
+		handlers    []HandlerFunc
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid Route with Single Handler",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: false,
+		},
+		{
+			name:        "Valid Route with Multiple Handlers",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler, testHandler},
+			expectError: false,
+		},
+		{
+			name:        "Empty Name",
+			routeName:   "",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: true,
+			errorMsg:    "name cannot be empty",
+		},
+		{
+			name:        "Empty Path",
+			routeName:   "test-route",
+			path:        "",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: true,
+			errorMsg:    "path cannot be empty",
+		},
+		{
+			name:        "No Handlers",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{},
+			expectError: true,
+			errorMsg:    "at least one handler required",
+		},
+		{
+			name:        "Nil Handlers Slice",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    nil,
+			expectError: true,
+			errorMsg:    "at least one handler required",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route, err := newRoute(tt.routeName, tt.path, tt.handlers...)
+
+			if tt.expectError {
+				assert.Error(t, err, "should return error for invalid input")
+				assert.Nil(t, route, "should return nil route on error")
+				assert.Contains(
+					t,
+					err.Error(),
+					tt.errorMsg,
+					"error message should contain expected text",
+				)
+			} else {
+				assert.NoError(t, err, "should not return error for valid input")
+				assert.NotNil(t, route, "should return non-nil route")
+				assert.Equal(t, tt.path, route.Path, "route path should match input")
+				assert.Equal(t, len(tt.handlers), len(route.Handlers), "handler count should match")
+			}
+		})
+	}
+}
+
 func TestNewWildcardRoute(t *testing.T) {
 	t.Parallel()
 
