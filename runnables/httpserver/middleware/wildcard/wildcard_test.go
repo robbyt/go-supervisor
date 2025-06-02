@@ -49,6 +49,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestWildcard_MatchingPrefix(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 	rec, req := setupRequest(t, "GET", "/api/users/123")
 
@@ -59,6 +60,7 @@ func TestWildcard_MatchingPrefix(t *testing.T) {
 }
 
 func TestWildcard_ExactPrefixMatch(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 	rec, req := setupRequest(t, "GET", "/api/")
 
@@ -69,6 +71,7 @@ func TestWildcard_ExactPrefixMatch(t *testing.T) {
 }
 
 func TestWildcard_NonMatchingPrefix(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 	rec, req := setupRequest(t, "GET", "/other/users")
 
@@ -79,6 +82,7 @@ func TestWildcard_NonMatchingPrefix(t *testing.T) {
 }
 
 func TestWildcard_PartialPrefixMatch(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 	rec, req := setupRequest(t, "GET", "/ap")
 
@@ -89,6 +93,7 @@ func TestWildcard_PartialPrefixMatch(t *testing.T) {
 }
 
 func TestWildcard_EmptyPath(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 
 	// Create request with minimal valid URL but empty path
@@ -102,6 +107,7 @@ func TestWildcard_EmptyPath(t *testing.T) {
 }
 
 func TestWildcard_RootPath(t *testing.T) {
+	t.Parallel()
 	handler := createPathEchoHandler(t)
 	rec, req := setupRequest(t, "GET", "/")
 
@@ -111,7 +117,56 @@ func TestWildcard_RootPath(t *testing.T) {
 	assert.Equal(t, "", rec.Body.String())
 }
 
+func TestWildcard_PrefixWithoutTrailingSlash(t *testing.T) {
+	t.Parallel()
+	handler := createPathEchoHandler(t)
+	rec, req := setupRequest(t, "GET", "/api/users")
+
+	executeHandlerWithWildcard(t, handler, "/api", rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "users", rec.Body.String())
+}
+
+func TestWildcard_RequestProcessorAbort(t *testing.T) {
+	t.Parallel()
+	var nextCalled bool
+
+	// Create a handler that should not be called when path doesn't match
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// Test with non-matching path to verify abort behavior
+	rec, req := setupRequest(t, "GET", "/different/path")
+
+	// Use the helper function which creates a complete route
+	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
+
+	// Verify that the handler was not called (middleware aborted)
+	assert.False(t, nextCalled)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestWildcard_QueryParameters(t *testing.T) {
+	t.Parallel()
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte(r.URL.Path + "?" + r.URL.RawQuery))
+		assert.NoError(t, err)
+	}
+
+	rec, req := setupRequest(t, "GET", "/api/users?id=123&name=test")
+
+	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "users?id=123&name=test", rec.Body.String())
+}
+
 func TestWildcard_DifferentMethods(t *testing.T) {
+	t.Parallel()
 	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -130,17 +185,8 @@ func TestWildcard_DifferentMethods(t *testing.T) {
 	}
 }
 
-func TestWildcard_PrefixWithoutTrailingSlash(t *testing.T) {
-	handler := createPathEchoHandler(t)
-	rec, req := setupRequest(t, "GET", "/api/users")
-
-	executeHandlerWithWildcard(t, handler, "/api", rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "/users", rec.Body.String())
-}
-
 func TestWildcard_NestedPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		prefix   string
@@ -180,42 +226,8 @@ func TestWildcard_NestedPaths(t *testing.T) {
 	}
 }
 
-func TestWildcard_RequestProcessorAbort(t *testing.T) {
-	var nextCalled bool
-
-	// Create a handler that should not be called when path doesn't match
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		nextCalled = true
-		w.WriteHeader(http.StatusOK)
-	}
-
-	// Test with non-matching path to verify abort behavior
-	rec, req := setupRequest(t, "GET", "/different/path")
-
-	// Use the helper function which creates a complete route
-	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
-
-	// Verify that the handler was not called (middleware aborted)
-	assert.False(t, nextCalled)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-}
-
-func TestWildcard_QueryParameters(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(r.URL.Path + "?" + r.URL.RawQuery))
-		assert.NoError(t, err)
-	}
-
-	rec, req := setupRequest(t, "GET", "/api/users?id=123&name=test")
-
-	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "users?id=123&name=test", rec.Body.String())
-}
-
 func TestWildcard_SpecialCharacters(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		prefix   string
@@ -243,6 +255,128 @@ func TestWildcard_SpecialCharacters(t *testing.T) {
 			path:     "/api/test-path_with.symbols",
 			expected: "test-path_with.symbols",
 			status:   http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := createPathEchoHandler(t)
+			rec, req := setupRequest(t, "GET", tt.path)
+
+			executeHandlerWithWildcard(t, handler, tt.prefix, rec, req)
+
+			assert.Equal(t, tt.status, rec.Code)
+			if tt.status == http.StatusOK {
+				assert.Equal(t, tt.expected, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWildcard_PrefixNormalization(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		prefix   string
+		path     string
+		expected string
+		status   int
+	}{
+		{
+			name:     "empty prefix defaults to root",
+			prefix:   "",
+			path:     "/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "prefix without leading slash",
+			prefix:   "api",
+			path:     "/api/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "prefix without trailing slash",
+			prefix:   "/api",
+			path:     "/api/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "prefix without leading or trailing slash",
+			prefix:   "api",
+			path:     "/api/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "root prefix stays as root",
+			prefix:   "/",
+			path:     "/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "malformed prefix gets normalized",
+			prefix:   "api/v1",
+			path:     "/api/v1/users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := createPathEchoHandler(t)
+			rec, req := setupRequest(t, "GET", tt.path)
+
+			executeHandlerWithWildcard(t, handler, tt.prefix, rec, req)
+
+			assert.Equal(t, tt.status, rec.Code)
+			if tt.status == http.StatusOK {
+				assert.Equal(t, tt.expected, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestWildcard_EdgeCases(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		prefix   string
+		path     string
+		expected string
+		status   int
+	}{
+		{
+			name:     "double slash in prefix",
+			prefix:   "//api//",
+			path:     "//api//users",
+			expected: "users",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "empty path with root prefix",
+			prefix:   "/",
+			path:     "/",
+			expected: "",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "exact match with normalized prefix",
+			prefix:   "api",
+			path:     "/api/",
+			expected: "",
+			status:   http.StatusOK,
+		},
+		{
+			name:     "path shorter than normalized prefix",
+			prefix:   "api/v1",
+			path:     "/api",
+			expected: "",
+			status:   http.StatusNotFound,
 		},
 	}
 

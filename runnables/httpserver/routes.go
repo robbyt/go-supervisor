@@ -84,6 +84,25 @@ func (r *Route) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // NewWildcardRoute creates a route that handles everything under /prefix/*.
 // Clients calling /prefix/foo/bar will match this route.
+//
+// Deprecated: Use NewRouteFromHandlerFunc with wildcard.New() middleware instead.
+// This approach is more composable and follows the package's middleware pattern.
+//
+// Migration example:
+//
+//	// Old approach:
+//	route, _ := httpserver.NewWildcardRoute("/api/", handler1, handler2)
+//
+//	// New approach:
+//	import "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
+//	route, _ := httpserver.NewRouteFromHandlerFunc(
+//	    "api",
+//	    "/api/*",
+//	    finalHandler,
+//	    wildcard.New("/api/"),
+//	    middleware1,
+//	    middleware2,
+//	)
 func NewWildcardRoute(prefix string, handlers ...HandlerFunc) (*Route, error) {
 	logger := slog.Default().WithGroup("httpserver.NewWildcardRoute")
 	if prefix == "" {
