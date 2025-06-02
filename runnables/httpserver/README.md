@@ -1,10 +1,10 @@
 # HTTP Server Runnable
 
-A production-ready HTTP server that integrates with go-supervisor for lifecycle management.
+An HTTP server that integrates with go-supervisor for lifecycle management.
 
 ## Why Use This?
 
-Building HTTP servers that handle shutdown gracefully is complex. When a process receives a termination signal, it needs to stop accepting new connections while allowing in-flight requests to complete. This package solves that problem by providing an HTTP server that:
+When a process receives a termination signal, it needs to stop accepting new connections while allowing in-flight requests to complete. This package provides an HTTP server that:
 
 - Integrates with go-supervisor's shutdown coordination
 - Reloads configuration without dropping connections
@@ -132,7 +132,7 @@ The server implements hot reloading for configuration changes. When the supervis
 2. Updates routes without dropping connections
 3. Restarts the server only if the listen address changes
 
-This enables zero-downtime updates for most configuration changes.
+Configuration changes take effect without dropping existing connections.
 
 ## State Monitoring
 
@@ -159,7 +159,7 @@ The server supports various timeouts and custom server creation:
 // Basic configuration with defaults
 config, _ := httpserver.NewConfig(":8080", routes)
 
-// Custom timeouts for different deployment scenarios
+// Custom timeouts
 config, _ := httpserver.NewConfig(
     ":8080",
     routes,
@@ -192,4 +192,4 @@ config, _ := httpserver.NewConfig(
 
 ## Examples
 
-See `examples/http/` for a basic implementation or `examples/custom_middleware/` for advanced middleware usage.
+See `examples/http/` or `examples/custom_middleware/` for usage examples.
