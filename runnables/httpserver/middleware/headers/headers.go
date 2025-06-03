@@ -10,6 +10,10 @@ type HeaderMap map[string]string
 // New creates a middleware that sets HTTP headers on responses.
 // Headers are set before the request is processed, allowing other middleware
 // and handlers to override them if needed.
+//
+// Note: The Go standard library's http package will validate headers when
+// writing them to prevent protocol violations. This middleware does not
+// perform additional validation beyond what the standard library provides.
 func New(headers HeaderMap) httpserver.HandlerFunc {
 	return func(rp *httpserver.RequestProcessor) {
 		// Set headers before processing
