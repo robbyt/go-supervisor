@@ -92,37 +92,62 @@ middlewares := []httpserver.HandlerFunc{
 
 ### Creating Custom Middleware
 
-Middleware receives a `RequestProcessor` that controls request flow:
+Middleware functions receive a `RequestProcessor` that controls the middleware chain. Each middleware **must** call either `Next()` or `Abort()`.
+
+#### Two-Phase Execution
+
+Middleware runs in two phases:
+- **Request phase**: Code before `Next()` - runs while processing the incoming request
+- **Response phase**: Code after `Next()` - runs after the final handler and all subsequent middleware complete
 
 ```go
-package mymiddleware
-
-import (
-    "net/http"
-    "time"
-    "github.com/robbyt/go-supervisor/runnables/httpserver"
-)
-
-// New creates a timing middleware
 func New() httpserver.HandlerFunc {
     return func(rp *httpserver.RequestProcessor) {
+        // REQUEST PHASE: Runs before handler
         start := time.Now()
         
-        // Continue processing
+        // Continue to next middleware/handler
         rp.Next()
         
-        // Measure after request completes
+        // RESPONSE PHASE: Runs after handler completes
         duration := time.Since(start)
         rp.Writer().Header().Set("X-Process-Time", duration.String())
     }
 }
 ```
 
-The `RequestProcessor` provides:
-- `Next()` - Continue to the next handler
-- `Abort()` - Stop processing
+#### Control Flow Methods
+
+- `Next()` - Continue to the next middleware in the chain (or final handler if last middleware)
+- `Abort()` - Stop processing immediately, skip all remaining middleware and handler
+
+#### When to Abort
+
+Use `Abort()` when requests should not continue processing:
+
+```go
+func AuthMiddleware(requiredRole string) httpserver.HandlerFunc {
+    return func(rp *httpserver.RequestProcessor) {
+        if !isAuthorized(rp.Request(), requiredRole) {
+            http.Error(rp.Writer(), "Forbidden", http.StatusForbidden)
+            rp.Abort() // Stop here - don't call remaining middleware
+            return
+        }
+        rp.Next() // Continue processing
+    }
+}
+```
+
+#### Available Methods
+
 - `Request()` - Access the HTTP request
-- `Writer()` - Access the response writer
+- `Writer()` - Access the enhanced response writer
+- `IsAborted()` - Check if processing was aborted by earlier middleware
+
+The `ResponseWriter` extends `http.ResponseWriter` with:
+- `Status()` - Get the HTTP status code after writing
+- `Size()` - Get the number of bytes written  
+- `Written()` - Check if response has been written
 
 ## Configuration Reloading
 

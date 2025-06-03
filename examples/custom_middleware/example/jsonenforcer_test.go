@@ -5,10 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestWrapHandlerForJSON(t *testing.T) {
+func TestJSONEnforcerMiddleware(t *testing.T) {
 	t.Parallel()
 
 	t.Run("transforms text response to JSON", func(t *testing.T) {
@@ -21,10 +22,18 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		// Wrap handler with JSON enforcement
-		wrappedHandler := WrapHandlerForJSON(textHandler)
-		wrappedHandler(rec, req)
+		// Create route with JSON enforcer middleware
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			textHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Contains(
 			t,
 			rec.Body.String(),
@@ -44,9 +53,17 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(jsonHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			jsonHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Equal(
 			t,
 			`{"message": "Hello World", "status": "success"}`,
@@ -66,10 +83,18 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(errorHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			errorHandler,
+			New(),
+		)
+		assert.NoError(t, err)
+
+		route.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusNotFound, rec.Code, "status code should be preserved")
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Contains(
 			t,
 			rec.Body.String(),
@@ -87,13 +112,21 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(emptyHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			emptyHandler,
+			New(),
+		)
+		assert.NoError(t, err)
+
+		route.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusNoContent, rec.Code, "status code should be preserved")
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Equal(
 			t,
-			`{"response":""}`+"\n",
+			`{"response":""}`,
 			rec.Body.String(),
 			"empty response should be wrapped",
 		)
@@ -110,9 +143,17 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(htmlHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			htmlHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		// JSON encoding will escape HTML characters
 		assert.Contains(t, rec.Body.String(), `{"response":"`, "HTML should be wrapped in JSON")
 		assert.Contains(t, rec.Body.String(), `html`, "should contain html content")
@@ -130,9 +171,17 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(arrayHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			arrayHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Equal(
 			t,
 			`["item1", "item2", "item3"]`,
@@ -152,9 +201,17 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(malformedHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			malformedHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		assert.Contains(
 			t,
 			rec.Body.String(),
@@ -177,15 +234,52 @@ func TestWrapHandlerForJSON(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		wrappedHandler := WrapHandlerForJSON(multiWriteHandler)
-		wrappedHandler(rec, req)
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			multiWriteHandler,
+			New(),
+		)
+		assert.NoError(t, err)
 
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		body := rec.Body.String()
 		assert.Equal(
 			t,
-			`{"response":"Hello World"}`+"\n",
+			`{"response":"Hello World"}`,
 			body,
 			"all writes should be buffered and wrapped",
 		)
+	})
+}
+
+// Test compliance with the middleware framework
+func TestJSONEnforcerCompliance(t *testing.T) {
+	// This is a placeholder test that would import the compliance framework
+	// In practice, you would add this to runnables/httpserver/middleware/compliance_test.go
+	jsonMiddleware := New()
+
+	// Test basic compliance: calls Next()
+	t.Run("calls Next()", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		called := false
+		mockHandler := func(w http.ResponseWriter, r *http.Request) {
+			called = true
+		}
+
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			mockHandler,
+			jsonMiddleware,
+		)
+		assert.NoError(t, err)
+
+		route.ServeHTTP(rec, req)
+		assert.True(t, called, "should call the next handler")
 	})
 }

@@ -268,20 +268,24 @@ func TestJSONEnforcerIntegration(t *testing.T) {
 			assert.NoError(t, resp.Body.Close())
 		}()
 
-		// Panic recovery returns 500 with text/plain
-		assert.Equal(
-			t,
-			http.StatusInternalServerError,
-			resp.StatusCode,
-			"should return 500 for panic",
-		)
-		assert.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"),
-			"panic recovery returns text/plain, not JSON")
+		// JSON enforcer transforms panic recovery response to JSON
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode,
+			"should preserve 500 status from panic recovery")
+		assert.Equal(t, "application/json", resp.Header.Get("Content-Type"),
+			"JSON enforcer transforms panic recovery to JSON")
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err, "reading response body should not fail")
-		assert.Equal(t, "Internal Server Error\n", string(body),
-			"panic recovery returns standard error message")
+
+		var jsonResp map[string]any
+		err = json.Unmarshal(body, &jsonResp)
+		require.NoError(t, err, "response should be valid JSON")
+
+		// The panic recovery message should be wrapped in JSON
+		response, ok := jsonResp["response"].(string)
+		require.True(t, ok, "response field should be a string")
+		assert.Contains(t, response, "Internal Server Error",
+			"panic recovery message should be wrapped in JSON")
 
 		// Security headers should still be set (from middleware before panic)
 		assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))

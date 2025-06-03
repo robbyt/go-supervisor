@@ -1,10 +1,22 @@
+// This file defines the core middleware execution types.
+//
+// RequestProcessor manages the middleware chain execution and provides access
+// to request/response data. It handles the control flow ("when" middleware runs)
+// while ResponseWriter (response_writer.go) handles data capture ("what" data
+// is available).
+//
+// When writing custom middleware, use RequestProcessor methods to:
+// - Continue processing: rp.Next()
+// - Stop processing: rp.Abort()
+// - Access request: rp.Request()
+// - Access response: rp.Writer()
 package httpserver
 
 import (
 	"net/http"
 )
 
-// HandlerFunc is the new middleware/handler signature
+// HandlerFunc is the middleware/handler signature
 type HandlerFunc func(*RequestProcessor)
 
 // RequestProcessor carries the request/response and middleware chain
@@ -45,4 +57,10 @@ func (rp *RequestProcessor) Writer() ResponseWriter {
 // Request returns the HTTP request
 func (rp *RequestProcessor) Request() *http.Request {
 	return rp.request
+}
+
+// SetWriter replaces the ResponseWriter for the request.
+// This allows middleware to intercept and transform responses.
+func (rp *RequestProcessor) SetWriter(w ResponseWriter) {
+	rp.writer = w
 }

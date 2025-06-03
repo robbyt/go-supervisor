@@ -1,3 +1,25 @@
+// Package httpserver provides HTTP server functionality with middleware support.
+//
+// This file defines ResponseWriter, which wraps the standard http.ResponseWriter
+// to capture response metadata that the standard interface doesn't expose.
+//
+// # Why This Wrapper Exists
+//
+// The standard http.ResponseWriter doesn't provide access to the status code
+// or byte count after they've been written. Middleware needs this information
+// for logging, metrics, and conditional processing.
+//
+// # Relationship to Middleware
+//
+// Middleware functions receive a RequestProcessor that contains this ResponseWriter.
+// The wrapper allows middleware to inspect response state after handlers execute.
+//
+// # Relationship to RequestProcessor (context.go)
+//
+// RequestProcessor manages middleware execution flow and provides access to this
+// ResponseWriter through its Writer() method. The RequestProcessor handles the
+// "when" of middleware execution, while ResponseWriter handles the "what" of
+// response data capture.
 package httpserver
 
 import "net/http"

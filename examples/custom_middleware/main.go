@@ -61,14 +61,18 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	// Sets JSON response headers
 	jsonHeadersMw := headersMw.JSON()
 
+	// JSON enforcer for transforming all responses to JSON
+	jsonEnforcerMw := example.New()
+
 	// Common middleware stack for all routes
 	// Order matters! middleware executes in order on request, reverse order on response
 	commonMw := []httpserver.HandlerFunc{
-		recoveryMw,    // 1. Handle panics first - MUST be outermost to catch all failures
-		securityMw,    // 2. Add security headers early - ensures they're always set
-		loggingMw,     // 3. Log requests - captures what's actually being processed
-		metricsMw,     // 4. Collect metrics - measures logged requests
-		jsonHeadersMw, // 5. Set JSON headers last - prevents handler override
+		jsonEnforcerMw, // 1. Transform responses to JSON - MUST be outermost to catch all responses
+		recoveryMw,     // 2. Handle panics - recovery responses will be transformed to JSON
+		securityMw,     // 3. Add security headers early - ensures they're always set
+		loggingMw,      // 4. Log requests - captures what's actually being processed
+		metricsMw,      // 5. Collect metrics - measures logged requests
+		jsonHeadersMw,  // 6. Set JSON headers last - prevents handler override
 	}
 
 	// CORS middleware for API endpoints
@@ -76,12 +80,13 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 
 	// API-specific middleware (adds CORS after security headers)
 	apiMw := []httpserver.HandlerFunc{
-		commonMw[0], // recoveryMw
-		commonMw[1], // securityMw
+		commonMw[0], // jsonEnforcerMw
+		commonMw[1], // recoveryMw
+		commonMw[2], // securityMw
 		corsMw,      // different from commonMw - CORS for API endpoints
-		commonMw[2], // loggingMw
-		commonMw[3], // metricsMw
-		commonMw[4], // jsonHeadersMw
+		commonMw[3], // loggingMw
+		commonMw[4], // metricsMw
+		commonMw[5], // jsonHeadersMw
 	}
 
 	// Index handler and route creation - plain text will be converted to JSON
@@ -91,7 +96,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	indexRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"index",
 		"/",
-		example.WrapHandlerForJSON(indexHandler),
+		indexHandler,
 		commonMw...,
 	)
 	if err != nil {
@@ -109,7 +114,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	jsonRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"json-data",
 		"/api/data",
-		example.WrapHandlerForJSON(jsonHandler),
+		jsonHandler,
 		apiMw...,
 	)
 	if err != nil {
@@ -126,7 +131,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	htmlRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"html-demo",
 		"/html",
-		example.WrapHandlerForJSON(htmlHandler),
+		htmlHandler,
 		commonMw...,
 	)
 	if err != nil {
@@ -141,7 +146,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	errorRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"error-demo",
 		"/error",
-		example.WrapHandlerForJSON(errorHandler),
+		errorHandler,
 		commonMw...,
 	)
 	if err != nil {
@@ -155,7 +160,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	panicRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"panic-demo",
 		"/panic",
-		example.WrapHandlerForJSON(panicHandler),
+		panicHandler,
 		commonMw...,
 	)
 	if err != nil {
