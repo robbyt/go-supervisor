@@ -9,6 +9,15 @@ import (
 )
 
 // ResponseWrapper captures response data for transformation
+//
+// This is a simple example for demonstration purposes and is not intended for
+// production use. Limitations:
+// - Does not preserve optional HTTP interfaces (http.Hijacker, http.Flusher, http.Pusher)
+// - Not safe for concurrent writes from multiple goroutines within the same request
+// - No memory limits on buffered content
+//
+// Each request gets its own ResponseWrapper instance, so different requests won't
+// interfere with each other.
 type ResponseWrapper struct {
 	original httpserver.ResponseWriter
 	buffer   *bytes.Buffer
@@ -63,9 +72,8 @@ func (rw *ResponseWrapper) Size() int {
 
 // transformToJSON wraps non-JSON content in a JSON response
 func transformToJSON(data []byte) ([]byte, error) {
-	// First check if the data is valid JSON regardless of content type
-	var test any
-	if json.Unmarshal(data, &test) == nil {
+	// Use json.Valid for efficient validation without unmarshaling
+	if json.Valid(data) {
 		return data, nil // Valid JSON, return as-is
 	}
 
@@ -91,6 +99,25 @@ func New() httpserver.HandlerFunc {
 
 		// RESPONSE PHASE: Transform response to JSON
 		originalData := wrapper.buffer.Bytes()
+		statusCode := wrapper.Status()
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+
+		// Copy headers to original writer
+		originalWriter := wrapper.original
+		for key, values := range wrapper.Header() {
+			for _, value := range values {
+				originalWriter.Header().Add(key, value)
+			}
+		}
+
+		// Check if this status code should have no body per HTTP spec
+		// 204 No Content and 304 Not Modified MUST NOT have a message body
+		if statusCode == http.StatusNoContent || statusCode == http.StatusNotModified {
+			originalWriter.WriteHeader(statusCode)
+			return
+		}
 
 		// Transform captured data to JSON
 		if len(originalData) == 0 && wrapper.status == 0 {
@@ -104,22 +131,10 @@ func New() httpserver.HandlerFunc {
 			jsonData = []byte(`{"error":"Unable to encode response"}`)
 		}
 
-		// Copy headers to original writer
-		originalWriter := wrapper.original
-		for key, values := range wrapper.Header() {
-			for _, value := range values {
-				originalWriter.Header().Add(key, value)
-			}
-		}
-
 		// Ensure JSON content type
 		originalWriter.Header().Set("Content-Type", "application/json")
 
 		// Write status and transformed data
-		statusCode := wrapper.Status()
-		if statusCode == 0 {
-			statusCode = http.StatusOK
-		}
 		originalWriter.WriteHeader(statusCode)
 		if _, err := originalWriter.Write(jsonData); err != nil {
 			// Response is already committed, cannot recover from write error

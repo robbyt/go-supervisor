@@ -103,11 +103,11 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 		)
 	})
 
-	t.Run("handles empty response body", func(t *testing.T) {
+	t.Run("handles 204 No Content correctly", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		rec := httptest.NewRecorder()
 
-		// Handler that writes nothing
+		// Handler that returns 204 No Content
 		emptyHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -123,13 +123,34 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 		route.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusNoContent, rec.Code, "status code should be preserved")
-		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-		assert.Equal(
-			t,
-			`{"response":""}`,
-			rec.Body.String(),
-			"empty response should be wrapped",
+		assert.Empty(t, rec.Body.String(), "204 responses must have no body per HTTP spec")
+		assert.Equal(t, 0, rec.Body.Len(), "content length should be 0")
+	})
+
+	t.Run("handles 304 Not Modified correctly", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		// Handler that returns 304 Not Modified
+		notModifiedHandler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotModified)
+			// Even if handler writes, middleware should not include body
+			_, err := w.Write([]byte("should be ignored"))
+			assert.NoError(t, err)
+		}
+
+		route, err := httpserver.NewRouteFromHandlerFunc(
+			"test",
+			"/test",
+			notModifiedHandler,
+			New(),
 		)
+		assert.NoError(t, err)
+
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotModified, rec.Code, "status code should be preserved")
+		assert.Empty(t, rec.Body.String(), "304 responses must have no body per HTTP spec")
 	})
 
 	t.Run("transforms HTML response to JSON", func(t *testing.T) {
