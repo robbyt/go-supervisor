@@ -81,12 +81,19 @@ Middleware forms a processing pipeline where each step can affect subsequent ste
 // Logging captures the actual request after security filtering
 // Content headers set last prevent handlers from overriding them
 
+import (
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
+)
+
 middlewares := []httpserver.HandlerFunc{
     recovery.New(lgr),        // Catches panics - must wrap everything
-    headersMw.Security(),     // Security headers - always applied
+    headers.Security(),       // Security headers - always applied
     logger.New(lgr),          // Logs what actually gets processed
     metrics.New(),            // Measures performance
-    headersMw.JSON(),         // Sets content type - easily overridden
+    headers.JSON(),           // Sets content type - easily overridden
 }
 ```
 
