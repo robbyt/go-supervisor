@@ -49,7 +49,7 @@ func TestBootFailure(t *testing.T) {
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 
 		callback := func() (*Config, error) {
@@ -92,7 +92,7 @@ func TestCustomServerCreator(t *testing.T) {
 
 	// Create a test route and config
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 	routes := Routes{*route}
 
@@ -165,7 +165,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	}
 
 	// Create the server manually to have more control
-	route, err := NewRoute("v1", "/long", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/long", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 
@@ -247,7 +247,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	}
 
 	// Create the server manually
-	route, err := NewRoute("v1", "/sleep", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/sleep", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 
@@ -316,7 +316,7 @@ func TestServerErr(t *testing.T) {
 	port := ":9230"
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 
@@ -368,7 +368,7 @@ func TestServerLifecycle(t *testing.T) {
 	// Use unique port numbers for parallel tests
 	listenPort := getAvailablePort(t, 8800)
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
 
 	// Create the Config and HTTPServer instance
@@ -432,7 +432,7 @@ func TestString(t *testing.T) {
 		// Use a unique port
 		listenPort := getAvailablePort(t, 8700)
 		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		hConfig := Routes{*route}
 
@@ -476,7 +476,7 @@ func TestString(t *testing.T) {
 		// Use a unique port
 		listenPort := getAvailablePort(t, 8700)
 		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		hConfig := Routes{*route}
 

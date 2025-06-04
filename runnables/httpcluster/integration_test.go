@@ -54,7 +54,7 @@ func TestIntegration_BasicServerLifecycle(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// Add a server
-	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/test",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +137,7 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// Create initial config
-	route1, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route1, err := httpserver.NewRouteFromHandlerFunc(
 		"test1",
 		"/test1",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +170,7 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "Server count should be 1")
 
 	// Update config (same port, different route)
-	route2, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route2, err := httpserver.NewRouteFromHandlerFunc(
 		"test2",
 		"/test2",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -273,7 +273,7 @@ func TestIntegration_StateReporting(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// Send config to trigger reload
-	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/test",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -379,7 +379,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "Invalid config should not create servers but runner should continue")
 
 	// Send multiple rapid config updates
-	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/test",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -444,7 +444,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// Create initial configuration
-	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/test",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -566,7 +566,7 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	// by testing the newEntries function directly
 
 	// Create initial configuration
-	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/test",
 		func(w http.ResponseWriter, r *http.Request) {

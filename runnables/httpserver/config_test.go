@@ -277,7 +277,7 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	// Create the test route
-	route, err := NewRoute("test", "/long-running", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/long-running", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 
@@ -371,7 +371,7 @@ func TestCreateServer(t *testing.T) {
 
 	// Create a test route
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 	routes := Routes{*route}
 
@@ -427,7 +427,7 @@ func TestFunctionalOptions(t *testing.T) {
 
 	// Create a basic test route
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 	routes := Routes{*route}
 

@@ -20,7 +20,7 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	port := getAvailablePort(t, 8700)
@@ -109,7 +109,7 @@ func TestRunnerRaceConditions(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	port := getAvailablePort(t, 8600)

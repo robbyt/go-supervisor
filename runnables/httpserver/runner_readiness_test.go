@@ -14,9 +14,13 @@ import (
 func TestServerReadinessProbe(t *testing.T) {
 	t.Parallel()
 
-	route, err := NewRoute("test", "/test", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	route, err := NewRouteFromHandlerFunc(
+		"test",
+		"/test",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	)
 	require.NoError(t, err)
 
 	port := getAvailablePort(t, 9100)
