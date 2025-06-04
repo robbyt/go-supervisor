@@ -1,14 +1,32 @@
-package middleware
+package logger
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
+
+// setupRequest creates a basic HTTP request for testing
+func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	return rec, req
+}
+
+// setupLogBuffer creates a handler that writes to a buffer for testing
+func setupLogBuffer(t *testing.T, level slog.Level) (*bytes.Buffer, slog.Handler) {
+	t.Helper()
+	buffer := &bytes.Buffer{}
+	handler := slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: level})
+	return buffer, handler
+}
 
 // createTestHandler returns a handler that writes a response
 func createTestHandler(t *testing.T, checkResponse bool) http.HandlerFunc {
@@ -30,13 +48,15 @@ func createTestHandler(t *testing.T, checkResponse bool) http.HandlerFunc {
 func executeHandlerWithLogger(
 	t *testing.T,
 	handler http.HandlerFunc,
-	logger *slog.Logger,
+	logHandler slog.Handler,
 	rec *httptest.ResponseRecorder,
 	req *http.Request,
 ) {
 	t.Helper()
-	wrappedHandler := Logger(logger)(handler)
-	wrappedHandler(rec, req)
+	// Create a route with logger middleware and the handler
+	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logHandler))
+	assert.NoError(t, err)
+	route.ServeHTTP(rec, req)
 }
 
 // setupDetailedRequest creates a test HTTP request with user agent and remote addr
@@ -52,14 +72,14 @@ func setupDetailedRequest(
 }
 
 func TestLogger(t *testing.T) {
-	t.Run("with custom logger", func(t *testing.T) {
+	t.Run("with custom handler", func(t *testing.T) {
 		// Setup
-		logBuffer, logger := setupLogBuffer(t, slog.LevelInfo)
+		logBuffer, logHandler := setupLogBuffer(t, slog.LevelInfo)
 		rec, req := setupDetailedRequest(t, "GET", "/test", "test-agent", "127.0.0.1:12345")
 		handler := createTestHandler(t, false)
 
 		// Execute
-		executeHandlerWithLogger(t, handler, logger, rec, req)
+		executeHandlerWithLogger(t, handler, logHandler, rec, req)
 
 		// Check response
 		resp := rec.Result()
@@ -78,19 +98,19 @@ func TestLogger(t *testing.T) {
 		assert.Contains(t, logOutput, "remote_addr=127.0.0.1:12345")
 	})
 
-	t.Run("with nil logger (uses default)", func(t *testing.T) {
+	t.Run("with nil handler (uses default)", func(t *testing.T) {
 		// Save and restore default logger
 		defaultLogger := slog.Default()
 		defer slog.SetDefault(defaultLogger)
 
 		// Setup with default logger
-		logBuffer, testLogger := setupLogBuffer(t, slog.LevelInfo)
-		slog.SetDefault(testLogger)
+		logBuffer, testHandler := setupLogBuffer(t, slog.LevelInfo)
+		slog.SetDefault(slog.New(testHandler))
 
 		rec, req := setupRequest(t, "GET", "/test")
 		handler := createTestHandler(t, true)
 
-		// Execute with nil logger (will use default)
+		// Execute with nil handler (will use default)
 		executeHandlerWithLogger(t, handler, nil, rec, req)
 
 		// Verify log output

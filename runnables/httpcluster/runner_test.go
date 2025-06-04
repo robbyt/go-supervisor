@@ -590,6 +590,9 @@ func TestRunnerExecuteActions(t *testing.T) {
 		// Mock clearRuntime in case the server fails to become ready (can happen in slow environments)
 		mockEntries.On("clearRuntime", "start1").Return(mockEntries).Maybe()
 
+		// Mock removeEntry in case the server fails to start (can happen when no run context)
+		mockEntries.On("removeEntry", "start1").Return(mockEntries).Maybe()
+
 		result := runner.executeActions(context.Background(), mockEntries)
 		assert.Equal(t, mockEntries, result)
 

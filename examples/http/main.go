@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
+	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
@@ -36,43 +39,53 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		fmt.Fprintf(w, "You requested: %s\n", r.URL.Path)
 	}
 
-	// Create middleware for the routes
-	logger := slog.New(logHandler)
-	loggingMw := middleware.Logger(logger.WithGroup("http"))
-	recoveryMw := middleware.PanicRecovery(logger.WithGroup("recovery"))
-	metricsMw := middleware.MetricCollector()
+	// Create middleware for the routes using the new middleware system
+	loggingMw := logger.New(logHandler.WithGroup("http"))
+	recoveryMw := recovery.New(logHandler.WithGroup("recovery"))
+	metricsMw := metrics.New()
 
-	// Common middleware stack for all routes
-	commonMw := []middleware.Middleware{
+	// Common middleware stack for all routes (using new HandlerFunc pattern)
+	commonMw := []httpserver.HandlerFunc{
 		recoveryMw,
 		loggingMw,
 		metricsMw,
 	}
 
+	// Convert HandlerFunc slice to any slice for deprecated function
+	commonMwAny := make([]any, len(commonMw))
+	for i, mw := range commonMw {
+		commonMwAny[i] = mw
+	}
+
 	// Create routes with common middleware attached to each
-	indexRoute, err := httpserver.NewRouteWithMiddleware(
+	indexRoute, err := httpserver.NewRouteWithMiddleware( //nolint:staticcheck
 		"index",
 		"/",
 		indexHandler,
-		commonMw...,
+		commonMwAny...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create index route: %w", err)
 	}
 
 	// Status route to provide a health check
-	statusRoute, err := httpserver.NewRouteWithMiddleware(
+	statusRoute, err := httpserver.NewRouteWithMiddleware( //nolint:staticcheck
 		"status",
 		"/status",
 		statusHandler,
-		commonMw...,
+		commonMwAny...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
 	}
 
-	// API routes have their middlewares passed to the updated function
-	apiRoute, err := httpserver.NewWildcardRoute("/api", wildcardHandler, commonMw...)
+	// API wildcard route using the new middleware system
+	apiRoute, err := httpserver.NewRouteFromHandlerFunc(
+		"api",
+		"/api/*",
+		wildcardHandler,
+		wildcard.New("/api/"),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wildcard route: %w", err)
 	}

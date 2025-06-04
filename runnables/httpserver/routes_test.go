@@ -5,10 +5,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testRoute creates a Route for testing purposes
+func testRoute(t *testing.T, name, path string, handler http.HandlerFunc) Route {
+	t.Helper()
+	route, err := NewRouteFromHandlerFunc(name, path, handler)
+	require.NoError(t, err)
+	return *route
+}
 
 func TestNewRoute(t *testing.T) {
 	t.Parallel()
@@ -71,9 +78,96 @@ func TestNewRoute(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, route)
-				assert.Equal(t, tt.routeName, route.name)
 				assert.Equal(t, tt.path, route.Path)
-				assert.NotNil(t, route.Handler)
+				assert.NotEmpty(t, route.Handlers)
+			}
+		})
+	}
+}
+
+func TestNewRoute_Internal(t *testing.T) {
+	t.Parallel()
+
+	testHandler := func(rp *RequestProcessor) {
+		rp.Writer().WriteHeader(http.StatusOK)
+	}
+
+	tests := []struct {
+		name        string
+		routeName   string
+		path        string
+		handlers    []HandlerFunc
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "Valid Route with Single Handler",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: false,
+		},
+		{
+			name:        "Valid Route with Multiple Handlers",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler, testHandler},
+			expectError: false,
+		},
+		{
+			name:        "Empty Name",
+			routeName:   "",
+			path:        "/test",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: true,
+			errorMsg:    "name cannot be empty",
+		},
+		{
+			name:        "Empty Path",
+			routeName:   "test-route",
+			path:        "",
+			handlers:    []HandlerFunc{testHandler},
+			expectError: true,
+			errorMsg:    "path cannot be empty",
+		},
+		{
+			name:        "No Handlers",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    []HandlerFunc{},
+			expectError: true,
+			errorMsg:    "at least one handler required",
+		},
+		{
+			name:        "Nil Handlers Slice",
+			routeName:   "test-route",
+			path:        "/test",
+			handlers:    nil,
+			expectError: true,
+			errorMsg:    "at least one handler required",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // capture range variable
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route, err := newRoute(tt.routeName, tt.path, tt.handlers...)
+
+			if tt.expectError {
+				assert.Error(t, err, "should return error for invalid input")
+				assert.Nil(t, route, "should return nil route on error")
+				assert.Contains(
+					t,
+					err.Error(),
+					tt.errorMsg,
+					"error message should contain expected text",
+				)
+			} else {
+				assert.NoError(t, err, "should not return error for valid input")
+				assert.NotNil(t, route, "should return non-nil route")
+				assert.Equal(t, tt.path, route.Path, "route path should match input")
+				assert.Equal(t, len(tt.handlers), len(route.Handlers), "handler count should match")
 			}
 		})
 	}
@@ -89,10 +183,15 @@ func TestNewWildcardRoute(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Convert http.HandlerFunc to httpserver.HandlerFunc
+	convertedHandler := func(rp *RequestProcessor) {
+		testHandler(rp.Writer(), rp.Request())
+	}
+
 	tests := []struct {
 		name        string
 		prefix      string
-		handler     http.HandlerFunc
+		handler     any
 		testPath    string
 		expectError bool
 		errorMsg    string
@@ -100,28 +199,28 @@ func TestNewWildcardRoute(t *testing.T) {
 		{
 			name:        "Valid Wildcard Route with Slash",
 			prefix:      "/api/",
-			handler:     testHandler,
+			handler:     convertedHandler,
 			testPath:    "/api/users/123",
 			expectError: false,
 		},
 		{
 			name:        "Valid Wildcard Route without Slash",
 			prefix:      "/api",
-			handler:     testHandler,
+			handler:     convertedHandler,
 			testPath:    "/api/users/123",
 			expectError: false,
 		},
 		{
 			name:        "Valid Wildcard Route without Leading Slash",
 			prefix:      "api",
-			handler:     testHandler,
+			handler:     convertedHandler,
 			testPath:    "/api/users/123",
 			expectError: false,
 		},
 		{
 			name:        "Empty Prefix",
 			prefix:      "",
-			handler:     testHandler,
+			handler:     convertedHandler,
 			expectError: true,
 			errorMsg:    "prefix cannot be empty",
 		},
@@ -147,14 +246,13 @@ func TestNewWildcardRoute(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, route)
-				assert.Contains(t, route.name, "wildcard:")
-				assert.NotNil(t, route.Handler)
+				assert.NotEmpty(t, route.Handlers)
 
-				// Test the handler with a sample request
+				// Test the route using ServeHTTP method
 				req := httptest.NewRequest("GET", tt.testPath, nil)
 				w := httptest.NewRecorder()
 
-				route.Handler(w, req)
+				route.ServeHTTP(w, req)
 				resp := w.Result()
 				defer func() { assert.NoError(t, resp.Body.Close()) }()
 
@@ -172,13 +270,18 @@ func TestNewWildcardRoute(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}
 
-		route, err := NewWildcardRoute("/api/", pathCaptureHandler)
+		// Convert to httpserver.HandlerFunc
+		convertedPathHandler := func(rp *RequestProcessor) {
+			pathCaptureHandler(rp.Writer(), rp.Request())
+		}
+
+		route, err := NewWildcardRoute("/api/", convertedPathHandler)
 		require.NoError(t, err)
 
 		// Test with a request to a subpath
 		req := httptest.NewRequest("GET", "/api/users/123", nil)
 		w := httptest.NewRecorder()
-		route.Handler(w, req)
+		route.ServeHTTP(w, req)
 
 		// The handler should have received the stripped path
 		assert.Equal(t, "users/123", actualPath)
@@ -191,13 +294,18 @@ func TestNewWildcardRoute(t *testing.T) {
 			handlerCalled = true
 		}
 
-		route, err := NewWildcardRoute("/api/", handler)
+		// Convert to httpserver.HandlerFunc
+		convertedHandler := func(rp *RequestProcessor) {
+			handler(rp.Writer(), rp.Request())
+		}
+
+		route, err := NewWildcardRoute("/api/", convertedHandler)
 		require.NoError(t, err)
 
 		// Test with a request to a different path
 		req := httptest.NewRequest("GET", "/different/path", nil)
 		w := httptest.NewRecorder()
-		route.Handler(w, req)
+		route.ServeHTTP(w, req)
 
 		// The handler should not be called, and a 404 should be returned
 		assert.False(t, handlerCalled)
@@ -217,59 +325,27 @@ func TestRoute_Equal(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "Same routes",
-			route1: Route{
-				name:    "v1",
-				Path:    "/test",
-				Handler: sameHandler,
-			},
-			route2: Route{
-				name:    "v1",
-				Path:    "/test",
-				Handler: sameHandler,
-			},
+			name:     "Same routes",
+			route1:   testRoute(t, "v1", "/test", sameHandler),
+			route2:   testRoute(t, "v1", "/test", sameHandler),
 			expected: true,
 		},
 		{
-			name: "Different paths",
-			route1: Route{
-				name:    "v1",
-				Path:    "/test1",
-				Handler: sameHandler,
-			},
-			route2: Route{
-				name:    "v1",
-				Path:    "/test2",
-				Handler: sameHandler,
-			},
+			name:     "Different paths",
+			route1:   testRoute(t, "v1", "/test1", sameHandler),
+			route2:   testRoute(t, "v1", "/test2", sameHandler),
 			expected: false,
 		},
 		{
-			name: "Different names",
-			route1: Route{
-				name:    "v1",
-				Path:    "/test",
-				Handler: sameHandler,
-			},
-			route2: Route{
-				name:    "v2",
-				Path:    "/test",
-				Handler: sameHandler,
-			},
+			name:     "Different names",
+			route1:   testRoute(t, "v1", "/test", sameHandler),
+			route2:   testRoute(t, "v2", "/test", sameHandler),
 			expected: false,
 		},
 		{
-			name: "Different handlers",
-			route1: Route{
-				name:    "v1",
-				Path:    "/test",
-				Handler: func(w http.ResponseWriter, r *http.Request) {},
-			},
-			route2: Route{
-				name:    "v1",
-				Path:    "/test",
-				Handler: func(w http.ResponseWriter, r *http.Request) {},
-			},
+			name:     "Different handlers",
+			route1:   testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {}),
+			route2:   testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {}),
 			expected: true, // Route equality no longer compares handler functions
 		},
 	}
@@ -299,27 +375,15 @@ func TestRoutes_String(t *testing.T) {
 		{
 			name: "SingleRoute",
 			routes: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			expected: "Routes<Name: v1, Path: /test>",
 		},
 		{
 			name: "MultipleRoutes",
 			routes: Routes{
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
-				{
-					name:    "v2",
-					Path:    "/test2",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test1", func(w http.ResponseWriter, r *http.Request) {}),
+				testRoute(t, "v2", "/test2", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			expected: "Routes<Name: v1, Path: /test1, Name: v2, Path: /test2>",
 		},
@@ -357,80 +421,44 @@ func TestRoutes_Equal(t *testing.T) {
 		{
 			name: "SameRoutes",
 			routes1: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: sameHandler,
-				},
+				testRoute(t, "v1", "/test", sameHandler),
 			},
 			routes2: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: sameHandler,
-				},
+				testRoute(t, "v1", "/test", sameHandler),
 			},
 			expected: true,
 		},
 		{
 			name: "DifferentLengths",
 			routes1: Routes{
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
-				{
-					name:    "v2",
-					Path:    "/test2",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test1", func(w http.ResponseWriter, r *http.Request) {}),
+				testRoute(t, "v2", "/test2", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			routes2: Routes{
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test1", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			expected: false,
 		},
 		{
 			name: "DifferentPaths",
 			routes1: Routes{
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test1", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			routes2: Routes{
-				{
-					name:    "v1",
-					Path:    "/test2",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test2", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			expected: false,
 		},
 		{
 			name: "DifferentHandlers",
 			routes1: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			routes2: Routes{
-				{
-					name: "v1",
-					Path: "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {
-						_, err := w.Write([]byte("different"))
-						require.NoError(t, err)
-					},
-				},
+				testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {
+					_, err := w.Write([]byte("different"))
+					require.NoError(t, err)
+				}),
 			},
 			expected: true,
 		},
@@ -444,39 +472,19 @@ func TestRoutes_Equal(t *testing.T) {
 			name:    "OneNilRoute",
 			routes1: nil,
 			routes2: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
+				testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {}),
 			},
 			expected: false,
 		},
 		{
 			name: "Same Routes in Different Order",
 			routes1: Routes{
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: sameHandler,
-				},
-				{
-					name:    "v2",
-					Path:    "/test2",
-					Handler: sameHandler,
-				},
+				testRoute(t, "v1", "/test1", sameHandler),
+				testRoute(t, "v2", "/test2", sameHandler),
 			},
 			routes2: Routes{
-				{
-					name:    "v2",
-					Path:    "/test2",
-					Handler: sameHandler,
-				},
-				{
-					name:    "v1",
-					Path:    "/test1",
-					Handler: sameHandler,
-				},
+				testRoute(t, "v2", "/test2", sameHandler),
+				testRoute(t, "v1", "/test1", sameHandler),
 			},
 			expected: true,
 		},
@@ -492,49 +500,6 @@ func TestRoutes_Equal(t *testing.T) {
 	}
 }
 
-func TestApplyMiddlewares(t *testing.T) {
-	// Create a test handler
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("test response"))
-		if err != nil {
-			http.Error(w, "Failed to write response", http.StatusInternalServerError)
-			return
-		}
-	})
-
-	// Create middleware that adds headers
-	middleware1 := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Middleware-1", "applied")
-			next(w, r)
-		}
-	}
-
-	middleware2 := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Middleware-2", "applied")
-			next(w, r)
-		}
-	}
-
-	// Apply middlewares
-	wrappedHandler := applyMiddlewares(testHandler, middleware1, middleware2)
-
-	// Create a test request
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-
-	// Call the handler
-	wrappedHandler(w, req)
-
-	// Check the response
-	resp := w.Result()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "applied", resp.Header.Get("X-Middleware-1"))
-	assert.Equal(t, "applied", resp.Header.Get("X-Middleware-2"))
-}
-
 func TestNewRouteWithMiddleware(t *testing.T) {
 	t.Parallel()
 
@@ -548,27 +513,23 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 		}
 	})
 
-	// Create middleware that adds headers
-	middleware1 := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Middleware-1", "applied")
-			next(w, r)
-		}
-	})
+	// Create middleware that adds headers - using HandlerFunc type
+	middleware1 := func(rp *RequestProcessor) {
+		rp.Writer().Header().Set("X-Middleware-1", "applied")
+		rp.Next()
+	}
 
-	middleware2 := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Middleware-2", "applied")
-			next(w, r)
-		}
-	})
+	middleware2 := func(rp *RequestProcessor) {
+		rp.Writer().Header().Set("X-Middleware-2", "applied")
+		rp.Next()
+	}
 
 	tests := []struct {
 		name        string
 		routeName   string
 		path        string
 		handler     http.HandlerFunc
-		middlewares []middleware.Middleware
+		middlewares []HandlerFunc
 		expectError bool
 		errorMsg    string
 	}{
@@ -577,7 +538,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			routeName:   "test-route",
 			path:        "/test",
 			handler:     testHandler,
-			middlewares: []middleware.Middleware{middleware1, middleware2},
+			middlewares: []HandlerFunc{middleware1, middleware2},
 			expectError: false,
 		},
 		{
@@ -585,7 +546,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			routeName:   "test-route",
 			path:        "/test",
 			handler:     testHandler,
-			middlewares: []middleware.Middleware{},
+			middlewares: []HandlerFunc{},
 			expectError: false,
 		},
 		{
@@ -593,7 +554,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			routeName:   "",
 			path:        "/test",
 			handler:     testHandler,
-			middlewares: []middleware.Middleware{middleware1},
+			middlewares: []HandlerFunc{middleware1},
 			expectError: true,
 			errorMsg:    "name cannot be empty",
 		},
@@ -602,7 +563,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			routeName:   "test-route",
 			path:        "",
 			handler:     testHandler,
-			middlewares: []middleware.Middleware{middleware1},
+			middlewares: []HandlerFunc{middleware1},
 			expectError: true,
 			errorMsg:    "path cannot be empty",
 		},
@@ -611,7 +572,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			routeName:   "test-route",
 			path:        "/test",
 			handler:     nil,
-			middlewares: []middleware.Middleware{middleware1},
+			middlewares: []HandlerFunc{middleware1},
 			expectError: true,
 			errorMsg:    "handler cannot be nil",
 		},
@@ -621,7 +582,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 		tt := tt // capture range variable
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			route, err := NewRouteWithMiddleware(
+			route, err := NewRouteFromHandlerFunc(
 				tt.routeName,
 				tt.path,
 				tt.handler,
@@ -634,14 +595,13 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, route)
-				assert.Equal(t, tt.routeName, route.name)
 				assert.Equal(t, tt.path, route.Path)
-				assert.NotNil(t, route.Handler)
+				assert.NotEmpty(t, route.Handlers)
 
-				// Test the handler with a sample request to verify middleware applied
+				// Test the route using ServeHTTP method
 				req := httptest.NewRequest("GET", tt.path, nil)
 				w := httptest.NewRecorder()
-				route.Handler(w, req)
+				route.ServeHTTP(w, req)
 				resp := w.Result()
 				defer func() { assert.NoError(t, resp.Body.Close()) }()
 
@@ -669,23 +629,19 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middlewareA := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
-			return func(w http.ResponseWriter, r *http.Request) {
-				executionOrder = append(executionOrder, "middlewareA-before")
-				next(w, r)
-				executionOrder = append(executionOrder, "middlewareA-after")
-			}
-		})
+		middlewareA := func(rp *RequestProcessor) {
+			executionOrder = append(executionOrder, "middlewareA-before")
+			rp.Next()
+			executionOrder = append(executionOrder, "middlewareA-after")
+		}
 
-		middlewareB := middleware.Middleware(func(next http.HandlerFunc) http.HandlerFunc {
-			return func(w http.ResponseWriter, r *http.Request) {
-				executionOrder = append(executionOrder, "middlewareB-before")
-				next(w, r)
-				executionOrder = append(executionOrder, "middlewareB-after")
-			}
-		})
+		middlewareB := func(rp *RequestProcessor) {
+			executionOrder = append(executionOrder, "middlewareB-before")
+			rp.Next()
+			executionOrder = append(executionOrder, "middlewareB-after")
+		}
 
-		route, err := NewRouteWithMiddleware(
+		route, err := NewRouteFromHandlerFunc(
 			"order-test",
 			"/order-test",
 			testHandler,
@@ -696,7 +652,7 @@ func TestNewRouteWithMiddleware(t *testing.T) {
 
 		req := httptest.NewRequest("GET", "/order-test", nil)
 		w := httptest.NewRecorder()
-		route.Handler(w, req)
+		route.ServeHTTP(w, req)
 
 		// The expected order is: middlewareA before, middlewareB before, handler, middlewareB after, middlewareA after
 		expectedOrder := []string{

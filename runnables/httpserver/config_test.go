@@ -41,13 +41,9 @@ func TestConfigEqual(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {}
 
 	// Create base config for comparison
-	baseRoutes := Routes{
-		{
-			name:    "v1",
-			Path:    "/test",
-			Handler: handler,
-		},
-	}
+	route, err := NewRouteFromHandlerFunc("v1", "/test", handler)
+	require.NoError(t, err)
+	baseRoutes := Routes{*route}
 	baseConfig, err := NewConfig(":8080", baseRoutes,
 		WithDrainTimeout(30*time.Second),
 		WithReadTimeout(15*time.Second),
@@ -115,13 +111,11 @@ func TestConfigEqual(t *testing.T) {
 				ReadTimeout:  15 * time.Second,
 				WriteTimeout: 15 * time.Second,
 				IdleTimeout:  1 * time.Minute,
-				Routes: Routes{
-					{
-						name:    "v2",
-						Path:    "/test2",
-						Handler: handler,
-					},
-				},
+				Routes: func() Routes {
+					route, err := NewRouteFromHandlerFunc("v2", "/test2", handler)
+					require.NoError(t, err)
+					return Routes{*route}
+				}(),
 			},
 			expected: false,
 		},
@@ -167,13 +161,9 @@ func TestConfigGetMux(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}
 
-		routes := Routes{
-			{
-				name:    "test",
-				Path:    "/test",
-				Handler: handler,
-			},
-		}
+		route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+		require.NoError(t, err)
+		routes := Routes{*route}
 
 		config, err := NewConfig(":8080", routes, WithDrainTimeout(30*time.Second))
 		require.NoError(t, err)
@@ -215,10 +205,11 @@ func TestConfigGetMux(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 		}
 
-		routes := Routes{
-			{name: "route1", Path: "/route1", Handler: handler1},
-			{name: "route2", Path: "/route2", Handler: handler2},
-		}
+		route1, err := NewRouteFromHandlerFunc("route1", "/route1", handler1)
+		require.NoError(t, err)
+		route2, err := NewRouteFromHandlerFunc("route2", "/route2", handler2)
+		require.NoError(t, err)
+		routes := Routes{*route1, *route2}
 
 		config, err := NewConfig(":8080", routes, WithDrainTimeout(30*time.Second))
 		require.NoError(t, err)
@@ -616,13 +607,17 @@ func TestNewConfig(t *testing.T) {
 		{
 			name: "ValidConfig",
 			addr: ":8080",
-			routes: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
-			},
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
 			opts:        []ConfigOption{WithDrainTimeout(30 * time.Second)},
 			expectError: false,
 			expectedStr: "Config<addr=:8080, drainTimeout=30s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
@@ -638,13 +633,17 @@ func TestNewConfig(t *testing.T) {
 		{
 			name: "ZeroDrainTimeout",
 			addr: ":8080",
-			routes: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
-			},
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
 			opts:        []ConfigOption{WithDrainTimeout(0)},
 			expectError: false,
 			expectedStr: "Config<addr=:8080, drainTimeout=0s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
@@ -652,13 +651,17 @@ func TestNewConfig(t *testing.T) {
 		{
 			name: "NegativeDrainTimeout",
 			addr: ":8080",
-			routes: Routes{
-				{
-					name:    "v1",
-					Path:    "/test",
-					Handler: func(w http.ResponseWriter, r *http.Request) {},
-				},
-			},
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
 			opts:        []ConfigOption{WithDrainTimeout(-10 * time.Second)},
 			expectError: false,
 			expectedStr: "Config<addr=:8080, drainTimeout=-10s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
@@ -705,13 +708,9 @@ func TestWithConfigCopy(t *testing.T) {
 	}
 
 	// Create source config with custom settings
-	sourceRoutes := Routes{
-		{
-			name:    "source",
-			Path:    "/source",
-			Handler: handler,
-		},
-	}
+	sourceRoute, err := NewRouteFromHandlerFunc("source", "/source", handler)
+	require.NoError(t, err)
+	sourceRoutes := Routes{*sourceRoute}
 	sourceConfig, err := NewConfig(":8080", sourceRoutes,
 		WithDrainTimeout(45*time.Second),
 		WithReadTimeout(30*time.Second),
@@ -723,13 +722,9 @@ func TestWithConfigCopy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create destination routes
-	destRoutes := Routes{
-		{
-			name:    "dest",
-			Path:    "/dest",
-			Handler: handler,
-		},
-	}
+	destRoute, err := NewRouteFromHandlerFunc("dest", "/dest", handler)
+	require.NoError(t, err)
+	destRoutes := Routes{*destRoute}
 
 	// Test cases
 	tests := []struct {

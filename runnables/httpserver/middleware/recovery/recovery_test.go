@@ -1,26 +1,46 @@
-package middleware
+package recovery
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 )
+
+// setupRequest creates a basic HTTP request for testing
+func setupRequest(t *testing.T, method, path string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	return rec, req
+}
+
+// setupLogBuffer creates a handler that writes to a buffer for testing
+func setupLogBuffer(t *testing.T, level slog.Level) (*bytes.Buffer, slog.Handler) {
+	t.Helper()
+	buffer := &bytes.Buffer{}
+	handler := slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: level})
+	return buffer, handler
+}
 
 // executeHandlerWithRecovery runs the provided handler with the PanicRecovery middleware
 func executeHandlerWithRecovery(
 	t *testing.T,
 	handler http.HandlerFunc,
-	logger *slog.Logger,
+	logHandler slog.Handler,
 	rec *httptest.ResponseRecorder,
 	req *http.Request,
 ) {
 	t.Helper()
-	wrappedHandler := PanicRecovery(logger)(handler)
-	wrappedHandler(rec, req)
+	// Create a route with recovery middleware and the handler
+	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logHandler))
+	assert.NoError(t, err)
+	route.ServeHTTP(rec, req)
 }
 
 // createPanicHandler returns a handler that panics with the given message
@@ -43,14 +63,14 @@ func createSuccessHandler(t *testing.T) http.HandlerFunc {
 }
 
 func TestRecoveryMiddleware(t *testing.T) {
-	t.Run("recovers from panic with custom logger", func(t *testing.T) {
+	t.Run("recovers from panic with custom handler", func(t *testing.T) {
 		// Setup
-		logBuffer, logger := setupLogBuffer(t, slog.LevelError)
+		logBuffer, logHandler := setupLogBuffer(t, slog.LevelError)
 		rec, req := setupRequest(t, "GET", "/test")
 		handler := createPanicHandler(t, "test panic")
 
 		// Execute
-		executeHandlerWithRecovery(t, handler, logger, rec, req)
+		executeHandlerWithRecovery(t, handler, logHandler, rec, req)
 
 		// Verify response
 		resp := rec.Result()
@@ -67,29 +87,22 @@ func TestRecoveryMiddleware(t *testing.T) {
 		assert.Contains(t, logOutput, "method=GET")
 	})
 
-	t.Run("recovers from panic with nil logger (uses default)", func(t *testing.T) {
-		// Save and restore default logger
-		defaultLogger := slog.Default()
-		defer slog.SetDefault(defaultLogger)
-
-		// Setup with nil logger (will use default)
-		logBuffer, testLogger := setupLogBuffer(t, slog.LevelError)
-		slog.SetDefault(testLogger)
-
+	t.Run("recovers from panic silently with nil handler", func(t *testing.T) {
+		// Setup
 		rec, req := setupRequest(t, "POST", "/api/test")
-		handler := createPanicHandler(t, "test panic with default logger")
+		handler := createPanicHandler(t, "test panic with nil handler")
 
-		// Execute with nil logger
+		// Execute with nil handler - should recover silently
 		executeHandlerWithRecovery(t, handler, nil, rec, req)
 
-		// Verify response
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		// Verify response - should still return 500 error
+		resp := rec.Result()
+		body, err := io.ReadAll(resp.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+		assert.Equal(t, "Internal Server Error\n", string(body))
 
-		// Verify log output
-		logOutput := logBuffer.String()
-		assert.Contains(t, logOutput, "httpserver")
-		assert.Contains(t, logOutput, "HTTP handler panic recovered")
-		assert.Contains(t, logOutput, "test panic with default logger")
+		// No log verification since recovery should be silent
 	})
 
 	t.Run("passes through normal requests", func(t *testing.T) {
