@@ -35,7 +35,7 @@ func main() {
         fmt.Fprintf(w, "Status: OK")
     }
     
-    // Create routes from standard HTTP handlers
+    // Create routes from standard HTTP handlers (preferred method)
     indexRoute, _ := httpserver.NewRouteFromHandlerFunc("index", "/", indexHandler)
     statusRoute, _ := httpserver.NewRouteFromHandlerFunc("status", "/status", statusHandler)
     
@@ -221,6 +221,62 @@ config, _ := httpserver.NewConfig(
     httpserver.WithServerCreator(customServerCreator),
 )
 ```
+
+## Migration from Previous Versions
+
+### Deprecated Functions
+
+For backwards compatibility, the following functions are still supported but deprecated:
+
+- `NewRoute()` - Use `NewRouteFromHandlerFunc()` instead
+- `NewRouteWithMiddleware()` - Use `NewRouteFromHandlerFunc()` instead  
+- `NewWildcardRoute()` - Use `NewRouteFromHandlerFunc()` with `wildcard.New()` instead
+
+### Migrating Old Middleware
+
+If you have existing middleware using the old `func(http.HandlerFunc) http.HandlerFunc` pattern, you can use the adapter functions:
+
+```go
+// Old middleware pattern
+func OldMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // middleware logic
+        next(w, r)
+    }
+}
+
+// Adapting old middleware to new pattern
+oldMw := httpserver.AdaptMiddleware(httpserver.MiddlewareAdapter(OldMiddleware))
+
+// Use with new route creation
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api", 
+    "/api", 
+    handler,
+    oldMw, // adapted middleware
+)
+```
+
+### Wildcard Route Migration
+
+```go
+// Old approach (deprecated but still works)
+route, _ := httpserver.NewWildcardRoute("/api/", handler, middleware1, middleware2)
+
+// New approach (recommended)
+import "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
+
+route, _ := httpserver.NewRouteFromHandlerFunc(
+    "api",
+    "/api/*", 
+    handler,
+    wildcard.New("/api/"),
+    middleware1,
+    middleware2,
+)
+```
+
+The new approach provides better composability and follows the package's consistent middleware pattern.
 
 ## Examples
 

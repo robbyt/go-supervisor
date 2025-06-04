@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,42 +14,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildRoutes tests that routes are created correctly
-func TestBuildRoutes(t *testing.T) {
-	t.Parallel()
-
-	routes, err := buildRoutes()
-	require.NoError(t, err, "buildRoutes should not fail")
-	require.Len(t, routes, 3, "should have 3 routes")
-
-	// Test each route
-	for _, route := range routes {
-		// Create a test server for the route
-		req := httptest.NewRequest("GET", route.Path, nil)
-		rec := httptest.NewRecorder()
-
-		route.ServeHTTP(rec, req)
-
-		assert.Equal(t, http.StatusOK, rec.Code, "route %s should return 200", route.Path)
-		assert.NotEmpty(t, rec.Body.String(), "route %s should return content", route.Path)
-	}
-}
-
-// TestCreateHTTPServer tests that the HTTP server can be created
-func TestCreateHTTPServer(t *testing.T) {
+// TestRunServer tests that the HTTP server starts successfully
+func TestRunServer(t *testing.T) {
 	t.Parallel()
 
 	// Create a test logger that discards output
 	logHandler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})
 
-	// Build routes
-	routes, err := buildRoutes()
-	require.NoError(t, err, "Failed to build routes")
+	// Create a context with timeout for the test
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Create HTTP server
-	httpServer, err := createHTTPServer(routes, logHandler)
-	require.NoError(t, err, "Failed to create HTTP server")
-	require.NotNil(t, httpServer, "HTTP server should not be nil")
+	// Run the server
+	routes, err := buildRoutes(logHandler)
+	require.NoError(t, err, "Failed to build routes")
+	require.NotEmpty(t, routes, "Routes should not be empty")
+
+	sv, err := RunServer(ctx, logHandler, routes)
+	require.NoError(t, err, "RunServer should not return an error")
+	require.NotNil(t, sv, "Supervisor should not be nil")
+
+	// Start the server in a goroutine to avoid blocking the test
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sv.Run()
+	}()
+
+	// Give the server a moment to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Make a request to the server
+	resp, err := http.Get("http://localhost:8080/status")
+	require.NoError(t, err, "Failed to make GET request")
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "Failed to read response body")
+	assert.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "Status: OK\n", string(body))
+
+	// Stop the supervisor
+	sv.Shutdown()
+
+	// Check that Run() didn't return an error
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err, "Run() should not return an error")
+	case <-time.After(100 * time.Millisecond):
+		// This is expected - the server is still running
+	}
 }
 
 // TestRunServerInvalidPort tests error handling when an invalid port is specified
@@ -65,7 +77,7 @@ func TestRunServerInvalidPort(t *testing.T) {
 	defer cancel()
 
 	// Build routes - reuse the same routes from the main app
-	routes, err := buildRoutes()
+	routes, err := buildRoutes(logHandler)
 	require.NoError(t, err, "Failed to build routes")
 
 	// Create a config callback that uses an invalid port

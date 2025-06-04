@@ -191,7 +191,7 @@ func TestNewWildcardRoute(t *testing.T) {
 	tests := []struct {
 		name        string
 		prefix      string
-		handler     HandlerFunc
+		handler     any
 		testPath    string
 		expectError bool
 		errorMsg    string

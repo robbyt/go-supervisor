@@ -32,7 +32,7 @@ func getRestartTestPort(tb testing.TB) string {
 // createRestartTestHTTPConfig creates a test HTTP configuration with a specific route name
 func createRestartTestHTTPConfig(tb testing.TB, addr string, routeName string) *httpserver.Config {
 	tb.Helper()
-	route, err := httpserver.NewRoute(
+	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
 		routeName,
 		"/"+routeName,
 		func(w http.ResponseWriter, r *http.Request) {

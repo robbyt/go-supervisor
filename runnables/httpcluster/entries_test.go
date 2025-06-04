@@ -13,9 +13,13 @@ import (
 // createTestHTTPConfig creates a test httpserver config
 func createTestHTTPConfig(t *testing.T, addr string) *httpserver.Config {
 	t.Helper()
-	route, err := httpserver.NewRoute("test", "/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	route, err := httpserver.NewRoute( //nolint:staticcheck // testing deprecated function
+		"test",
+		"/",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
