@@ -9,6 +9,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func createTestRoute(t *testing.T, handler http.HandlerFunc) *httpserver.Route {
+	t.Helper()
+	route, err := httpserver.NewRouteFromHandlerFunc(
+		"test",
+		"/test",
+		handler,
+		New(),
+	)
+	assert.NoError(t, err)
+	return route
+}
+
 func TestJSONEnforcerMiddleware(t *testing.T) {
 	t.Parallel()
 
@@ -22,14 +34,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		// Create route with JSON enforcer middleware
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			textHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, textHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -53,13 +58,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			jsonHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, jsonHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -83,13 +82,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			errorHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, errorHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -112,13 +105,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			emptyHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, emptyHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -139,13 +126,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			notModifiedHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, notModifiedHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -164,13 +145,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			htmlHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, htmlHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -192,13 +167,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			arrayHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, arrayHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -222,13 +191,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			malformedHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, malformedHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -255,13 +218,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			multiWriteHandler,
-			New(),
-		)
-		assert.NoError(t, err)
+		route := createTestRoute(t, multiWriteHandler)
 
 		route.ServeHTTP(rec, req)
 
@@ -274,33 +231,39 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 			"all writes should be buffered and wrapped",
 		)
 	})
-}
 
-// Test compliance with the middleware framework
-func TestJSONEnforcerCompliance(t *testing.T) {
-	// This is a placeholder test that would import the compliance framework
-	// In practice, you would add this to runnables/httpserver/middleware/compliance_test.go
-	jsonMiddleware := New()
-
-	// Test basic compliance: calls Next()
-	t.Run("calls Next()", func(t *testing.T) {
+	t.Run("preserves headers from handler", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/test", nil)
 		rec := httptest.NewRecorder()
 
-		called := false
-		mockHandler := func(w http.ResponseWriter, r *http.Request) {
-			called = true
+		headerHandler := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Custom-Header", "test-value")
+			w.Header().Set("X-Another-Header", "another-value")
+			_, err := w.Write([]byte("Hello World"))
+			assert.NoError(t, err)
 		}
 
-		route, err := httpserver.NewRouteFromHandlerFunc(
-			"test",
-			"/test",
-			mockHandler,
-			jsonMiddleware,
-		)
-		assert.NoError(t, err)
-
+		route := createTestRoute(t, headerHandler)
 		route.ServeHTTP(rec, req)
-		assert.True(t, called, "should call the next handler")
+
+		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+		assert.Equal(t, "test-value", rec.Header().Get("X-Custom-Header"))
+		assert.Equal(t, "another-value", rec.Header().Get("X-Another-Header"))
+		assert.Contains(t, rec.Body.String(), `{"response":"Hello World"}`)
+	})
+
+	t.Run("handles empty response", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		emptyHandler := func(w http.ResponseWriter, r *http.Request) {
+			// Handler does nothing - no writes, no status
+		}
+
+		route := createTestRoute(t, emptyHandler)
+		route.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Empty(t, rec.Body.String(), "empty response should remain empty")
 	})
 }

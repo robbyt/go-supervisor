@@ -17,6 +17,5 @@ HTTP server cluster with automatic port allocation.
 ## Running
 
 ```bash
-cd examples/<name>
-go run main.go
+go run ./examples/<name>
 ```
