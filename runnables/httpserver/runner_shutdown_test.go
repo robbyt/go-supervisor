@@ -16,7 +16,7 @@ func TestStopServerFailures(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	t.Run("shutdown_timeout", func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	t.Run("successful_fsm_transitions", func(t *testing.T) {
@@ -274,7 +274,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	// Create a mock server that counts shutdown calls
@@ -340,7 +340,7 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	// Create a counting server to track shutdowns

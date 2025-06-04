@@ -50,7 +50,7 @@ func createTestRouteForMock(t *testing.T, path string) Route {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
-	route, err := NewRoute("test", path, handler)
+	route, err := NewRouteFromHandlerFunc("test", path, handler)
 	require.NoError(t, err)
 	return *route
 }
@@ -70,7 +70,7 @@ func TestReloadConfig_EdgeCases(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
-		route, err := NewRoute("test", "/", handler)
+		route, err := NewRouteFromHandlerFunc("test", "/", handler)
 		require.NoError(t, err)
 		config2, err := NewConfig(":8500", Routes{*route}, WithDrainTimeout(1*time.Second))
 		require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 		// Create initial config
 		listenPort := getAvailablePort(t, 8600)
 		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		initialRoutes := Routes{*route}
 
@@ -183,7 +183,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 
 		// Create a modified config for the reload
 		modifiedHandler := func(w http.ResponseWriter, r *http.Request) {}
-		modifiedRoute, err := NewRoute("v2", "/modified", modifiedHandler)
+		modifiedRoute, err := NewRouteFromHandlerFunc("v2", "/modified", modifiedHandler)
 		require.NoError(t, err)
 		modifiedRoutes := Routes{*modifiedRoute}
 

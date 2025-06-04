@@ -60,7 +60,7 @@ func main() {
             w.Write([]byte("Hello World"))
         })
         
-        route, _ := httpserver.NewRoute("hello", "/", handler)
+        route, _ := httpserver.NewRouteFromHandlerFunc("hello", "/", handler)
         config, _ := httpserver.NewConfig(":8080", httpserver.Routes{*route})
         
         cluster.configSiphon <- map[string]*httpserver.Config{
@@ -183,7 +183,7 @@ func main() {
             w.Write([]byte("API v1"))
         })
         
-        route, _ := httpserver.NewRoute("api", "/api", handler)
+        route, _ := httpserver.NewRouteFromHandlerFunc("api", "/api", handler)
         config, _ := httpserver.NewConfig(":8080", httpserver.Routes{*route})
         
         cluster.configSiphon <- map[string]*httpserver.Config{
@@ -197,7 +197,7 @@ func main() {
             w.Write([]byte("Admin"))
         })
         
-        adminRoute, _ := httpserver.NewRoute("admin", "/admin", adminHandler)
+        adminRoute, _ := httpserver.NewRouteFromHandlerFunc("admin", "/admin", adminHandler)
         adminConfig, _ := httpserver.NewConfig(":9090", httpserver.Routes{*adminRoute})
         
         cluster.configSiphon <- map[string]*httpserver.Config{

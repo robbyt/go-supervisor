@@ -53,7 +53,7 @@ func TestContextValuePropagation(t *testing.T) {
 	}
 
 	// Create a route with the test handler
-	route, err := NewRoute("test", "/test", handler)
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
 	// Get a unique port for this test

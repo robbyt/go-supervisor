@@ -19,7 +19,7 @@ func TestWithLogHandler(t *testing.T) {
 	customHandler := slog.NewTextHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})
 	// Create required route and config callback for Runner
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 	cfgCallback := func() (*Config, error) {
@@ -44,7 +44,7 @@ func TestWithConfig(t *testing.T) {
 	t.Parallel()
 	// Create a test server config
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/test-route", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/test-route", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 	testAddr := ":8765" // Use a specific port for identification
@@ -85,7 +85,7 @@ func TestWithServerCreator(t *testing.T) {
 	}
 	// Create required route and config callback for Runner
 	handler := func(w http.ResponseWriter, r *http.Request) {}
-	route, err := NewRoute("v1", "/", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
 	hConfig := Routes{*route}
 	testAddr := ":9876" // Use a specific port for identification

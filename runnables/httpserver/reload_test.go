@@ -25,7 +25,7 @@ func TestRapidReload(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
-	route, err := NewRoute("v1", "/", handler)
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
 	initialRoutes := Routes{*route}
 
@@ -148,7 +148,7 @@ func TestReload(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		routes := Routes{*route}
 
@@ -225,7 +225,7 @@ func TestReload(t *testing.T) {
 			_, err := w.Write([]byte("initial"))
 			require.NoError(t, err)
 		}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		routes := Routes{*route}
 
@@ -299,7 +299,7 @@ func TestReload(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		routes := Routes{*route}
 
@@ -355,7 +355,7 @@ func TestReload(t *testing.T) {
 		updatedHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted) // Different status code
 		}
-		updatedRoute, err := NewRoute("v1", "/updated", updatedHandler)
+		updatedRoute, err := NewRouteFromHandlerFunc("v1", "/updated", updatedHandler)
 		require.NoError(t, err)
 		updatedRoutes := Routes{*updatedRoute}
 
@@ -411,7 +411,7 @@ func TestReload(t *testing.T) {
 		// Create a config
 		listenPort := getAvailablePort(t, 8950)
 		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		routes := Routes{*route}
 
@@ -451,7 +451,7 @@ func TestReload(t *testing.T) {
 			_, err := w.Write([]byte("unchanged"))
 			require.NoError(t, err)
 		}
-		route, err := NewRoute("v1", "/", handler)
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
 		routes := Routes{*route}
 

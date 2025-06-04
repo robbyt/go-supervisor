@@ -51,29 +51,23 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		metricsMw,
 	}
 
-	// Convert HandlerFunc slice to any slice for deprecated function
-	commonMwAny := make([]any, len(commonMw))
-	for i, mw := range commonMw {
-		commonMwAny[i] = mw
-	}
-
 	// Create routes with common middleware attached to each
-	indexRoute, err := httpserver.NewRouteWithMiddleware( //nolint:staticcheck
+	indexRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"index",
 		"/",
 		indexHandler,
-		commonMwAny...,
+		commonMw...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create index route: %w", err)
 	}
 
 	// Status route to provide a health check
-	statusRoute, err := httpserver.NewRouteWithMiddleware( //nolint:staticcheck
+	statusRoute, err := httpserver.NewRouteFromHandlerFunc(
 		"status",
 		"/status",
 		statusHandler,
-		commonMwAny...,
+		commonMw...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create status route: %w", err)
