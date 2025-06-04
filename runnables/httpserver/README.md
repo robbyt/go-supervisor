@@ -170,7 +170,7 @@ Configuration changes take effect without dropping existing connections.
 
 The server reports its lifecycle state through the `Stateable` interface. States progress through:
 
-- "New" → "Booting" → "Running" → "Stopping" → "Stopped"
+"New" -> "Booting" -> "Running" -> "Stopping" -> "Stopped"
 
 Error states can occur at any point. Monitor state changes to coordinate with other services or implement health checks:
 
