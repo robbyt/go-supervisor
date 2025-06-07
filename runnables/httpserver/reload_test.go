@@ -83,11 +83,6 @@ func TestRapidReload(t *testing.T) {
 		return server.GetState() == finitestate.StatusRunning
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// Create context for state monitoring
-	stateCtx, stateCancel := context.WithCancel(t.Context())
-	defer stateCancel()
-	stateChan := server.GetStateChan(stateCtx)
-
 	// Perform rapid reloads
 	for range 10 {
 		// Force config change by updating cfgCallback's closure state
@@ -99,16 +94,7 @@ func TestRapidReload(t *testing.T) {
 	var finalState string
 	require.Eventually(t, func() bool {
 		finalState = server.GetState()
-		// Check both the state channel and the current state
-		select {
-		case state := <-stateChan:
-			// Capture the latest state change
-			finalState = state
-			return finitestate.StatusRunning == state || finitestate.StatusError == state
-		default:
-			// Check if we're already in a terminal state
-			return finalState == finitestate.StatusRunning || finalState == finitestate.StatusError
-		}
+		return finalState == finitestate.StatusRunning || finalState == finitestate.StatusError
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Log the final state for debugging purposes

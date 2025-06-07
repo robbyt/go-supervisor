@@ -32,21 +32,29 @@ type HttpServer interface {
 	Shutdown(ctx context.Context) error
 }
 
+type fsm interface {
+	GetState() string
+	GetStateChanWithTimeout(ctx context.Context) <-chan string
+	Transition(state string) error
+	SetState(state string) error
+	TransitionBool(state string) bool
+}
+
 // Runner implements an HTTP server with graceful shutdown, dynamic reconfiguration,
 // and state monitoring. It implements the Runnable, Reloadable, and Stateable
 // interfaces from the supervisor package.
 type Runner struct {
+	fsm            fsm
+	mutex          sync.RWMutex
 	name           string
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
-	mutex          sync.RWMutex
 
 	server          HttpServer
 	serverCloseOnce sync.Once
 	serverMutex     sync.RWMutex
 	serverErrors    chan error
 
-	fsm finitestate.Machine
 	// Set during Run()
 	ctx    context.Context
 	cancel context.CancelFunc

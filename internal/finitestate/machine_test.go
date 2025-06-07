@@ -37,11 +37,11 @@ func TestNew(t *testing.T) {
 func TestMachineInterface(t *testing.T) {
 	t.Parallel()
 
-	setup := func() Machine {
+	setup := func() *Machine {
 		handler := slog.NewTextHandler(os.Stdout, nil)
-		machine, err := New(handler)
+		m, err := New(handler)
 		require.NoError(t, err)
-		return machine
+		return m
 	}
 
 	t.Run("Transition changes state", func(t *testing.T) {

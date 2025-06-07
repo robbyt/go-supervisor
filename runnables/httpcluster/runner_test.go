@@ -102,10 +102,12 @@ func TestNewRunner(t *testing.T) {
 		require.NoError(t, err)
 
 		cfg := make(map[string]*httpserver.Config)
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer timeoutCancel()
 		select {
 		case runner.configSiphon <- cfg:
 			// we're good!
-		case <-time.After(100 * time.Millisecond):
+		case <-timeoutCtx.Done():
 			t.Fatal("Should be able to send config without blocking")
 		}
 
@@ -171,10 +173,12 @@ func TestRunnerBasicInterface(t *testing.T) {
 		assert.NotNil(t, stateChan)
 
 		// Should receive current state
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer timeoutCancel()
 		select {
 		case state := <-stateChan:
 			assert.Equal(t, finitestate.StatusNew, state)
-		case <-ctx.Done():
+		case <-timeoutCtx.Done():
 			t.Fatal("Should receive current state immediately")
 		}
 	})
@@ -203,10 +207,12 @@ func TestRunnerRun(t *testing.T) {
 		cancel()
 
 		// Should stop gracefully
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), time.Second)
+		defer timeoutCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 
@@ -233,10 +239,12 @@ func TestRunnerRun(t *testing.T) {
 		runner.Stop()
 
 		// Should stop gracefully
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), time.Second)
+		defer timeoutCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 	})
@@ -261,10 +269,12 @@ func TestRunnerRun(t *testing.T) {
 		close(runner.configSiphon)
 
 		// Should stop gracefully
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), time.Second)
+		defer timeoutCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 
@@ -297,10 +307,12 @@ func TestRunnerConfigUpdate(t *testing.T) {
 			"server1": createTestHTTPConfig(t, addr),
 		}
 
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer timeoutCancel()
 		select {
 		case runner.configSiphon <- configs:
 			// Config sent
-		case <-time.After(100 * time.Millisecond):
+		case <-timeoutCtx.Done():
 			t.Fatal("Should be able to send config")
 		}
 
@@ -313,10 +325,12 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		assert.True(t, runner.IsRunning())
 
 		cancel()
+		stopCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
+		defer stopCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-stopCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 	})
@@ -331,7 +345,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 			"server1": createTestHTTPConfig(t, addr),
 		}
 
-		err = runner.processConfigUpdate(context.Background(), configs)
+		err = runner.processConfigUpdate(t.Context(), configs)
 		assert.NoError(t, err) // Should not error, just ignore
 
 		assert.Equal(t, finitestate.StatusNew, runner.GetState())
@@ -373,10 +387,12 @@ func TestRunnerStateTransitions(t *testing.T) {
 
 		// Stop
 		runCancel()
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), time.Second)
+		defer timeoutCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 
@@ -434,6 +450,9 @@ func TestRunnerConcurrency(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(numConfigs)
 
+		testCtx, testCancel := context.WithCancel(t.Context())
+		defer testCancel()
+
 		for i := 0; i < numConfigs; i++ {
 			go func(i int) {
 				defer wg.Done()
@@ -443,10 +462,12 @@ func TestRunnerConcurrency(t *testing.T) {
 					"server1": createTestHTTPConfig(t, addr),
 				}
 
+				ctx, cancel := context.WithTimeout(testCtx, 100*time.Millisecond)
+				defer cancel()
 				select {
 				case runner.configSiphon <- configs:
 					// Sent successfully
-				case <-time.After(100 * time.Millisecond):
+				case <-ctx.Done():
 					// Timeout is ok for buffered channel
 				}
 			}(i)
@@ -507,7 +528,7 @@ func TestRunnerConcurrency(t *testing.T) {
 		runner, err := NewRunner()
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// Start runner
 		runErr := make(chan error, 1)
@@ -535,10 +556,12 @@ func TestRunnerConcurrency(t *testing.T) {
 		wg.Wait()
 
 		// Should stop gracefully
+		timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), time.Second)
+		defer timeoutCancel()
 		select {
 		case err := <-runErr:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 	})
@@ -560,7 +583,7 @@ func TestRunnerExecuteActions(t *testing.T) {
 		mockEntries := &MockEntriesManager{}
 		mockEntries.On("getPendingActions").Return([]string{}, []string{})
 
-		result := runner.executeActions(context.Background(), mockEntries)
+		result := runner.executeActions(t.Context(), mockEntries)
 		assert.Equal(t, mockEntries, result)
 
 		mockEntries.AssertExpectations(t)
@@ -593,7 +616,7 @@ func TestRunnerExecuteActions(t *testing.T) {
 		// Mock removeEntry in case the server fails to start (can happen when no run context)
 		mockEntries.On("removeEntry", "start1").Return(mockEntries).Maybe()
 
-		result := runner.executeActions(context.Background(), mockEntries)
+		result := runner.executeActions(t.Context(), mockEntries)
 		assert.Equal(t, mockEntries, result)
 
 		mockEntries.AssertExpectations(t)

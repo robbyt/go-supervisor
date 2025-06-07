@@ -59,23 +59,19 @@ func (m *MockStateMachine) GetState() string {
 
 // GetStateChan mocks the GetStateChan method of the stateMachine interface.
 // It returns a channel that emits the state machine's state whenever it changes.
-func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
+func (m *MockStateMachine) GetStateChanWithTimeout(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
 	return args.Get(0).(<-chan string)
 }
 
 // GetStateChanBuffer mocks the GetStateChanBuffer method of the stateMachine interface.
 // It returns a channel with a configurable buffer size that emits the state machine's state whenever it changes.
-func (m *MockStateMachine) GetStateChanBuffer(ctx context.Context, bufferSize int) <-chan string {
-	args := m.Called(ctx, bufferSize)
-	return args.Get(0).(<-chan string)
-}
 
 // MockRunner is a special version of Runner that allows direct manipulation
 // of config storage for testing purposes
 type MockRunner struct {
 	storedConfig *Config
-	mockFSM      finitestate.Machine
+	mockFSM      fsm
 	callback     func() (*Config, error)
 	ctx          context.Context
 	// Custom error responses for testing
@@ -84,10 +80,10 @@ type MockRunner struct {
 }
 
 // Creates a new MockRunner with mocked config storage
-func NewMockRunner(configCallback func() (*Config, error), fsm finitestate.Machine) *MockRunner {
+func NewMockRunner(configCallback func() (*Config, error), f fsm) *MockRunner {
 	return &MockRunner{
 		callback: configCallback,
-		mockFSM:  fsm,
+		mockFSM:  f,
 		ctx:      context.Background(),
 	}
 }
