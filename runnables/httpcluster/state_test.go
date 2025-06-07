@@ -26,10 +26,31 @@ func TestGetStateChan(t *testing.T) {
 	runner, err := NewRunner(WithStateChanBufferSize(5))
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	stateChan := runner.GetStateChan(ctx)
+	require.NotNil(t, stateChan)
+
+	// Should receive the initial state
+	select {
+	case state := <-stateChan:
+		assert.Equal(t, finitestate.StatusNew, state)
+	default:
+		t.Fatal("Expected to receive initial state")
+	}
+}
+
+func TestGetStateChanWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewRunner(WithStateChanBufferSize(5))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stateChan := runner.GetStateChanWithTimeout(ctx)
 	require.NotNil(t, stateChan)
 
 	// Should receive the initial state
@@ -90,16 +111,8 @@ func (m *MockFSMForStateError) GetState() string {
 	return args.String(0)
 }
 
-func (m *MockFSMForStateError) GetStateChan(ctx context.Context) <-chan string {
+func (m *MockFSMForStateError) GetStateChanWithTimeout(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
-	return args.Get(0).(<-chan string)
-}
-
-func (m *MockFSMForStateError) GetStateChanBuffer(
-	ctx context.Context,
-	bufferSize int,
-) <-chan string {
-	args := m.Called(ctx, bufferSize)
 	return args.Get(0).(<-chan string)
 }
 

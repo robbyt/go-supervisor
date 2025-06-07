@@ -294,3 +294,23 @@ func TestRequestProcessor_IntegrationWithRoute(t *testing.T) {
 		)
 	})
 }
+
+func TestRequestProcessor_SetWriter(t *testing.T) {
+	req := httptest.NewRequest("GET", "/test", nil)
+	originalRW := newResponseWriter(httptest.NewRecorder())
+	newRW := newResponseWriter(httptest.NewRecorder())
+
+	rp := &RequestProcessor{
+		writer:  originalRW,
+		request: req,
+	}
+
+	// Verify original writer
+	assert.Same(t, originalRW, rp.Writer(), "should initially have original writer")
+
+	// Set new writer
+	rp.SetWriter(newRW)
+
+	// Verify new writer is set
+	assert.Same(t, newRW, rp.Writer(), "should have new writer after SetWriter")
+}

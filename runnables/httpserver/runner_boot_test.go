@@ -1,9 +1,12 @@
 package httpserver
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,4 +29,65 @@ func TestBootConfigCreateFailure(t *testing.T) {
 	err = runner.boot()
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrCreateConfig)
+}
+
+// TestBootFailure tests various boot failure scenarios
+func TestBootFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Missing config callback", func(t *testing.T) {
+		_, err := NewRunner()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config callback is required")
+	})
+
+	t.Run("Config callback returns nil", func(t *testing.T) {
+		callback := func() (*Config, error) { return nil, nil }
+		runner, err := NewRunner(
+			WithConfigCallback(callback),
+		)
+
+		assert.Error(t, err)
+		assert.Nil(t, runner)
+		assert.ErrorIs(t, err, ErrConfigCallback)
+	})
+
+	t.Run("Config callback returns error", func(t *testing.T) {
+		callback := func() (*Config, error) { return nil, errors.New("failed to load config") }
+		runner, err := NewRunner(
+			WithConfigCallback(callback),
+		)
+
+		assert.Error(t, err)
+		assert.Nil(t, runner)
+		assert.ErrorIs(t, err, ErrConfigCallback)
+	})
+
+	t.Run("Server boot fails with invalid port", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {}
+		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
+		require.NoError(t, err)
+
+		callback := func() (*Config, error) {
+			return &Config{
+				ListenAddr:   "invalid-port",
+				DrainTimeout: 1 * time.Second,
+				Routes:       Routes{*route},
+			}, nil
+		}
+
+		runner, err := NewRunner(
+			WithConfigCallback(callback),
+		)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, runner)
+
+		// Test actual run
+		err = runner.Run(t.Context())
+		assert.Error(t, err)
+		// With our readiness probe, the error format is different but should be propagated properly
+		assert.ErrorIs(t, err, ErrServerBoot)
+		assert.Equal(t, finitestate.StatusError, runner.GetState())
+	})
 }

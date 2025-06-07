@@ -2,11 +2,13 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +25,7 @@ func TestServerReadinessProbe(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	port := getAvailablePort(t, 9100)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	callback := func() (*Config, error) {
 		return NewConfig(port, Routes{*route})
 	}

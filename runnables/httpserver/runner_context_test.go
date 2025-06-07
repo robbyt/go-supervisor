@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -57,7 +58,7 @@ func TestContextValuePropagation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get a unique port for this test
-	port := getAvailablePort(t, 8400)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 
 	// Create config with our test context
 	cfgCallback := func() (*Config, error) {

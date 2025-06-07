@@ -17,10 +17,20 @@ const (
 	defaultRestartDelay        = 10 * time.Millisecond
 )
 
+type fsm interface {
+	GetState() string
+	GetStateChanWithTimeout(ctx context.Context) <-chan string
+	Transition(state string) error
+	TransitionIfCurrentState(state string, targetState string) error
+	SetState(state string) error
+	TransitionBool(state string) bool
+}
+
 // Runner manages multiple HTTP server instances as a cluster.
 // It implements supervisor.Runnable and supervisor.Stateable interfaces.
 type Runner struct {
-	mu sync.RWMutex
+	fsm fsm
+	mu  sync.RWMutex
 
 	// runner factory creates the Runnable instances
 	runnerFactory       runnerFactory
@@ -36,9 +46,6 @@ type Runner struct {
 
 	// Current entries state
 	currentEntries entriesManager
-
-	// State management using FSM
-	fsm finitestate.Machine
 
 	// Options
 	logger              *slog.Logger

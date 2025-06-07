@@ -3,6 +3,7 @@ package finitestate
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/robbyt/go-fsm"
 )
@@ -21,35 +22,22 @@ const (
 // TypicalTransitions is a set of standard transitions for a finite state machine.
 var TypicalTransitions = fsm.TypicalTransitions
 
-// Machine defines the interface for the finite state machine that tracks
-// the HTTP server's lifecycle states. This abstraction allows for different
-// FSM implementations and simplifies testing.
-type Machine interface {
-	// Transition attempts to transition the state machine to the specified state.
-	Transition(state string) error
+// Machine is a wrapper around go-fsm.Machine that provides additional functionality.
+type Machine struct {
+	*fsm.Machine
+}
 
-	// TransitionBool attempts to transition the state machine to the specified state.
-	TransitionBool(state string) bool
-
-	// TransitionIfCurrentState attempts to transition the state machine to the specified state
-	TransitionIfCurrentState(currentState, newState string) error
-
-	// SetState sets the state of the state machine to the specified state.
-	SetState(state string) error
-
-	// GetState returns the current state of the state machine.
-	GetState() string
-
-	// GetStateChan returns a channel that emits the state machine's state whenever it changes.
-	// The channel is closed when the provided context is canceled.
-	GetStateChan(ctx context.Context) <-chan string
-
-	// GetStateChanBuffer returns a channel with a configurable buffer size that emits the state machine's state whenever it changes.
-	// The channel is closed when the provided context is canceled.
-	GetStateChanBuffer(ctx context.Context, bufferSize int) <-chan string
+// GetStateChan returns a channel that emits the state whenever it changes.
+// The channel is closed when the provided context is canceled.
+func (s *Machine) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+	return s.GetStateChanWithOptions(ctx, fsm.WithSyncTimeout(5*time.Second))
 }
 
 // New creates a new finite state machine with the specified logger using "standard" state transitions.
-func New(handler slog.Handler) (*fsm.Machine, error) {
-	return fsm.New(handler, StatusNew, TypicalTransitions)
+func New(handler slog.Handler) (*Machine, error) {
+	f, err := fsm.New(handler, StatusNew, TypicalTransitions)
+	if err != nil {
+		return nil, err
+	}
+	return &Machine{Machine: f}, nil
 }

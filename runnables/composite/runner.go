@@ -14,15 +14,23 @@ import (
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
 type ConfigCallback[T runnable] func() (*Config[T], error)
 
+type fsm interface {
+	GetState() string
+	GetStateChanWithTimeout(ctx context.Context) <-chan string
+	Transition(state string) error
+	TransitionIfCurrentState(state string, targetState string) error
+	SetState(state string) error
+}
+
 // Runner implements a component that manages multiple runnables of the same type
 // as a single unit. It satisfies the Runnable, Reloadable, and Stateable interfaces.
 type Runner[T runnable] struct {
+	fsm            fsm
 	configMu       sync.Mutex // Only used for getConfig()
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
 	runnablesMu sync.Mutex
-	fsm         finitestate.Machine
 
 	// will be set by Run()
 	ctx    context.Context

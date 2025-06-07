@@ -3,33 +3,16 @@ package httpcluster
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// getAvailablePort finds an available port by listening on :0 and returning the assigned port
-func getAvailablePort(t *testing.T) string {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer func() {
-		if err := listener.Close(); err != nil {
-			t.Logf("Failed to close listener: %v", err)
-		}
-	}()
-
-	_, port, err := net.SplitHostPort(listener.Addr().String())
-	require.NoError(t, err)
-
-	return "127.0.0.1:" + port
-}
 
 func TestIntegration_BasicServerLifecycle(t *testing.T) {
 	if testing.Short() {
@@ -67,7 +50,7 @@ func TestIntegration_BasicServerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	config, err := httpserver.NewConfig(
-		getAvailablePort(t),
+		networking.GetRandomListeningPort(t),
 		httpserver.Routes{*route},
 	)
 	require.NoError(t, err)
@@ -149,7 +132,10 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	config1, err := httpserver.NewConfig(getAvailablePort(t), httpserver.Routes{*route1})
+	config1, err := httpserver.NewConfig(
+		networking.GetRandomListeningPort(t),
+		httpserver.Routes{*route1},
+	)
 	require.NoError(t, err)
 
 	// Send initial config
@@ -182,7 +168,10 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	config2, err := httpserver.NewConfig(getAvailablePort(t), httpserver.Routes{*route2})
+	config2, err := httpserver.NewConfig(
+		networking.GetRandomListeningPort(t),
+		httpserver.Routes{*route2},
+	)
 	require.NoError(t, err)
 
 	updatedConfigs := map[string]*httpserver.Config{
@@ -202,7 +191,10 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "Server count should still be 1 after update")
 
 	// Add second server
-	config3, err := httpserver.NewConfig(getAvailablePort(t), httpserver.Routes{*route1})
+	config3, err := httpserver.NewConfig(
+		networking.GetRandomListeningPort(t),
+		httpserver.Routes{*route1},
+	)
 	require.NoError(t, err)
 
 	multiConfigs := map[string]*httpserver.Config{
@@ -282,7 +274,10 @@ func TestIntegration_StateReporting(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	config, err := httpserver.NewConfig(getAvailablePort(t), httpserver.Routes{*route})
+	config, err := httpserver.NewConfig(
+		networking.GetRandomListeningPort(t),
+		httpserver.Routes{*route},
+	)
 	require.NoError(t, err)
 
 	configs := map[string]*httpserver.Config{
@@ -390,7 +385,10 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		// Use port 0 to let OS assign available port
-		config, err := httpserver.NewConfig(getAvailablePort(t), httpserver.Routes{*route})
+		config, err := httpserver.NewConfig(
+			networking.GetRandomListeningPort(t),
+			httpserver.Routes{*route},
+		)
 		require.NoError(t, err)
 
 		configs := map[string]*httpserver.Config{
@@ -457,7 +455,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 	require.NoError(t, err)
 
 	config, err := httpserver.NewConfig(
-		getAvailablePort(t),
+		networking.GetRandomListeningPort(t),
 		httpserver.Routes{*route},
 	)
 	require.NoError(t, err)

@@ -34,7 +34,13 @@ func (r *Runner) GetState() string {
 // GetStateChan returns a channel that emits the HTTP server's state whenever it changes.
 // The channel is closed when the provided context is canceled.
 func (r *Runner) GetStateChan(ctx context.Context) <-chan string {
-	return r.fsm.GetStateChan(ctx)
+	return r.fsm.GetStateChanWithTimeout(ctx)
+}
+
+// GetStateChanWithTimeout returns a channel that emits state changes.
+// The channel is closed when the provided context is canceled.
+func (r *Runner) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+	return r.fsm.GetStateChanWithTimeout(ctx)
 }
 
 // IsRunning returns true if the HTTP server is currently running.
