@@ -2,11 +2,13 @@ package httpserver
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -172,7 +174,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 		}
 
 		// Create initial config
-		listenPort := getAvailablePort(t, 8600)
+		listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)

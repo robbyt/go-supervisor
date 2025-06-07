@@ -66,7 +66,7 @@ func testCompositeRaceCondition(t *testing.T) {
 	runner, err := NewRunner(callback)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	// Start runner
@@ -105,10 +105,12 @@ func testCompositeRaceCondition(t *testing.T) {
 	cancel()
 
 	// Wait for shutdown
+	timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer timeoutCancel()
 	select {
 	case err := <-runErr:
 		assert.NoError(t, err)
-	case <-time.After(5 * time.Second):
+	case <-timeoutCtx.Done():
 		t.Fatal("Composite did not shutdown within timeout")
 	}
 
@@ -155,7 +157,7 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 	assert.Equal(t, "New", runner.GetState())
 	assert.False(t, runner.IsRunning())
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	// Start runner
 	runErr := make(chan error, 1)
@@ -195,10 +197,12 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "Should transition to Stopping")
 
 	// Wait for shutdown
+	timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer timeoutCancel()
 	select {
 	case err := <-runErr:
 		assert.NoError(t, err)
-	case <-time.After(5 * time.Second):
+	case <-timeoutCtx.Done():
 		t.Fatal("Runner did not shutdown within timeout")
 	}
 

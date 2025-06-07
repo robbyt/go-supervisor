@@ -23,7 +23,7 @@ func TestIntegration_HttpClusterNoRaceCondition(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	const iterations = 5 // Test multiple times to catch race conditions
+	const iterations = 5
 
 	for i := 0; i < iterations; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -34,25 +34,20 @@ func TestIntegration_HttpClusterNoRaceCondition(t *testing.T) {
 
 func testHttpClusterRaceCondition(t *testing.T) {
 	t.Helper()
-	// Create httpcluster runner with real FSM
+
 	cluster, err := NewRunner()
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-
-	// Start cluster
 	runErr := make(chan error, 1)
 	go func() {
 		runErr <- cluster.Run(ctx)
 	}()
 
-	// Wait for cluster to be running
 	require.Eventually(t, func() bool {
 		return cluster.IsRunning()
 	}, 5*time.Second, 50*time.Millisecond, "Cluster should be running")
-
-	// Create test route
 	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
 		"/health",
@@ -64,14 +59,9 @@ func testHttpClusterRaceCondition(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Get available port
-	addr := getAvailablePort(t)
-
-	// Create httpserver config
+	addr := networking.GetRandomListeningPort(t)
 	config, err := httpserver.NewConfig(addr, httpserver.Routes{*route})
 	require.NoError(t, err)
-
-	// Send config to cluster
 	select {
 	case cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
 		"test-server": config,
@@ -80,24 +70,17 @@ func testHttpClusterRaceCondition(t *testing.T) {
 		t.Fatal("Failed to send config to cluster")
 	}
 
-	// Wait for server count to be 1
 	require.Eventually(t, func() bool {
 		return cluster.GetServerCount() == 1
 	}, 10*time.Second, 100*time.Millisecond, "Server should be added to cluster")
 
-	// CRITICAL TEST: Verify TCP connectivity is immediately available
-	// This tests if there's a race between cluster reporting server as ready
-	// and actual TCP readiness
 	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-	assert.NoError(t, err,
-		"RACE CONDITION DETECTED: Cluster reports server ready but TCP connection failed. "+
-			"This means cluster.waitForIsRunning() returned true before server was actually ready.")
+	assert.NoError(t, err, "TCP connection should succeed when cluster reports server ready")
 
 	if conn != nil {
 		require.NoError(t, conn.Close())
 	}
 
-	// Additional verification: HTTP request should work
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://" + addr + "/health")
 	assert.NoError(t, err, "HTTP request should succeed when cluster reports server ready")
@@ -107,22 +90,17 @@ func testHttpClusterRaceCondition(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	}
 
-	// Test server restart scenario - this is where race conditions often occur
 	t.Run("server_restart_race", func(t *testing.T) {
-		// Remove server
 		select {
 		case cluster.GetConfigSiphon() <- map[string]*httpserver.Config{}:
 		case <-time.After(1 * time.Second):
 			t.Fatal("Failed to send empty config")
 		}
 
-		// Wait for server to be removed
 		require.Eventually(t, func() bool {
 			return cluster.GetServerCount() == 0
 		}, 5*time.Second, 100*time.Millisecond, "Server should be removed")
-
-		// Re-add server with new port
-		newAddr := getAvailablePort(t)
+		newAddr := networking.GetRandomListeningPort(t)
 		newConfig, err := httpserver.NewConfig(newAddr, httpserver.Routes{*route})
 		require.NoError(t, err)
 
@@ -134,21 +112,17 @@ func testHttpClusterRaceCondition(t *testing.T) {
 			t.Fatal("Failed to send restart config")
 		}
 
-		// Wait for server to be re-added
 		require.Eventually(t, func() bool {
 			return cluster.GetServerCount() == 1
 		}, 10*time.Second, 100*time.Millisecond, "Server should be re-added")
 
-		// Immediately test TCP connectivity after restart
 		conn, err := net.DialTimeout("tcp", newAddr, 500*time.Millisecond)
-		assert.NoError(t, err,
-			"RESTART RACE CONDITION: Server restart reported complete but TCP not ready")
+		assert.NoError(t, err, "TCP connection should succeed immediately after restart")
 
 		if conn != nil {
 			require.NoError(t, conn.Close())
 		}
 
-		// HTTP should work immediately
 		resp, err := client.Get("http://" + newAddr + "/health")
 		assert.NoError(t, err, "HTTP should work immediately after restart")
 		if resp != nil {
@@ -156,14 +130,14 @@ func testHttpClusterRaceCondition(t *testing.T) {
 		}
 	})
 
-	// Stop cluster
 	cancel()
 
-	// Wait for shutdown
+	timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer timeoutCancel()
 	select {
 	case err := <-runErr:
 		assert.NoError(t, err)
-	case <-time.After(5 * time.Second):
+	case <-timeoutCtx.Done():
 		t.Fatal("Cluster did not shutdown within timeout")
 	}
 }
@@ -174,35 +148,27 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Create cluster
 	cluster, err := NewRunner()
 	require.NoError(t, err)
 
-	// Initial state
 	assert.Equal(t, "New", cluster.GetState())
 	assert.False(t, cluster.IsRunning())
 	assert.Equal(t, 0, cluster.GetServerCount())
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Start cluster
+	ctx, cancel := context.WithCancel(t.Context())
 	runErr := make(chan error, 1)
 	go func() {
 		runErr <- cluster.Run(ctx)
 	}()
 
-	// Should transition through states
 	assert.Eventually(t, func() bool {
 		state := cluster.GetState()
 		return state == "Booting" || state == "Running"
 	}, 2*time.Second, 50*time.Millisecond, "Should transition to Booting")
 
-	// Wait for Running state
 	assert.Eventually(t, func() bool {
 		return cluster.IsRunning() && cluster.GetState() == "Running"
 	}, 5*time.Second, 50*time.Millisecond, "Should transition to Running")
-
-	// Add multiple servers to test scaling
 	route1, err := httpserver.NewRouteFromHandlerFunc("svc1", "/svc1",
 		func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -219,8 +185,8 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 		})
 	require.NoError(t, err)
 
-	addr1 := getAvailablePort(t)
-	addr2 := getAvailablePort(t)
+	addr1 := networking.GetRandomListeningPort(t)
+	addr2 := networking.GetRandomListeningPort(t)
 
 	config1, err := httpserver.NewConfig(addr1, httpserver.Routes{*route1})
 	require.NoError(t, err)
@@ -228,7 +194,6 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	config2, err := httpserver.NewConfig(addr2, httpserver.Routes{*route2})
 	require.NoError(t, err)
 
-	// Add both servers
 	select {
 	case cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
 		"service1": config1,
@@ -238,12 +203,9 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 		t.Fatal("Failed to send configs")
 	}
 
-	// Wait for both servers
 	require.Eventually(t, func() bool {
 		return cluster.GetServerCount() == 2
 	}, 10*time.Second, 100*time.Millisecond, "Both servers should start")
-
-	// Test both endpoints immediately
 	client := &http.Client{Timeout: 1 * time.Second}
 
 	resp1, err := client.Get("http://" + addr1 + "/svc1")
@@ -256,7 +218,6 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
 	assert.NoError(t, resp2.Body.Close())
 
-	// Scale down to one server
 	select {
 	case cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
 		"service1": config1,
@@ -265,42 +226,36 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 		t.Fatal("Failed to send scale-down config")
 	}
 
-	// Wait for scale down
 	require.Eventually(t, func() bool {
 		return cluster.GetServerCount() == 1
 	}, 5*time.Second, 100*time.Millisecond, "Should scale down to 1 server")
-
-	// Service1 should still work
 	resp1, err = client.Get("http://" + addr1 + "/svc1")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp1.StatusCode)
 	assert.NoError(t, resp1.Body.Close())
 
-	// Service2 should be unreachable
 	resp2, err = client.Get("http://" + addr2 + "/svc2")
 	if err == nil && resp2 != nil {
 		assert.NoError(t, resp2.Body.Close())
 	}
 	assert.Error(t, err, "Service2 should be stopped")
 
-	// Stop cluster
 	cancel()
 
-	// Should transition to stopping/stopped
 	assert.Eventually(t, func() bool {
 		state := cluster.GetState()
 		return state == "Stopping" || state == "Stopped"
 	}, 2*time.Second, 50*time.Millisecond, "Should transition to Stopping")
 
-	// Wait for shutdown
+	timeoutCtx, timeoutCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer timeoutCancel()
 	select {
 	case err := <-runErr:
 		assert.NoError(t, err)
-	case <-time.After(5 * time.Second):
+	case <-timeoutCtx.Done():
 		t.Fatal("Cluster did not shutdown within timeout")
 	}
 
-	// Final state
 	assert.Eventually(t, func() bool {
 		return cluster.GetState() == "Stopped"
 	}, 1*time.Second, 10*time.Millisecond, "Should be Stopped")

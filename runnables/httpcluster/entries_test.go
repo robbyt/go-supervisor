@@ -66,21 +66,19 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 
 		entries := newEntries(configs)
 
-		assert.Equal(t, 2, entries.count())
+		assert.Equal(t, 2, entries.count(), "Should have 2 entries")
 
-		// Both servers should be marked for start
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 2)
-		assert.Len(t, toStop, 0)
-		assert.Contains(t, toStart, "server1")
-		assert.Contains(t, toStart, "server2")
+		assert.Len(t, toStart, 2, "Both servers should be marked for start")
+		assert.Len(t, toStop, 0, "No servers should be marked for stop")
+		assert.Contains(t, toStart, "server1", "server1 should be marked for start")
+		assert.Contains(t, toStart, "server2", "server2 should be marked for start")
 
-		// Check individual entries
 		entry1 := entries.get("server1")
-		require.NotNil(t, entry1)
-		assert.Equal(t, "server1", entry1.id)
-		assert.Equal(t, actionStart, entry1.action)
-		assert.Nil(t, entry1.runner)
+		require.NotNil(t, entry1, "server1 entry should exist")
+		assert.Equal(t, "server1", entry1.id, "Entry should have correct ID")
+		assert.Equal(t, actionStart, entry1.action, "Entry should be marked for start")
+		assert.Nil(t, entry1.runner, "New entry should not have runtime state")
 	})
 
 	t.Run("empty previous state", func(t *testing.T) {
@@ -129,7 +127,7 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 		entry := entries.get("server1")
 		require.NotNil(t, entry)
 		assert.Equal(t, actionStop, entry.action)
-		assert.NotNil(t, entry.runner) // Runtime state preserved for stopping
+		assert.NotNil(t, entry.runner, "Runtime state should be preserved for stopping")
 	})
 
 	t.Run("remove non-running server", func(t *testing.T) {
@@ -245,26 +243,28 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		desiredEntries := newEntries(configs)
 		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
-		// Should have both stop and start entries
-		assert.Equal(t, 2, entries.count())
+		assert.Equal(t, 2, entries.count(), "Config change should create stop and start entries")
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 1)
 		assert.Len(t, toStop, 1)
 
-		// Check stop entry (with :stop suffix)
 		assert.Contains(t, toStop, "server1:stop")
 		stopEntry := entries.get("server1:stop")
 		require.NotNil(t, stopEntry)
 		assert.Equal(t, actionStop, stopEntry.action)
-		assert.Equal(t, ":8001", stopEntry.config.ListenAddr) // Old config preserved
+		assert.Equal(
+			t,
+			":8001",
+			stopEntry.config.ListenAddr,
+			"Stop entry should preserve old config",
+		)
 
-		// Check start entry (original id)
 		assert.Contains(t, toStart, "server1")
 		startEntry := entries.get("server1")
 		require.NotNil(t, startEntry)
 		assert.Equal(t, actionStart, startEntry.action)
-		assert.Equal(t, ":8002", startEntry.config.ListenAddr) // New config
-		assert.Equal(t, "server1", startEntry.id)              // Original ID preserved
+		assert.Equal(t, ":8002", startEntry.config.ListenAddr, "Start entry should have new config")
+		assert.Equal(t, "server1", startEntry.id, "Start entry should preserve original ID")
 	})
 
 	t.Run("config change non-running server", func(t *testing.T) {
@@ -286,8 +286,7 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		desiredEntries := newEntries(configs)
 		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
-		// Should just update config and mark for start
-		assert.Equal(t, 1, entries.count())
+		assert.Equal(t, 1, entries.count(), "Non-running server config change should just update")
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 1)
 		assert.Len(t, toStop, 0)
@@ -296,7 +295,7 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		entry := entries.get("server1")
 		require.NotNil(t, entry)
 		assert.Equal(t, actionStart, entry.action)
-		assert.Equal(t, ":8002", entry.config.ListenAddr) // New config
+		assert.Equal(t, ":8002", entry.config.ListenAddr, "Entry should have updated config")
 	})
 
 	t.Run("config unchanged", func(t *testing.T) {
@@ -308,7 +307,7 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		}
 
 		configs := map[string]*httpserver.Config{
-			"server1": config, // Same config object
+			"server1": config,
 		}
 
 		desiredEntries := newEntries(configs)
@@ -355,27 +354,22 @@ func TestEntriesCommit(t *testing.T) {
 
 		committed := entries.commit()
 
-		// Should have 3 servers (stop entry removed)
-		assert.Equal(t, 3, committed.count())
+		assert.Equal(t, 3, committed.count(), "Stop entries should be removed after commit")
 
-		// Check kept entry
 		keepEntry := committed.get("keep")
-		require.NotNil(t, keepEntry)
-		assert.Equal(t, actionNone, keepEntry.action)
+		require.NotNil(t, keepEntry, "Keep entry should remain")
+		assert.Equal(t, actionNone, keepEntry.action, "Keep entry should have no action")
 
-		// Check stopped entry is gone
-		assert.Nil(t, committed.get("stop"))
+		assert.Nil(t, committed.get("stop"), "Stop entry should be removed")
 
-		// Check started entry
 		startEntry := committed.get("start")
-		require.NotNil(t, startEntry)
-		assert.Equal(t, actionNone, startEntry.action)
+		require.NotNil(t, startEntry, "Start entry should remain")
+		assert.Equal(t, actionNone, startEntry.action, "Start entry action should be reset")
 
-		// Check restarted entry
 		restartEntry := committed.get("restart")
-		require.NotNil(t, restartEntry)
-		assert.Equal(t, "restart", restartEntry.id)
-		assert.Equal(t, actionNone, restartEntry.action)
+		require.NotNil(t, restartEntry, "Restart entry should remain")
+		assert.Equal(t, "restart", restartEntry.id, "Restart entry should preserve ID")
+		assert.Equal(t, actionNone, restartEntry.action, "Restart entry action should be reset")
 	})
 }
 
@@ -402,11 +396,10 @@ func TestEntriesSetRuntime(t *testing.T) {
 		entry := updated.get("server1")
 		require.NotNil(t, entry)
 		assert.Equal(t, ctx, entry.ctx)
-		assert.Equal(t, actionStart, entry.action) // Action preserved
+		assert.Equal(t, actionStart, entry.action, "Action should be preserved")
 
-		// Original entries unchanged
 		originalEntry := entries.get("server1")
-		assert.Nil(t, originalEntry.ctx)
+		assert.Nil(t, originalEntry.ctx, "Original entries should be unchanged")
 	})
 
 	t.Run("set runtime for non-existing entry", func(t *testing.T) {
@@ -447,11 +440,10 @@ func TestEntriesClearRuntime(t *testing.T) {
 		require.NotNil(t, entry)
 		assert.Nil(t, entry.ctx)
 		assert.Nil(t, entry.cancel)
-		assert.Equal(t, actionStop, entry.action) // Action preserved
+		assert.Equal(t, actionStop, entry.action, "Action should be preserved")
 
-		// Original entries unchanged
 		originalEntry := entries.get("server1")
-		assert.NotNil(t, originalEntry.ctx)
+		assert.NotNil(t, originalEntry.ctx, "Original entries should be unchanged")
 	})
 
 	t.Run("clear runtime for non-existing entry", func(t *testing.T) {
@@ -565,7 +557,6 @@ func TestEntriesImmutability(t *testing.T) {
 
 func TestComplexScenarios(t *testing.T) {
 	t.Run("multiple changes in one update", func(t *testing.T) {
-		// Previous state: 3 servers running
 		previous := &entries{
 			servers: map[string]*serverEntry{
 				"keep": createTestServerEntry(t, "keep", createTestHTTPConfig(t, ":8001"), true),
@@ -584,39 +575,38 @@ func TestComplexScenarios(t *testing.T) {
 			},
 		}
 
-		// New config: keep one, remove one, change one, add one
 		configs := map[string]*httpserver.Config{
-			"keep":   createTestHTTPConfig(t, ":8001"), // Unchanged
-			"change": createTestHTTPConfig(t, ":8004"), // Changed port
-			"add":    createTestHTTPConfig(t, ":8005"), // New server
-			// "remove" not in new config
+			"keep":   createTestHTTPConfig(t, ":8001"),
+			"change": createTestHTTPConfig(t, ":8004"),
+			"add":    createTestHTTPConfig(t, ":8005"),
 		}
 
 		desiredEntries := newEntries(configs)
 		entries := previous.buildPendingEntries(desiredEntries).(*entries)
 
-		// Should have 5 entries: keep(none) + remove(stop) + change(stop) + change:new(start) + add(start)
-		assert.Equal(t, 5, entries.count())
+		assert.Equal(
+			t,
+			5,
+			entries.count(),
+			"Should have entries for keep, remove(stop), change(stop), change(start), add(start)",
+		)
 
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 2) // change:new + add
-		assert.Len(t, toStop, 2)  // remove + change
-
-		// Verify specific entries
+		assert.Len(t, toStart, 2, "Should start changed server and new server")
+		assert.Len(t, toStop, 2, "Should stop removed server and old changed server")
 		assert.Equal(t, actionNone, entries.get("keep").action)
 		assert.Equal(t, actionStop, entries.get("remove").action)
 		assert.Equal(t, actionStop, entries.get("change:stop").action)
 		assert.Equal(t, actionStart, entries.get("change").action)
 		assert.Equal(t, actionStart, entries.get("add").action)
 
-		// After commit, should have 3 servers
 		committed := entries.commit()
-		assert.Equal(t, 3, committed.count())
-		assert.NotNil(t, committed.get("keep"))
-		assert.NotNil(t, committed.get("change"))
-		assert.NotNil(t, committed.get("add"))
-		assert.Nil(t, committed.get("remove"))
-		assert.Nil(t, committed.get("change:stop"))
+		assert.Equal(t, 3, committed.count(), "After commit should have 3 running servers")
+		assert.NotNil(t, committed.get("keep"), "Keep server should remain")
+		assert.NotNil(t, committed.get("change"), "Changed server should remain")
+		assert.NotNil(t, committed.get("add"), "Added server should remain")
+		assert.Nil(t, committed.get("remove"), "Removed server should be gone")
+		assert.Nil(t, committed.get("change:stop"), "Stop entry should be removed")
 	})
 }
 
@@ -652,7 +642,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 		entry := entries["server1"]
 		require.NotNil(t, entry)
 		assert.Equal(t, actionStop, entry.action)
-		assert.NotNil(t, entry.runner) // Runtime state preserved for stopping
+		assert.NotNil(t, entry.runner, "Runtime state should be preserved for stopping")
 	})
 
 	t.Run("remove non-running server", func(t *testing.T) {
@@ -663,7 +653,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 		)
 
 		assert.Len(t, entries, 0)
-		assert.Len(t, keys, 0) // Nothing yielded for non-running servers
+		assert.Len(t, keys, 0, "Nothing should be yielded for non-running servers")
 	})
 
 	t.Run("nil old entry", func(t *testing.T) {
@@ -672,7 +662,7 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 		)
 
 		assert.Len(t, entries, 0)
-		assert.Len(t, keys, 0) // Nothing yielded for nil entries
+		assert.Len(t, keys, 0, "Nothing should be yielded for nil entries")
 	})
 }
 
@@ -693,7 +683,7 @@ func TestProcessExistingServer_ConfigUnchanged(t *testing.T) {
 		require.NotNil(t, entry)
 		assert.Equal(t, actionNone, entry.action)
 		assert.Equal(t, config, entry.config)
-		assert.NotNil(t, entry.runner) // Runtime state preserved
+		assert.NotNil(t, entry.runner, "Runtime state should be preserved")
 	})
 
 	t.Run("non-running server unchanged", func(t *testing.T) {
@@ -711,7 +701,7 @@ func TestProcessExistingServer_ConfigUnchanged(t *testing.T) {
 		require.NotNil(t, entry)
 		assert.Equal(t, actionNone, entry.action)
 		assert.Equal(t, config, entry.config)
-		assert.Nil(t, entry.runner) // No runtime state
+		assert.Nil(t, entry.runner, "Non-running server should have no runtime state")
 	})
 }
 
@@ -730,20 +720,18 @@ func TestProcessExistingServer_ConfigChanged(t *testing.T) {
 		assert.Contains(t, keys, "server1:stop")
 		assert.Contains(t, keys, "server1")
 
-		// Check stop entry
 		stopEntry := entries["server1:stop"]
-		require.NotNil(t, stopEntry)
-		assert.Equal(t, actionStop, stopEntry.action)
-		assert.Equal(t, oldConfig, stopEntry.config) // Preserves old config
-		assert.NotNil(t, stopEntry.runner)
+		require.NotNil(t, stopEntry, "Stop entry should exist")
+		assert.Equal(t, actionStop, stopEntry.action, "Stop entry should have stop action")
+		assert.Equal(t, oldConfig, stopEntry.config, "Stop entry should preserve old config")
+		assert.NotNil(t, stopEntry.runner, "Stop entry should have runtime state")
 
-		// Check start entry
 		startEntry := entries["server1"]
-		require.NotNil(t, startEntry)
-		assert.Equal(t, actionStart, startEntry.action)
-		assert.Equal(t, newConfig, startEntry.config) // Has new config
-		assert.Equal(t, "server1", startEntry.id)
-		assert.Nil(t, startEntry.runner) // No runtime state yet
+		require.NotNil(t, startEntry, "Start entry should exist")
+		assert.Equal(t, actionStart, startEntry.action, "Start entry should have start action")
+		assert.Equal(t, newConfig, startEntry.config, "Start entry should have new config")
+		assert.Equal(t, "server1", startEntry.id, "Start entry should preserve server ID")
+		assert.Nil(t, startEntry.runner, "Start entry should not have runtime state yet")
 	})
 
 	t.Run("non-running server config changed", func(t *testing.T) {
@@ -779,7 +767,7 @@ func TestProcessExistingServer_IteratorBehavior(t *testing.T) {
 		var yielded []string
 		iterator(func(key string, entry *serverEntry) bool {
 			yielded = append(yielded, key)
-			return false // Stop after first yield
+			return false
 		})
 
 		assert.Len(t, yielded, 1)
@@ -793,7 +781,6 @@ func TestProcessExistingServer_IteratorBehavior(t *testing.T) {
 
 		iterator := processExistingServer("server1", oldEntry, newConfig)
 
-		// Manually collect all entries
 		entries := make(map[string]*serverEntry)
 		for key, entry := range iterator {
 			entries[key] = entry
@@ -826,7 +813,6 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 	t.Run("nil desired config vs empty config", func(t *testing.T) {
 		oldEntry := createTestServerEntry(t, "server1", createTestHTTPConfig(t, ":8001"), true)
 
-		// nil config should trigger removal
 		entries1, _ := collectEntries(
 			t, processExistingServer("server1", oldEntry, nil),
 		)
@@ -838,7 +824,6 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 		config := createTestHTTPConfig(t, ":8001")
 		oldEntry := createTestServerEntry(t, "server1", config, true)
 
-		// Same config reference should be detected as unchanged
 		entries, _ := collectEntries(
 			t, processExistingServer("server1", oldEntry, config),
 		)
@@ -851,7 +836,6 @@ func TestProcessExistingServer_EdgeCases(t *testing.T) {
 		config2 := createTestHTTPConfig(t, ":8002")
 		oldEntry := createTestServerEntry(t, "server1", config1, true)
 
-		// Different configs should trigger restart
 		entries, keys := collectEntries(
 			t, processExistingServer("server1", oldEntry, config2),
 		)

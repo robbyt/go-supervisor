@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +22,7 @@ func TestRapidReload(t *testing.T) {
 	t.Parallel()
 
 	// Setup initial configuration
-	initialPort := getAvailablePort(t, 8500)
+	initialPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
@@ -130,7 +131,7 @@ func TestReload(t *testing.T) {
 
 	t.Run("Reload fails when boot fails", func(t *testing.T) {
 		// Setup mock server with custom behavior
-		initialPort := getAvailablePort(t, 8000)
+		initialPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
@@ -203,7 +204,7 @@ func TestReload(t *testing.T) {
 
 	t.Run("Reload fails when config callback returns error", func(t *testing.T) {
 		// Setup initial configuration
-		initialPort := getAvailablePort(t, 8000)
+		initialPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handlerCalled := false
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			handlerCalled = true
@@ -281,7 +282,7 @@ func TestReload(t *testing.T) {
 
 	t.Run("Reload fails when transition to Reloading state fails", func(t *testing.T) {
 		// Setup initial configuration
-		initialPort := getAvailablePort(t, 8000)
+		initialPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
@@ -337,7 +338,7 @@ func TestReload(t *testing.T) {
 		require.Equal(t, initialPort, initialCfg.ListenAddr)
 
 		// Create an updated configuration
-		updatedPort := getAvailablePort(t, 9000)
+		updatedPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		updatedHandler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted) // Different status code
 		}
@@ -395,7 +396,7 @@ func TestReload(t *testing.T) {
 
 	t.Run("Reload with no prior config loads new config", func(t *testing.T) {
 		// Create a config
-		listenPort := getAvailablePort(t, 8950)
+		listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
@@ -429,7 +430,7 @@ func TestReload(t *testing.T) {
 
 	t.Run("Reload with unchanged configuration should skip reload", func(t *testing.T) {
 		// Setup initial configuration
-		initialPort := getAvailablePort(t, 8000)
+		initialPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handlerCalled := false
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			handlerCalled = true

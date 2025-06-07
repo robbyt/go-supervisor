@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -35,7 +36,7 @@ func TestCustomServerCreator(t *testing.T) {
 	routes := Routes{*route}
 
 	// Use a unique port to avoid conflicts
-	listenAddr := getAvailablePort(t, 8500)
+	listenAddr := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 
 	// Create a callback that generates the config with our custom server creator
 	cfgCallback := func() (*Config, error) {
@@ -140,7 +141,7 @@ func TestServerLifecycle(t *testing.T) {
 	t.Parallel()
 
 	// Use unique port numbers for parallel tests
-	listenPort := getAvailablePort(t, 8800)
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	handler := func(w http.ResponseWriter, r *http.Request) {}
 	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 	require.NoError(t, err)
@@ -204,7 +205,7 @@ func TestString(t *testing.T) {
 
 	t.Run("with config", func(t *testing.T) {
 		// Use a unique port
-		listenPort := getAvailablePort(t, 8700)
+		listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
@@ -248,7 +249,7 @@ func TestString(t *testing.T) {
 
 	t.Run("with config and name", func(t *testing.T) {
 		// Use a unique port
-		listenPort := getAvailablePort(t, 8700)
+		listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		handler := func(w http.ResponseWriter, r *http.Request) {}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)

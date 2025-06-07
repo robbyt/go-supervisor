@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,7 @@ func TestStopServerFailures(t *testing.T) {
 			},
 		}
 
-		port := getAvailablePort(t, 8300)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route}, WithDrainTimeout(10*time.Millisecond))
 		}
@@ -50,7 +51,7 @@ func TestStopServerFailures(t *testing.T) {
 			shutdownErr: customErr,
 		}
 
-		port := getAvailablePort(t, 8400)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -69,7 +70,7 @@ func TestStopServerFailures(t *testing.T) {
 	t.Run("config_nil_uses_default_timeout", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 8500)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -118,7 +119,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("successful_fsm_transitions", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 8900)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -148,7 +149,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 			shutdownErr: customErr,
 		}
 
-		port := getAvailablePort(t, 9000)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -176,7 +177,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("duplicate_stopping_transition_succeeds", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 9100)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -208,7 +209,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("initial_fsm_transition_error_continues_shutdown", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 9200)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -231,7 +232,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	})
 
 	t.Run("shutdown_when_server_nil", func(t *testing.T) {
-		port := getAvailablePort(t, 9300)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -283,7 +284,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 	mockServer := &mockCountingServer{}
 
 	// Set up a config callback
-	port := getAvailablePort(t, 8700)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	cfgCallback := func() (*Config, error) {
 		return NewConfig(port, Routes{*route})
 	}
@@ -349,7 +350,7 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	mockServer := &mockCountingServer{}
 
 	// Set up a config callback
-	port := getAvailablePort(t, 8800)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	cfgCallback := func() (*Config, error) {
 		return NewConfig(port, Routes{*route})
 	}
@@ -399,7 +400,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	const drainTimeout = 1 * time.Second
 
 	// Use unique port to avoid conflicts
-	listenPort := getAvailablePort(t, 9200)
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	started := make(chan struct{})
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -481,7 +482,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 	const drainTimeout = 3 * time.Second
 
 	// Use unique port to avoid conflicts
-	listenPort := getAvailablePort(t, 9000)
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	started := make(chan struct{})
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		close(started)
