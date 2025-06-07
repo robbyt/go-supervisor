@@ -3,6 +3,7 @@ package composite
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/runnables/mocks"
@@ -263,4 +264,154 @@ func TestCompositeRunner_GetStringWithNilConfig(t *testing.T) {
 
 	// Verify it shows nil config
 	assert.Equal(t, "CompositeRunner<nil>", str)
+}
+
+// TestGetStateChanWithTimeout tests the GetStateChanWithTimeout method
+func TestGetStateChanWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Create mock runnable
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("String").Return("runnable1").Maybe()
+
+	// Create entries
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: mockRunnable, Config: nil},
+	}
+
+	// Create config callback
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", entries)
+	}
+
+	// Create runner
+	runner, err := NewRunner(configCallback)
+	require.NoError(t, err)
+
+	t.Run("provides state updates with timeout", func(t *testing.T) {
+		// Create context with cancel
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// Get state channel with timeout
+		stateCh := runner.GetStateChanWithTimeout(ctx)
+		require.NotNil(t, stateCh)
+
+		// Should receive initial state
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateCh:
+				return state == "New"
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Should receive initial state")
+
+		// Transition to a new state
+		err = runner.fsm.Transition("Booting")
+		require.NoError(t, err)
+
+		// Should receive updated state
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateCh:
+				return state == "Booting"
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Should receive Booting state")
+
+		// Cancel context and verify channel closes
+		cancel()
+
+		assert.Eventually(t, func() bool {
+			_, open := <-stateCh
+			return !open
+		}, 1*time.Second, 10*time.Millisecond, "Channel should close when context is canceled")
+	})
+
+	t.Run("multiple channels work independently", func(t *testing.T) {
+		// Create separate contexts
+		ctx1, cancel1 := context.WithCancel(t.Context())
+		ctx2, cancel2 := context.WithCancel(t.Context())
+		defer cancel1()
+		defer cancel2()
+
+		// Get multiple state channels
+		stateCh1 := runner.GetStateChanWithTimeout(ctx1)
+		stateCh2 := runner.GetStateChanWithTimeout(ctx2)
+		require.NotNil(t, stateCh1)
+		require.NotNil(t, stateCh2)
+
+		// Drain any initial states from both channels
+		select {
+		case <-stateCh1:
+		default:
+		}
+		select {
+		case <-stateCh2:
+		default:
+		}
+
+		// Transition state
+		err = runner.fsm.Transition("Running")
+		require.NoError(t, err)
+
+		// Both channels should receive the update
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateCh1:
+				return state == "Running"
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "First channel should receive state update")
+
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateCh2:
+				return state == "Running"
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Second channel should receive state update")
+
+		// Cancel only first context
+		cancel1()
+
+		// First channel should close, second should remain open
+		assert.Eventually(t, func() bool {
+			_, open := <-stateCh1
+			return !open
+		}, 1*time.Second, 10*time.Millisecond, "First channel should close")
+
+		// Second channel should still be open and receive new state
+		err = runner.fsm.Transition("Stopping")
+		require.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateCh2:
+				return state == "Stopping"
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Second channel should still receive updates")
+	})
+
+	t.Run("channel closes on context timeout", func(t *testing.T) {
+		// Create context with short timeout
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		// Get state channel
+		stateCh := runner.GetStateChanWithTimeout(ctx)
+		require.NotNil(t, stateCh)
+
+		// Channel should close when context times out
+		assert.Eventually(t, func() bool {
+			_, open := <-stateCh
+			return !open
+		}, 100*time.Millisecond, 10*time.Millisecond, "Channel should close on context timeout")
+	})
 }

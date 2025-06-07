@@ -136,7 +136,7 @@ func TestMachineInterface(t *testing.T) {
 		assert.Equal(t, StatusBooting, machine.GetState())
 
 		// Set up context with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
 		// Set up the channel to receive state updates
@@ -196,5 +196,138 @@ func TestTypicalTransitions(t *testing.T) {
 		assert.Equal(t, fsm.StatusStopped, StatusStopped)
 		assert.Equal(t, fsm.StatusError, StatusError)
 		assert.Equal(t, fsm.StatusUnknown, StatusUnknown)
+	})
+}
+
+func TestGetStateChanWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	setup := func() *Machine {
+		handler := slog.NewTextHandler(os.Stdout, nil)
+		m, err := New(handler)
+		require.NoError(t, err)
+		return m
+	}
+
+	t.Run("provides state updates with timeout", func(t *testing.T) {
+		machine := setup()
+
+		// Set up context
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// Get state channel with timeout
+		stateChan := machine.GetStateChanWithTimeout(ctx)
+		require.NotNil(t, stateChan)
+
+		// Should receive initial state
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan:
+				return state == StatusNew
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Should receive initial state")
+
+		// Transition to Booting and verify state update
+		err := machine.Transition(StatusBooting)
+		require.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan:
+				return state == StatusBooting
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Should receive Booting state")
+
+		// Transition to Running and verify state update
+		err = machine.Transition(StatusRunning)
+		require.NoError(t, err)
+
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan:
+				return state == StatusRunning
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Should receive Running state")
+
+		// Cancel context and verify channel closes
+		cancel()
+
+		assert.Eventually(t, func() bool {
+			_, open := <-stateChan
+			return !open
+		}, 1*time.Second, 10*time.Millisecond, "Channel should close when context is canceled")
+	})
+
+	t.Run("channel closes when context is canceled", func(t *testing.T) {
+		machine := setup()
+
+		// Set up context with timeout
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		// Get state channel with timeout
+		stateChan := machine.GetStateChanWithTimeout(ctx)
+		require.NotNil(t, stateChan)
+
+		// Wait for context to timeout
+		assert.Eventually(t, func() bool {
+			_, open := <-stateChan
+			return !open
+		}, 200*time.Millisecond, 10*time.Millisecond, "Channel should close when context times out")
+	})
+
+	t.Run("multiple channels can be created", func(t *testing.T) {
+		machine := setup()
+
+		// Set up context
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// Get multiple state channels
+		stateChan1 := machine.GetStateChanWithTimeout(ctx)
+		stateChan2 := machine.GetStateChanWithTimeout(ctx)
+		require.NotNil(t, stateChan1)
+		require.NotNil(t, stateChan2)
+		assert.NotEqual(t, stateChan1, stateChan2, "Should create different channel instances")
+
+		// Drain any initial states from both channels
+		select {
+		case <-stateChan1:
+		default:
+		}
+		select {
+		case <-stateChan2:
+		default:
+		}
+
+		// Transition and verify both channels receive updates
+		err := machine.Transition(StatusBooting)
+		require.NoError(t, err)
+
+		// Both channels should receive the state update
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan1:
+				return state == StatusBooting
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "First channel should receive state update")
+
+		assert.Eventually(t, func() bool {
+			select {
+			case state := <-stateChan2:
+				return state == StatusBooting
+			default:
+				return false
+			}
+		}, 1*time.Second, 10*time.Millisecond, "Second channel should receive state update")
 	})
 }
