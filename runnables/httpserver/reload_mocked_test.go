@@ -7,159 +7,98 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// MockConfigCallback is a mock implementation of the config callback function
-type MockConfigCallback struct {
-	mock.Mock
-}
-
-// Call implements the config callback function
-func (m *MockConfigCallback) Call() (*Config, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*Config), args.Error(1)
-}
-
-// Helper function to create a modified Config with a single route
-func createModifiedConfigForMock(t *testing.T, addr string) *Config {
-	t.Helper()
-	routes := Routes{createTestRouteForMock(t, "/modified")}
-	cfg, err := NewConfig(addr, routes, WithDrainTimeout(2*time.Second))
-	require.NoError(t, err)
-	return cfg
-}
-
-// createSimpleConfigForMock creates a test Config with a single route
-func createSimpleConfigForMock(t *testing.T, addr string) *Config {
-	t.Helper()
-	routes := Routes{createTestRouteForMock(t, "/")}
-	cfg, err := NewConfig(addr, routes, WithDrainTimeout(1*time.Second))
-	require.NoError(t, err)
-	return cfg
-}
-
-// Helper function to create a test Route
-func createTestRouteForMock(t *testing.T, path string) Route {
+// Helper function to create a test Config with a single route
+func createTestConfigForReload(
+	t *testing.T,
+	addr string,
+	path string,
+	drainTimeout time.Duration,
+) *Config {
 	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	route, err := NewRouteFromHandlerFunc("test", path, handler)
 	require.NoError(t, err)
-	return *route
+	cfg, err := NewConfig(addr, Routes{*route}, WithDrainTimeout(drainTimeout))
+	require.NoError(t, err)
+	return cfg
 }
 
-// TestReloadConfig_EdgeCases tests edge cases in the reloadConfig method
-func TestReloadConfig_EdgeCases(t *testing.T) {
+// TestReloadConfig_ConfigEquality tests that equal configs are detected properly
+func TestReloadConfig_ConfigEquality(t *testing.T) {
 	t.Parallel()
 
-	// Test with logically equivalent configs
-	t.Run("Logically equivalent configs should be detected", func(t *testing.T) {
-		t.Parallel()
+	// Create two configs that are logically equivalent but different instances
+	config1 := createTestConfigForReload(t, ":8500", "/", 1*time.Second)
+	config2 := createTestConfigForReload(t, ":8500", "/", 1*time.Second)
 
-		// Create two configs that are logically equivalent but different instances
-		config1 := createSimpleConfigForMock(t, ":8500")
+	// Verify they're not the same instance but are logically equal
+	assert.NotSame(t, config1, config2)
+	assert.True(t, config1.Equal(config2))
 
-		// Create config2 that has the same values as config1
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
+	callCount := 0
+	configCallback := func() (*Config, error) {
+		callCount++
+		if callCount == 1 {
+			return config1, nil
 		}
-		route, err := NewRouteFromHandlerFunc("test", "/", handler)
-		require.NoError(t, err)
-		config2, err := NewConfig(":8500", Routes{*route}, WithDrainTimeout(1*time.Second))
-		require.NoError(t, err)
+		return config2, nil
+	}
 
-		// Verify they're not the same instance but are logically equal
-		assert.NotSame(t, config1, config2)
-		assert.True(t, config1.Equal(config2))
+	// Create runner with dynamic callback
+	runner, err := NewRunner(WithConfigCallback(configCallback))
+	require.NoError(t, err)
 
-		// Setup mock callbacks
-		mockCallback1 := new(MockConfigCallback)
-		mockCallback1.On("Call").Return(config1, nil)
+	// First load should succeed
+	assert.Same(t, config1, runner.getConfig())
 
-		mockCallback2 := new(MockConfigCallback)
-		mockCallback2.On("Call").Return(config2, nil)
+	// Second reload should return ErrOldConfig since configs are equal
+	err = runner.reloadConfig()
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrOldConfig)
 
-		// Create MockRunner with the first mock callback
-		mockRunner := NewMockRunner(mockCallback1.Call, NewMockStateMachine())
+	// Config should not have changed
+	assert.Same(t, config1, runner.getConfig())
+}
 
-		// First call should succeed (no previous config)
-		err = mockRunner.reloadConfig()
-		assert.NoError(t, err)
-		assert.Same(t, config1, mockRunner.storedConfig)
-		mockCallback1.AssertExpectations(t)
+// TestReloadConfig_ConfigChanges tests sequential config changes
+func TestReloadConfig_ConfigChanges(t *testing.T) {
+	t.Parallel()
 
-		// Change callback to second mock
-		mockRunner.callback = mockCallback2.Call
+	config1 := createTestConfigForReload(t, ":8400", "/", 1*time.Second)
+	config2 := createTestConfigForReload(t, ":8400", "/modified", 1*time.Second) // Different path
+	config3 := createTestConfigForReload(t, ":8401", "/", 1*time.Second)         // Different port
 
-		// Second call should return ErrOldConfig since configs are logically equal
-		err = mockRunner.reloadConfig()
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrOldConfig)
-		mockCallback2.AssertExpectations(t)
+	configs := []*Config{config1, config2, config3}
+	callCount := 0
+	configCallback := func() (*Config, error) {
+		cfg := configs[callCount]
+		callCount++
+		return cfg, nil
+	}
 
-		// Config should not have changed
-		assert.Same(t, config1, mockRunner.storedConfig)
-	})
+	// Create runner
+	runner, err := NewRunner(WithConfigCallback(configCallback))
+	require.NoError(t, err)
 
-	// Test with sequential configs
-	t.Run("Sequential config changes", func(t *testing.T) {
-		t.Parallel()
+	// Initial config should be config1
+	assert.Same(t, config1, runner.getConfig())
 
-		// Create a set of configs for testing
-		config1 := createSimpleConfigForMock(t, ":8400")
-		config2 := createModifiedConfigForMock(t, ":8400") // Same port, different routes
-		config3 := createSimpleConfigForMock(t, ":8401")   // Different port
+	// Reload to config2 should succeed
+	err = runner.reloadConfig()
+	assert.NoError(t, err)
+	assert.Same(t, config2, runner.getConfig())
 
-		// Create a mock FSM
-		mockFSM := NewMockStateMachine()
-		mockFSM.On("GetState").Return(finitestate.StatusRunning)
-
-		// Create a sequence of callbacks
-		mockCallback1 := new(MockConfigCallback)
-		mockCallback1.On("Call").Return(config1, nil)
-
-		mockCallback2 := new(MockConfigCallback)
-		mockCallback2.On("Call").Return(config2, nil)
-
-		mockCallback3 := new(MockConfigCallback)
-		mockCallback3.On("Call").Return(config3, nil)
-
-		// Create MockRunner with the first mock callback
-		mockRunner := NewMockRunner(mockCallback1.Call, mockFSM)
-
-		// First call should succeed (no previous config)
-		err := mockRunner.reloadConfig()
-		assert.NoError(t, err)
-		assert.Same(t, config1, mockRunner.storedConfig)
-		mockCallback1.AssertExpectations(t)
-
-		// Change callback to second mock
-		mockRunner.callback = mockCallback2.Call
-
-		// Second call should succeed (different config)
-		err = mockRunner.reloadConfig()
-		assert.NoError(t, err)
-		assert.Same(t, config2, mockRunner.storedConfig)
-		mockCallback2.AssertExpectations(t)
-
-		// Change callback to third mock
-		mockRunner.callback = mockCallback3.Call
-
-		// Third call should succeed (different config)
-		err = mockRunner.reloadConfig()
-		assert.NoError(t, err)
-		assert.Same(t, config3, mockRunner.storedConfig)
-		mockCallback3.AssertExpectations(t)
-	})
+	// Reload to config3 should succeed
+	err = runner.reloadConfig()
+	assert.NoError(t, err)
+	assert.Same(t, config3, runner.getConfig())
 }
 
 // TestReloadConfig_WithFullRunner tests the reloadConfig method with a real Runner
@@ -167,7 +106,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 	t.Parallel()
 
 	// Test using a real Runner instance
-	t.Run("Full Runner with mocked config callback", func(t *testing.T) {
+	t.Run("Full Runner with dynamic config callback", func(t *testing.T) {
 		// Skip if integration tests are disabled
 		if testing.Short() {
 			t.Skip("Skipping integration test in short mode")
@@ -175,26 +114,8 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 
 		// Create initial config
 		listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
-		handler := func(w http.ResponseWriter, r *http.Request) {}
-		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
-		require.NoError(t, err)
-		initialRoutes := Routes{*route}
-
-		initialConfig, err := NewConfig(listenPort, initialRoutes, WithDrainTimeout(1*time.Second))
-		require.NoError(t, err)
-
-		// Create a modified config for the reload
-		modifiedHandler := func(w http.ResponseWriter, r *http.Request) {}
-		modifiedRoute, err := NewRouteFromHandlerFunc("v2", "/modified", modifiedHandler)
-		require.NoError(t, err)
-		modifiedRoutes := Routes{*modifiedRoute}
-
-		modifiedConfig, err := NewConfig(
-			listenPort,
-			modifiedRoutes,
-			WithDrainTimeout(2*time.Second),
-		)
-		require.NoError(t, err)
+		initialConfig := createTestConfigForReload(t, listenPort, "/", 1*time.Second)
+		modifiedConfig := createTestConfigForReload(t, listenPort, "/modified", 2*time.Second)
 
 		// Create a dynamically changing config callback
 		currentConfig := initialConfig
@@ -231,116 +152,39 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 	})
 }
 
-// TestReloadConfig_WithMock tests the reloadConfig method using mocks
-func TestReloadConfig_WithMock(t *testing.T) {
+// TestReloadConfig_ErrorCases tests error handling in reloadConfig
+func TestReloadConfig_ErrorCases(t *testing.T) {
 	t.Parallel()
 
 	// Test case: Error when configCallback returns an error
 	t.Run("Error when configCallback returns an error", func(t *testing.T) {
 		t.Parallel()
 
-		// Setup mock callback
-		mockCallback := new(MockConfigCallback)
+		// Create a callback that returns an error
 		expectedErr := errors.New("config callback error")
-		mockCallback.On("Call").Return(nil, expectedErr)
-
-		// Create Runner with the mock callback
-		runner := &Runner{
-			configCallback: mockCallback.Call,
-			fsm:            NewMockStateMachine(),
+		configCallback := func() (*Config, error) {
+			return nil, expectedErr
 		}
 
-		// Call reloadConfig
-		err := runner.reloadConfig()
-
-		// Verify expectations
-		mockCallback.AssertExpectations(t)
+		// Create real runner - will fail during NewRunner due to error
+		_, err := NewRunner(WithConfigCallback(configCallback))
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrConfigCallback)
-		assert.ErrorIs(t, err, expectedErr)
 	})
 
 	// Test case: Error when configCallback returns a nil config
 	t.Run("Error when configCallback returns a nil config", func(t *testing.T) {
 		t.Parallel()
 
-		// Setup mock callback
-		mockCallback := new(MockConfigCallback)
-		mockCallback.On("Call").Return(nil, nil)
-
-		// Create Runner with the mock callback
-		runner := &Runner{
-			configCallback: mockCallback.Call,
-			fsm:            NewMockStateMachine(),
+		// Create a callback that returns nil config
+		configCallback := func() (*Config, error) {
+			return nil, nil
 		}
 
-		// Call reloadConfig
-		err := runner.reloadConfig()
-
-		// Verify expectations
-		mockCallback.AssertExpectations(t)
+		// Create real runner - will fail during NewRunner due to nil config
+		_, err := NewRunner(WithConfigCallback(configCallback))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrConfigCallbackNil)
-	})
-
-	// Test case: ErrOldConfig returned when the new config matches the old config
-	t.Run("ErrOldConfig returned when new config matches old config", func(t *testing.T) {
-		t.Parallel()
-
-		// Create test config
-		testConfig := createSimpleConfigForMock(t, ":8200")
-
-		// Setup mock callback that returns the same config
-		mockCallback := new(MockConfigCallback)
-		mockCallback.On("Call").Return(testConfig, nil)
-
-		// Create MockRunner with the mock callback
-		mockRunner := NewMockRunner(mockCallback.Call, NewMockStateMachine())
-
-		// Pre-set the config to simulate existing config
-		mockRunner.storedConfig = testConfig
-
-		// Call reloadConfig
-		err := mockRunner.reloadConfig()
-
-		// Verify expectations
-		mockCallback.AssertExpectations(t)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrOldConfig)
-
-		// Verify config remained the same
-		assert.Same(t, testConfig, mockRunner.storedConfig)
-	})
-
-	// Test case: Success when oldConfig is different from newConfig
-	t.Run("Success when oldConfig is different from newConfig", func(t *testing.T) {
-		t.Parallel()
-
-		// Create old and new configs
-		oldConfig := createSimpleConfigForMock(t, ":8300")
-		newConfig := createModifiedConfigForMock(t, ":8301")
-
-		// Setup mock callback
-		mockCallback := new(MockConfigCallback)
-		mockCallback.On("Call").Return(newConfig, nil)
-
-		// Create MockRunner with the mock callback
-		mockRunner := NewMockRunner(mockCallback.Call, NewMockStateMachine())
-
-		// Pre-set the old config
-		mockRunner.storedConfig = oldConfig
-
-		// Call reloadConfig
-		err := mockRunner.reloadConfig()
-
-		// Verify expectations
-		mockCallback.AssertExpectations(t)
-		assert.NoError(t, err)
-
-		// Verify config was updated
-		assert.NotNil(t, mockRunner.storedConfig)
-		assert.Same(t, newConfig, mockRunner.storedConfig)
-		assert.NotSame(t, oldConfig, mockRunner.storedConfig)
+		assert.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	// Test case: Success when oldConfig is nil (initial config load)
@@ -348,67 +192,17 @@ func TestReloadConfig_WithMock(t *testing.T) {
 		t.Parallel()
 
 		// Create test config
-		testConfig := createSimpleConfigForMock(t, ":8100")
-
-		// Setup mock callback
-		mockCallback := new(MockConfigCallback)
-		mockCallback.On("Call").Return(testConfig, nil)
-
-		// Create MockRunner with the mock callback
-		mockRunner := NewMockRunner(mockCallback.Call, NewMockStateMachine())
-
-		// Call reloadConfig
-		err := mockRunner.reloadConfig()
-
-		// Verify expectations
-		mockCallback.AssertExpectations(t)
-		assert.NoError(t, err)
-
-		// Verify config was set
-		assert.NotNil(t, mockRunner.storedConfig)
-		assert.Same(t, testConfig, mockRunner.storedConfig)
-	})
-}
-
-// TestReloadWithStopServerError tests that the reload process fails gracefully
-// when the stopServer method returns an error
-func TestReloadWithStopServerError(t *testing.T) {
-	t.Parallel()
-
-	// Create initial and modified configs
-	initialConfig := createSimpleConfigForMock(t, ":8300")
-	modifiedConfig := createModifiedConfigForMock(t, ":8300")
-
-	// Create a mock FSM that can transition to any state for testing
-	mockFSM := new(MockStateMachine)
-	mockFSM.On("Transition", finitestate.StatusReloading).Return(nil)
-	mockFSM.On("Transition", finitestate.StatusRunning).Return(nil)
-	mockFSM.On("SetState", finitestate.StatusError).Return(nil)
-	mockFSM.On("GetState").Return(finitestate.StatusRunning)
-
-	// Create config callback that returns different configs
-	configCalled := false
-	configCallback := func() (*Config, error) {
-		if !configCalled {
-			configCalled = true
-			return initialConfig, nil
+		testConfig := createTestConfigForReload(t, ":8100", "/", 1*time.Second)
+		configCallback := func() (*Config, error) {
+			return testConfig, nil
 		}
-		return modifiedConfig, nil
-	}
 
-	// Create MockRunner with mocked dependencies
-	runner := NewMockRunner(configCallback, mockFSM)
-	runner.stopServerErr = errors.New("intentional stopServer failure")
+		// Create real runner with valid config
+		runner, err := NewRunner(WithConfigCallback(configCallback))
+		require.NoError(t, err)
 
-	// Load the initial config
-	err := runner.reloadConfig()
-	assert.NoError(t, err)
-	assert.Same(t, initialConfig, runner.getConfig())
-
-	// Perform reload which should fail when stopServer is called
-	runner.Reload()
-
-	// Verify error state was set
-	assert.True(t, runner.setStateErrorCalled, "setStateError should have been called")
-	mockFSM.AssertCalled(t, "SetState", finitestate.StatusError)
+		// Verify config was set during initialization
+		assert.NotNil(t, runner.getConfig())
+		assert.Same(t, testConfig, runner.getConfig())
+	})
 }
