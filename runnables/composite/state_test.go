@@ -71,7 +71,7 @@ func TestCompositeRunner_GetStateChan(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create context with cancel
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Get state channel
@@ -152,7 +152,7 @@ func TestGetStateChan_PassThrough(t *testing.T) {
 	runner.fsm = mockFSM
 
 	// Call GetStateChan
-	ctx := context.Background()
+	ctx := t.Context()
 	resultCh := runner.GetStateChan(ctx)
 
 	// Verify it returns the channel from the FSM
