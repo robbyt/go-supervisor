@@ -197,6 +197,8 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 
 	for {
 		select {
+		case err := <-r.serverErrors:
+			return fmt.Errorf("server failed to start: %w", err)
 		case <-probeCtx.Done():
 			return fmt.Errorf("%w: %w", ErrServerReadinessTimeout, probeCtx.Err())
 		case <-ticker.C:
