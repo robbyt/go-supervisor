@@ -2,11 +2,13 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +25,7 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
-	port := getAvailablePort(t, 8700)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 
 	configVersion := 0
 	cfgCallback := func() (*Config, error) {
@@ -112,7 +114,7 @@ func TestRunnerRaceConditions(t *testing.T) {
 	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
 	require.NoError(t, err)
 
-	port := getAvailablePort(t, 8600)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 
 	cfg, err := NewConfig(port, Routes{*route}, WithDrainTimeout(1*time.Second))
 	require.NoError(t, err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -282,7 +283,7 @@ func TestContextPropagation(t *testing.T) {
 	hConfig := Routes{*route}
 
 	// Use a unique port for this test
-	listenPort := getAvailablePort(t, 9300)
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 
 	// Create the server with a short drain timeout
 	cfgCallback := func() (*Config, error) {

@@ -230,3 +230,60 @@ func TestWaitForState(t *testing.T) {
 		return server.GetState() == finitestate.StatusStopping
 	}, 1*time.Second, 10*time.Millisecond)
 }
+
+// TestGetStateChanWithTimeout verifies the timeout version of state channel method
+func TestGetStateChanWithTimeout(t *testing.T) {
+	t.Parallel()
+
+	server, listenPort := createTestServer(t,
+		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
+	t.Logf("Server listening on port %s", listenPort)
+	t.Cleanup(func() {
+		server.Stop()
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stateChan := server.GetStateChanWithTimeout(ctx)
+	assert.NotNil(t, stateChan, "Should return a non-nil channel")
+
+	// First, read the current state (which is emitted immediately)
+	var currentState string
+	assert.Eventually(t, func() bool {
+		select {
+		case currentState = <-stateChan:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, 10*time.Millisecond, "Should receive current state")
+	assert.Equal(t, finitestate.StatusNew, currentState, "Should receive current state first")
+
+	// Now test that the channel receives state changes
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		err := server.fsm.SetState(finitestate.StatusRunning)
+		assert.NoError(t, err)
+	}()
+
+	// Should receive the state change
+	var newState string
+	assert.Eventually(t, func() bool {
+		select {
+		case newState = <-stateChan:
+			return newState == finitestate.StatusRunning
+		default:
+			return false
+		}
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should receive Running state")
+
+	// Test context cancellation closes channel
+	cancel()
+
+	// Wait for channel to close due to context cancellation
+	require.Eventually(t, func() bool {
+		_, ok := <-stateChan
+		return !ok
+	}, 1*time.Second, 10*time.Millisecond, "Channel should be closed after context cancellation")
+}

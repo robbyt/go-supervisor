@@ -3,11 +3,14 @@ package httpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +30,7 @@ func TestStopServerFailures(t *testing.T) {
 			},
 		}
 
-		port := getAvailablePort(t, 8300)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route}, WithDrainTimeout(10*time.Millisecond))
 		}
@@ -48,7 +51,7 @@ func TestStopServerFailures(t *testing.T) {
 			shutdownErr: customErr,
 		}
 
-		port := getAvailablePort(t, 8400)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -67,7 +70,7 @@ func TestStopServerFailures(t *testing.T) {
 	t.Run("config_nil_uses_default_timeout", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 8500)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		callback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -116,7 +119,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("successful_fsm_transitions", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 8900)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -146,7 +149,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 			shutdownErr: customErr,
 		}
 
-		port := getAvailablePort(t, 9000)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -174,7 +177,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("duplicate_stopping_transition_succeeds", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 9100)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -206,7 +209,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	t.Run("initial_fsm_transition_error_continues_shutdown", func(t *testing.T) {
 		mockServer := &mockHttpServer{}
 
-		port := getAvailablePort(t, 9200)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -229,7 +232,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 	})
 
 	t.Run("shutdown_when_server_nil", func(t *testing.T) {
-		port := getAvailablePort(t, 9300)
+		port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 		cfgCallback := func() (*Config, error) {
 			return NewConfig(port, Routes{*route})
 		}
@@ -281,7 +284,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 	mockServer := &mockCountingServer{}
 
 	// Set up a config callback
-	port := getAvailablePort(t, 8700)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	cfgCallback := func() (*Config, error) {
 		return NewConfig(port, Routes{*route})
 	}
@@ -347,7 +350,7 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	mockServer := &mockCountingServer{}
 
 	// Set up a config callback
-	port := getAvailablePort(t, 8800)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
 	cfgCallback := func() (*Config, error) {
 		return NewConfig(port, Routes{*route})
 	}
@@ -383,4 +386,168 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	calls := mockServer2.shutdownCount
 	mockServer2.mutex.Unlock()
 	assert.Equal(t, 1, calls, "Second server should be shut down once")
+}
+
+// TestRun_ShutdownDeadlineExceeded tests shutdown behavior when a handler exceeds the drain timeout
+func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
+	t.Parallel()
+
+	// Create test server with a handler that exceeds the drain timeout
+	const sleepDuration = 3 * time.Second
+	const drainTimeout = 1 * time.Second
+
+	// Use unique port to avoid conflicts
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	started := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		time.Sleep(sleepDuration)
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// Create the server manually to have more control
+	route, err := NewRouteFromHandlerFunc("v1", "/long", handler)
+	require.NoError(t, err)
+	hConfig := Routes{*route}
+
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
+	}
+
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// Channel to capture Run's completion
+	done := make(chan error, 1)
+
+	// Start the server in a goroutine
+	go func() {
+		err := server.Run(t.Context())
+		done <- err
+	}()
+
+	// Wait for the server to enter the Running state
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should enter Running state",
+	)
+
+	// Make a request to trigger the handler
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://localhost%s/long", listenPort))
+		if err == nil {
+			assert.NoError(t, resp.Body.Close())
+		}
+	}()
+
+	// Wait for handler to start, then initiate shutdown
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			server.Stop()
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
+
+	// Measure shutdown time
+	start := time.Now()
+	err = <-done
+	elapsed := time.Since(start)
+
+	// Verify shutdown behavior with timeout error
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrGracefulShutdownTimeout), "Expected shutdown timeout error")
+	require.GreaterOrEqual(t, elapsed, drainTimeout, "Shutdown didn't wait the minimum time")
+	require.LessOrEqual(t, elapsed, drainTimeout+500*time.Millisecond, "Shutdown took too long")
+}
+
+// TestRun_ShutdownWithDrainTimeout tests that the server waits for handlers to complete
+// within the drain timeout period
+func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping test in short mode")
+	}
+	t.Parallel()
+
+	// Create test server with a handler that sleeps
+	const sleepDuration = 1 * time.Second
+	const drainTimeout = 3 * time.Second
+
+	// Use unique port to avoid conflicts
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	started := make(chan struct{})
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		time.Sleep(sleepDuration)
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// Create the server manually
+	route, err := NewRouteFromHandlerFunc("v1", "/sleep", handler)
+	require.NoError(t, err)
+	hConfig := Routes{*route}
+
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(listenPort, hConfig, WithDrainTimeout(drainTimeout))
+	}
+
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// Channel to capture Run's completion
+	done := make(chan error, 1)
+
+	// Start the server in a goroutine
+	go func() {
+		err := server.Run(t.Context())
+		done <- err
+	}()
+
+	// Wait for the server to enter the Running state
+	waitForState(
+		t,
+		server,
+		finitestate.StatusRunning,
+		2*time.Second,
+		"Server should enter Running state",
+	)
+
+	// Make a request to trigger the handler
+	go func() {
+		resp, err := http.Get(fmt.Sprintf("http://localhost%s/sleep", listenPort))
+		if err == nil {
+			assert.NoError(t, resp.Body.Close())
+		}
+	}()
+
+	// Wait for handler to start, then initiate shutdown
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			server.Stop()
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
+
+	// Measure shutdown time
+	start := time.Now()
+	err = <-done
+	elapsed := time.Since(start)
+
+	// Verify shutdown behavior
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, elapsed.Seconds(), sleepDuration.Seconds(),
+		"Shutdown did not wait for the handler")
+	require.LessOrEqual(t, elapsed.Seconds(), drainTimeout.Seconds()+0.5,
+		"Shutdown exceeded expected time")
 }

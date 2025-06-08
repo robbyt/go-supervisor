@@ -14,10 +14,16 @@ func (r *Runner[T]) GetState() string {
 
 // GetStateChan returns a channel that will receive state updates.
 func (r *Runner[T]) GetStateChan(ctx context.Context) <-chan string {
-	return r.fsm.GetStateChan(ctx)
+	return r.fsm.GetStateChanWithTimeout(ctx)
 }
 
-// IsRunning returns true if the CompositeRunner is currently running.
+// GetStateChanWithTimeout returns a channel that emits state changes.
+// It's a pass-through to the underlying finite state machine.
+func (r *Runner[T]) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+	return r.fsm.GetStateChanWithTimeout(ctx)
+}
+
+// IsRunning returns true if the runner is in the Running state.
 func (r *Runner[T]) IsRunning() bool {
 	return r.fsm.GetState() == finitestate.StatusRunning
 }

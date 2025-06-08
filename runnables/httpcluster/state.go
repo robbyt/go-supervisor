@@ -13,10 +13,16 @@ func (r *Runner) GetState() string {
 
 // GetStateChan returns a channel that receives state updates.
 func (r *Runner) GetStateChan(ctx context.Context) <-chan string {
-	return r.fsm.GetStateChanBuffer(ctx, r.stateChanBufferSize)
+	return r.fsm.GetStateChanWithTimeout(ctx)
 }
 
-// IsRunning returns true if the cluster is in a running state.
+// GetStateChanWithTimeout returns a channel that emits state changes from the Runner.
+// The channel is closed when the provided context is canceled.
+func (r *Runner) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+	return r.fsm.GetStateChanWithTimeout(ctx)
+}
+
+// IsRunning returns true if the cluster is in the Running state.
 func (r *Runner) IsRunning() bool {
 	return r.fsm.GetState() == finitestate.StatusRunning
 }
