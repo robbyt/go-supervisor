@@ -101,8 +101,10 @@ func TestRunServerInvalidPort(t *testing.T) {
 	)
 	require.NoError(t, err, "Failed to create supervisor")
 
-	// Run the supervisor - should fail because of invalid port
 	err = sv.Run()
-	assert.Error(t, err, "Run should fail with invalid port")
-	assert.Contains(t, err.Error(), "timeout waiting for runnable to start")
+	require.Error(t, err, "Run() should fail with invalid port")
+	assert.ErrorIs(t,
+		err, httpserver.ErrServerBoot,
+		"httpserver.Runner.Run() should return ErrServerBoot",
+	)
 }

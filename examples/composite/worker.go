@@ -90,8 +90,10 @@ func (w *Worker) String() string {
 // Run starts the worker's main loop.
 func (w *Worker) Run(ctx context.Context) error {
 	logger := w.logger.WithGroup("Run")
-	w.mu.Lock()
 	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	w.mu.Lock()
 	w.ctx = runCtx
 	w.cancel = cancel
 	w.mu.Unlock()
@@ -101,17 +103,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	logger.Info("Starting worker")
 
 	w.startTicker(runCtx, cfg.Interval)
-	defer func() {
-		if tc := w.tickerCancel; tc != nil {
-			tc()
-		}
-		logger.Info("Worker stopped")
-	}()
 
 	for {
 		select {
 		case <-runCtx.Done():
-			logger.Debug("Worker context cancelled, shutting down")
+			logger.Info("Worker stopped")
 			return nil
 		case <-w.tickChan:
 			w.processTick()
@@ -125,9 +121,11 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // Stop signals the worker to gracefully shut down by cancelling its context.
 func (w *Worker) Stop() {
-	logger := w.logger.WithGroup("Stop")
 	currentName := w.getConfig().JobName
-	logger.Info("Stopping worker...", "name", currentName)
+	logger := w.logger.WithGroup("Stop").With("name", currentName)
+	logger.Info("Stopping worker...")
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if c := w.cancel; c != nil {
 		w.cancel = nil
 		c()
@@ -138,16 +136,17 @@ func (w *Worker) Stop() {
 // startTicker starts a new ticker goroutine that sends tick notifications to the worker.
 func (w *Worker) startTicker(ctx context.Context, interval time.Duration) {
 	logger := w.logger.WithGroup("startTicker")
+
+	// Cancel old ticker before creating new one, all under lock
 	w.mu.Lock()
-	oldTickerCancel := w.tickerCancel
-	w.tickerCancel = nil
-	w.mu.Unlock()
-	if oldTickerCancel != nil {
+	if w.tickerCancel != nil {
 		logger.Debug("Cancelling previous ticker goroutine")
-		oldTickerCancel()
+		w.tickerCancel()
+		w.tickerCancel = nil
 	}
+
+	// Create new ticker context and store cancel function
 	tickCtx, newTickerCancel := context.WithCancel(ctx)
-	w.mu.Lock()
 	w.tickerCancel = newTickerCancel
 	w.mu.Unlock()
 	ticker := time.NewTicker(interval)
