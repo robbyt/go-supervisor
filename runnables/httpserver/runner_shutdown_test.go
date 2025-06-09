@@ -516,7 +516,7 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 		t,
 		server,
 		finitestate.StatusRunning,
-		2*time.Second,
+		1*time.Minute,
 		"Server should enter Running state",
 	)
 

@@ -203,7 +203,7 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 			return fmt.Errorf("%w: %w", ErrServerReadinessTimeout, probeCtx.Err())
 		case <-ticker.C:
 			// Attempt to establish a TCP connection
-			conn, err := dialer.DialContext(ctx, "tcp", addr)
+			conn, err := dialer.DialContext(probeCtx, "tcp", addr)
 			if err == nil {
 				// Server is ready and accepting connections
 				if err := conn.Close(); err != nil {
