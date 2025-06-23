@@ -56,7 +56,7 @@ func JSON() httpserver.HandlerFunc {
 //	// Development setup with all methods
 //	CORS("http://localhost:3000", "GET,POST,PUT,PATCH,DELETE,OPTIONS", "*")
 func CORS(allowOrigin, allowMethods, allowHeaders string) httpserver.HandlerFunc {
-	headers := HeaderMap{
+	corsHeaders := HeaderMap{
 		"Access-Control-Allow-Origin":  allowOrigin,
 		"Access-Control-Allow-Methods": allowMethods,
 		"Access-Control-Allow-Headers": allowHeaders,
@@ -64,10 +64,10 @@ func CORS(allowOrigin, allowMethods, allowHeaders string) httpserver.HandlerFunc
 
 	// Add credentials header if origin is not wildcard
 	if allowOrigin != "*" {
-		headers["Access-Control-Allow-Credentials"] = "true"
+		corsHeaders["Access-Control-Allow-Credentials"] = "true"
 	}
 
-	return New(headers)
+	return NewWithOperations(WithSet(corsHeaders))
 }
 
 // Security creates a middleware that sets common security headers.
