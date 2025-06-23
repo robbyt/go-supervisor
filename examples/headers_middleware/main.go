@@ -1,5 +1,4 @@
-// Package main demonstrates request and response header manipulation using
-// go-supervisor's headers middleware.
+// Example of request/response header manipulation using a middleware.
 //
 // # Header Manipulation Example
 //
@@ -33,7 +32,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
@@ -118,11 +116,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 			})
 		}
 
-		// Sort headers for consistent output
-		sort.Slice(requestHeaders, func(i, j int) bool {
-			return requestHeaders[i].Name < requestHeaders[j].Name
-		})
-
 		response := HeaderResponse{
 			Message:        "Header inspection complete - request headers show middleware effects",
 			RequestHeaders: requestHeaders,
@@ -144,7 +137,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 
 	// Simple response handler
 	simpleHandler := func(w http.ResponseWriter, r *http.Request) {
-		response := map[string]interface{}{
+		response := map[string]any{
 			"message":   "Simple response with header manipulation",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"note":      "Check response headers - they've been modified by middleware",
@@ -209,10 +202,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 				Values: values,
 			})
 		}
-
-		sort.Slice(requestHeaders, func(i, j int) bool {
-			return requestHeaders[i].Name < requestHeaders[j].Name
-		})
 
 		response := HeaderResponse{
 			Message:        "Special route with different header middleware",
