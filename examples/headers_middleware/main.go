@@ -76,23 +76,23 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	headersMw := headers.NewWithOperations(
 		// Request header operations (applied before handler)
 		headers.WithRemoveRequest("X-Forwarded-For", "X-Real-IP"), // Remove proxy headers
-		headers.WithSetRequest(headers.HeaderMap{
-			"X-Request-Source": "go-supervisor-example", // Set request source
+		headers.WithSetRequest(http.Header{
+			"X-Request-Source": []string{"go-supervisor-example"}, // Set request source
 		}),
-		headers.WithAddRequest(headers.HeaderMap{
-			"X-Internal-Request": "true", // Mark as internal
+		headers.WithAddRequest(http.Header{
+			"X-Internal-Request": []string{"true"}, // Mark as internal
 		}),
 		headers.WithAddRequestHeader("X-Processing-Time", time.Now().Format(time.RFC3339)),
 
 		// Response header operations (applied after handler)
 		headers.WithRemove("Server", "X-Powered-By"), // Remove server identification
-		headers.WithSet(headers.HeaderMap{
-			"X-Frame-Options": "DENY",             // Security header
-			"X-API-Version":   "v1.0",             // API version
-			"Content-Type":    "application/json", // JSON responses
+		headers.WithSet(http.Header{
+			"X-Frame-Options": []string{"DENY"},             // Security header
+			"X-API-Version":   []string{"v1.0"},             // API version
+			"Content-Type":    []string{"application/json"}, // JSON responses
 		}),
-		headers.WithAdd(headers.HeaderMap{
-			"X-Custom-Header": "go-supervisor-headers", // Custom header
+		headers.WithAdd(http.Header{
+			"X-Custom-Header": []string{"go-supervisor-headers"}, // Custom header
 		}),
 		headers.WithAddHeader("X-Response-Time", time.Now().Format(time.RFC3339)),
 	)

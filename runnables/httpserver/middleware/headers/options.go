@@ -19,13 +19,13 @@ type headerOperations struct {
 }
 
 // WithSet creates an operation to set (replace) headers
-func WithSet(headers HeaderMap) HeaderOperation {
+func WithSet(headers http.Header) HeaderOperation {
 	return func(ops *headerOperations) {
 		if ops.setHeaders == nil {
 			ops.setHeaders = make(http.Header)
 		}
-		for key, value := range headers {
-			ops.setHeaders.Set(key, value)
+		for key, values := range headers {
+			ops.setHeaders[key] = values
 		}
 	}
 }
@@ -41,13 +41,15 @@ func WithSetHeader(key, value string) HeaderOperation {
 }
 
 // WithAdd creates an operation to add (append) headers
-func WithAdd(headers HeaderMap) HeaderOperation {
+func WithAdd(headers http.Header) HeaderOperation {
 	return func(ops *headerOperations) {
 		if ops.addHeaders == nil {
 			ops.addHeaders = make(http.Header)
 		}
-		for key, value := range headers {
-			ops.addHeaders.Add(key, value)
+		for key, values := range headers {
+			for _, value := range values {
+				ops.addHeaders.Add(key, value)
+			}
 		}
 	}
 }
@@ -70,13 +72,13 @@ func WithRemove(headerNames ...string) HeaderOperation {
 }
 
 // WithSetRequest creates an operation to set (replace) request headers
-func WithSetRequest(headers HeaderMap) HeaderOperation {
+func WithSetRequest(headers http.Header) HeaderOperation {
 	return func(ops *headerOperations) {
 		if ops.setRequestHeaders == nil {
 			ops.setRequestHeaders = make(http.Header)
 		}
-		for key, value := range headers {
-			ops.setRequestHeaders.Set(key, value)
+		for key, values := range headers {
+			ops.setRequestHeaders[key] = values
 		}
 	}
 }
@@ -92,13 +94,15 @@ func WithSetRequestHeader(key, value string) HeaderOperation {
 }
 
 // WithAddRequest creates an operation to add (append) request headers
-func WithAddRequest(headers HeaderMap) HeaderOperation {
+func WithAddRequest(headers http.Header) HeaderOperation {
 	return func(ops *headerOperations) {
 		if ops.addRequestHeaders == nil {
 			ops.addRequestHeaders = make(http.Header)
 		}
-		for key, value := range headers {
-			ops.addRequestHeaders.Add(key, value)
+		for key, values := range headers {
+			for _, value := range values {
+				ops.addRequestHeaders.Add(key, value)
+			}
 		}
 	}
 }
@@ -140,8 +144,9 @@ func NewWithOperations(operations ...HeaderOperation) httpserver.HandlerFunc {
 
 		// 2. Set request headers (replace)
 		for key, values := range ops.setRequestHeaders {
-			if len(values) > 0 {
-				request.Header.Set(key, values[0])
+			request.Header.Del(key)
+			for _, value := range values {
+				request.Header.Add(key, value)
 			}
 		}
 
@@ -160,8 +165,9 @@ func NewWithOperations(operations ...HeaderOperation) httpserver.HandlerFunc {
 
 		// 2. Set response headers (replace)
 		for key, values := range ops.setHeaders {
-			if len(values) > 0 {
-				writer.Header().Set(key, values[0])
+			writer.Header().Del(key)
+			for _, value := range values {
+				writer.Header().Add(key, value)
 			}
 		}
 

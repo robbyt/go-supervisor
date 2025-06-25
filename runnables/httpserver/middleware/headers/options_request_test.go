@@ -16,9 +16,9 @@ func TestRequestHeaderOperations(t *testing.T) {
 	t.Run("WithSetRequest sets request headers", func(t *testing.T) {
 		var capturedHeaders http.Header
 		middleware := NewWithOperations(
-			WithSetRequest(HeaderMap{
-				"X-Request-ID":     "req-123",
-				"X-Forwarded-Host": "example.com",
+			WithSetRequest(http.Header{
+				"X-Request-ID":     []string{"req-123"},
+				"X-Forwarded-Host": []string{"example.com"},
 			}),
 		)
 
@@ -60,9 +60,9 @@ func TestRequestHeaderOperations(t *testing.T) {
 	t.Run("WithAddRequest adds request headers", func(t *testing.T) {
 		var capturedHeaders http.Header
 		middleware := NewWithOperations(
-			WithAddRequest(HeaderMap{
-				"X-Tags": "tag1",
-				"X-Meta": "info",
+			WithAddRequest(http.Header{
+				"X-Tags": []string{"tag1"},
+				"X-Meta": []string{"info"},
 			}),
 		)
 
@@ -140,8 +140,8 @@ func TestRequestHeaderOperations(t *testing.T) {
 		var capturedHeaders http.Header
 		middleware := NewWithOperations(
 			WithRemoveRequest("X-Test"),
-			WithSetRequest(HeaderMap{"X-Test": "set-value"}),
-			WithAddRequest(HeaderMap{"X-Test": "add-value"}),
+			WithSetRequest(http.Header{"X-Test": []string{"set-value"}}),
+			WithAddRequest(http.Header{"X-Test": []string{"add-value"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -284,8 +284,8 @@ func TestRequestHeaderOperations(t *testing.T) {
 	t.Run("empty request header operations", func(t *testing.T) {
 		var capturedHeaders http.Header
 		middleware := NewWithOperations(
-			WithSetRequest(HeaderMap{}),
-			WithAddRequest(HeaderMap{}),
+			WithSetRequest(http.Header{}),
+			WithAddRequest(http.Header{}),
 			WithRemoveRequest(),
 		)
 
@@ -313,13 +313,13 @@ func TestRequestAndResponseHeaderCombinations(t *testing.T) {
 		middleware := NewWithOperations(
 			// Request operations
 			WithRemoveRequest("X-Forwarded-For"),
-			WithSetRequest(HeaderMap{"X-Request-Source": "middleware"}),
-			WithAddRequest(HeaderMap{"X-Request-Tag": "processed"}),
+			WithSetRequest(http.Header{"X-Request-Source": []string{"middleware"}}),
+			WithAddRequest(http.Header{"X-Request-Tag": []string{"processed"}}),
 
 			// Response operations
 			WithRemove("Server"),
-			WithSet(HeaderMap{"X-API-Version": "v1.0"}),
-			WithAdd(HeaderMap{"X-Response-Tag": "enhanced"}),
+			WithSet(http.Header{"X-API-Version": []string{"v1.0"}}),
+			WithAdd(http.Header{"X-Response-Tag": []string{"enhanced"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -351,8 +351,8 @@ func TestRequestAndResponseHeaderCombinations(t *testing.T) {
 	t.Run("same header name in request and response operations", func(t *testing.T) {
 		var capturedRequestHeaders http.Header
 		middleware := NewWithOperations(
-			WithSetRequest(HeaderMap{"X-Version": "request-v1"}),
-			WithSet(HeaderMap{"X-Version": "response-v1"}),
+			WithSetRequest(http.Header{"X-Version": []string{"request-v1"}}),
+			WithSet(http.Header{"X-Version": []string{"response-v1"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -376,14 +376,14 @@ func TestRequestAndResponseHeaderCombinations(t *testing.T) {
 			// Remove proxy headers from request
 			WithRemoveRequest("X-Forwarded-For", "X-Real-IP", "X-Forwarded-Proto"),
 			// Add internal tracking headers to request
-			WithSetRequest(HeaderMap{
-				"X-Internal-Request": "true",
-				"X-Request-ID":       "req-12345",
+			WithSetRequest(http.Header{
+				"X-Internal-Request": []string{"true"},
+				"X-Request-ID":       []string{"req-12345"},
 			}),
 			// Add security response headers
-			WithSet(HeaderMap{
-				"X-Frame-Options":        "DENY",
-				"X-Content-Type-Options": "nosniff",
+			WithSet(http.Header{
+				"X-Frame-Options":        []string{"DENY"},
+				"X-Content-Type-Options": []string{"nosniff"},
 			}),
 			// Remove server identification from response
 			WithRemove("Server", "X-Powered-By"),

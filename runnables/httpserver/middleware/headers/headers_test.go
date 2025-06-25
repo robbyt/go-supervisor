@@ -15,8 +15,8 @@ func TestNew(t *testing.T) {
 	t.Run("sets single header", func(t *testing.T) {
 		t.Parallel()
 
-		headers := HeaderMap{
-			"X-Test-Header": "test-value",
+		headers := http.Header{
+			"X-Test-Header": []string{"test-value"},
 		}
 
 		middleware := New(headers)
@@ -47,10 +47,10 @@ func TestNew(t *testing.T) {
 	t.Run("sets multiple headers", func(t *testing.T) {
 		t.Parallel()
 
-		headers := HeaderMap{
-			"X-Header-One": "value-one",
-			"X-Header-Two": "value-two",
-			"Content-Type": "application/json",
+		headers := http.Header{
+			"X-Header-One": []string{"value-one"},
+			"X-Header-Two": []string{"value-two"},
+			"Content-Type": []string{"application/json"},
 		}
 
 		middleware := New(headers)
@@ -82,7 +82,7 @@ func TestNew(t *testing.T) {
 	t.Run("handles empty headers map", func(t *testing.T) {
 		t.Parallel()
 
-		middleware := New(HeaderMap{})
+		middleware := New(http.Header{})
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		rec := httptest.NewRecorder()
@@ -100,7 +100,7 @@ func TestNew(t *testing.T) {
 	t.Run("allows headers to be overridden by subsequent middleware", func(t *testing.T) {
 		t.Parallel()
 
-		headerMiddleware := New(HeaderMap{"X-Test": "original"})
+		headerMiddleware := New(http.Header{"X-Test": []string{"original"}})
 		overrideMiddleware := func(rp *httpserver.RequestProcessor) {
 			rp.Writer().Header().Set("X-Test", "overridden")
 			rp.Next()
@@ -117,6 +117,58 @@ func TestNew(t *testing.T) {
 		route.ServeHTTP(rec, req)
 
 		assert.Equal(t, "overridden", rec.Header().Get("X-Test"), "header should be overridden")
+	})
+
+	t.Run("multiple Set-Cookie headers remain separate", func(t *testing.T) {
+		headers := http.Header{
+			"Set-Cookie": []string{
+				"session=abc123; Path=/; HttpOnly",
+				"theme=dark; Path=/; Max-Age=86400",
+				"lang=en; Path=/; SameSite=Strict",
+			},
+		}
+
+		middleware := New(headers)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
+			func(w http.ResponseWriter, r *http.Request) {}, middleware)
+		assert.NoError(t, err, "route creation should not fail")
+
+		route.ServeHTTP(rec, req)
+
+		cookies := rec.Header().Values("Set-Cookie")
+		assert.Len(t, cookies, 3, "should have three separate Set-Cookie headers")
+		assert.Contains(t, cookies, "session=abc123; Path=/; HttpOnly")
+		assert.Contains(t, cookies, "theme=dark; Path=/; Max-Age=86400")
+		assert.Contains(t, cookies, "lang=en; Path=/; SameSite=Strict")
+	})
+
+	t.Run("other headers can be comma-combined", func(t *testing.T) {
+		headers := http.Header{
+			"Accept":          []string{"text/html", "application/json", "application/xml"},
+			"Accept-Encoding": []string{"gzip", "deflate", "br"},
+		}
+
+		middleware := New(headers)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
+			func(w http.ResponseWriter, r *http.Request) {}, middleware)
+		assert.NoError(t, err, "route creation should not fail")
+
+		route.ServeHTTP(rec, req)
+
+		// These headers can be comma-combined
+		acceptValues := rec.Header().Values("Accept")
+		assert.Len(t, acceptValues, 3, "should have three Accept values")
+
+		encodingValues := rec.Header().Values("Accept-Encoding")
+		assert.Len(t, encodingValues, 3, "should have three Accept-Encoding values")
 	})
 }
 
