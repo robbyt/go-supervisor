@@ -36,8 +36,8 @@ func TestNewWithOperations(t *testing.T) {
 
 	t.Run("header addition vs setting", func(t *testing.T) {
 		middleware := NewWithOperations(
-			WithSet(HeaderMap{"Set-Cookie": "session=abc123"}),
-			WithAdd(HeaderMap{"Set-Cookie": "theme=dark"}),
+			WithSet(http.Header{"Set-Cookie": []string{"session=abc123"}}),
+			WithAdd(http.Header{"Set-Cookie": []string{"theme=dark"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -58,8 +58,8 @@ func TestNewWithOperations(t *testing.T) {
 	t.Run("operation ordering: remove → set → add", func(t *testing.T) {
 		middleware := NewWithOperations(
 			WithRemove("X-Test"),
-			WithSet(HeaderMap{"X-Test": "set-value"}),
-			WithAdd(HeaderMap{"X-Test": "add-value"}),
+			WithSet(http.Header{"X-Test": []string{"set-value"}}),
+			WithAdd(http.Header{"X-Test": []string{"add-value"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -110,8 +110,10 @@ func TestNewWithOperations(t *testing.T) {
 
 	t.Run("multiple set operations", func(t *testing.T) {
 		middleware := NewWithOperations(
-			WithSet(HeaderMap{"X-API": "v1", "Content-Type": "application/json"}),
-			WithSet(HeaderMap{"X-Version": "1.0"}),
+			WithSet(
+				http.Header{"X-API": []string{"v1"}, "Content-Type": []string{"application/json"}},
+			),
+			WithSet(http.Header{"X-Version": []string{"1.0"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -156,8 +158,8 @@ func TestNewWithOperations(t *testing.T) {
 
 	t.Run("empty operations", func(t *testing.T) {
 		middleware := NewWithOperations(
-			WithSet(HeaderMap{}),
-			WithAdd(HeaderMap{}),
+			WithSet(http.Header{}),
+			WithAdd(http.Header{}),
 			WithRemove(),
 		)
 
@@ -193,12 +195,12 @@ func TestNewWithOperations(t *testing.T) {
 	t.Run("complex scenario: security headers cleanup", func(t *testing.T) {
 		middleware := NewWithOperations(
 			WithRemove("Server", "X-Powered-By", "X-AspNet-Version"),
-			WithSet(HeaderMap{
-				"X-Content-Type-Options": "nosniff",
-				"X-Frame-Options":        "DENY",
+			WithSet(http.Header{
+				"X-Content-Type-Options": []string{"nosniff"},
+				"X-Frame-Options":        []string{"DENY"},
 			}),
-			WithAdd(HeaderMap{
-				"Set-Cookie": "secure=true; HttpOnly",
+			WithAdd(http.Header{
+				"Set-Cookie": []string{"secure=true; HttpOnly"},
 			}),
 		)
 
@@ -423,8 +425,8 @@ func TestMixedOperations(t *testing.T) {
 
 	t.Run("WithSet and WithAdd interaction", func(t *testing.T) {
 		middleware := NewWithOperations(
-			WithSet(HeaderMap{"X-Version": "1.0"}),
-			WithAdd(HeaderMap{"X-Version": "beta"}),
+			WithSet(http.Header{"X-Version": []string{"1.0"}}),
+			WithAdd(http.Header{"X-Version": []string{"beta"}}),
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -609,11 +611,11 @@ func TestRealWorldScenarios(t *testing.T) {
 	t.Run("security hardening", func(t *testing.T) {
 		middleware := NewWithOperations(
 			WithRemove("Server", "X-Powered-By", "X-AspNet-Version", "X-AspNetMvc-Version"),
-			WithSet(HeaderMap{
-				"X-Content-Type-Options":    "nosniff",
-				"X-Frame-Options":           "DENY",
-				"X-XSS-Protection":          "1; mode=block",
-				"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+			WithSet(http.Header{
+				"X-Content-Type-Options":    []string{"nosniff"},
+				"X-Frame-Options":           []string{"DENY"},
+				"X-XSS-Protection":          []string{"1; mode=block"},
+				"Strict-Transport-Security": []string{"max-age=31536000; includeSubDomains"},
 			}),
 			WithAddHeader("Content-Security-Policy", "default-src 'self'"),
 			WithAddHeader("Content-Security-Policy", "script-src 'self' 'unsafe-inline'"),
@@ -685,5 +687,59 @@ func TestRealWorldScenarios(t *testing.T) {
 		assert.Contains(t, cacheControl, "private")
 
 		assert.Equal(t, "no-cache", rec.Header().Get("Pragma"))
+	})
+
+	t.Run("WithSet properly handles multiple Set-Cookie values", func(t *testing.T) {
+		middleware := NewWithOperations(
+			WithSet(http.Header{
+				"Set-Cookie": []string{
+					"user=john; Path=/api",
+					"token=xyz789; Path=/api; Secure",
+				},
+			}),
+		)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
+			func(w http.ResponseWriter, r *http.Request) {}, middleware)
+		assert.NoError(t, err, "route creation should not fail")
+
+		route.ServeHTTP(rec, req)
+
+		cookies := rec.Header().Values("Set-Cookie")
+		assert.Len(t, cookies, 2, "should have two Set-Cookie headers")
+		assert.Contains(t, cookies, "user=john; Path=/api")
+		assert.Contains(t, cookies, "token=xyz789; Path=/api; Secure")
+	})
+
+	t.Run("WithAdd appends to existing Set-Cookie headers", func(t *testing.T) {
+		middleware := NewWithOperations(
+			WithSet(http.Header{
+				"Set-Cookie": []string{"existing=value; Path=/"},
+			}),
+			WithAdd(http.Header{
+				"Set-Cookie": []string{
+					"new1=value1; Path=/",
+					"new2=value2; Path=/",
+				},
+			}),
+		)
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		rec := httptest.NewRecorder()
+
+		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
+			func(w http.ResponseWriter, r *http.Request) {}, middleware)
+		assert.NoError(t, err, "route creation should not fail")
+
+		route.ServeHTTP(rec, req)
+
+		cookies := rec.Header().Values("Set-Cookie")
+		assert.Len(t, cookies, 3, "should have three Set-Cookie headers")
+		assert.Contains(t, cookies, "existing=value; Path=/")
+		assert.Contains(t, cookies, "new1=value1; Path=/")
+		assert.Contains(t, cookies, "new2=value2; Path=/")
 	})
 }

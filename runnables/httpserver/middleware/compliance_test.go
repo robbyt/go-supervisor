@@ -210,7 +210,7 @@ func createRequestProcessor(
 func TestBuiltinMiddlewareCompliance(t *testing.T) {
 	// Test headers middleware
 	t.Run("headers middleware", func(t *testing.T) {
-		headersMiddleware := headers.New(headers.HeaderMap{"Content-Type": "application/json"})
+		headersMiddleware := headers.New(http.Header{"Content-Type": []string{"application/json"}})
 		test := NewMiddlewareComplianceTest(t, "headers", headersMiddleware)
 		test.RunAllTests()
 	})
