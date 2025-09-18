@@ -36,19 +36,28 @@ func testCompositeRaceCondition(t *testing.T) {
 	mock2 := mocks.NewMockRunnableWithStateable()
 	mock3 := mocks.NewMockRunnableWithStateable()
 	mock1.On("String").Return("service1")
-	mock1.On("Run", mock.Anything).Return(nil)
+	mock1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock1.On("Stop").Return()
 	mock1.On("IsRunning").Return(true)
 	mock1.On("GetState").Return("Running")
 
 	mock2.On("String").Return("service2")
-	mock2.On("Run", mock.Anything).Return(nil)
+	mock2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock2.On("Stop").Return()
 	mock2.On("IsRunning").Return(true)
 	mock2.On("GetState").Return("Running")
 
 	mock3.On("String").Return("service3")
-	mock3.On("Run", mock.Anything).Return(nil)
+	mock3.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock3.On("Stop").Return()
 	mock3.On("IsRunning").Return(true)
 	mock3.On("GetState").Return("Running")
