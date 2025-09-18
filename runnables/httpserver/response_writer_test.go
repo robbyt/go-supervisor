@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewResponseWriter(t *testing.T) {
@@ -77,7 +78,7 @@ func TestResponseWriter_Write(t *testing.T) {
 
 	n, err := rw.Write(data)
 
-	assert.NoError(t, err, "Write should not return error")
+	require.NoError(t, err, "Write should not return error")
 	assert.Equal(t, len(data), n, "Write should return number of bytes written")
 	assert.Equal(t, len(data), rw.Size(), "Size should match bytes written")
 	assert.True(t, rw.Written(), "Written flag should be true after Write")
@@ -98,7 +99,7 @@ func TestResponseWriter_Write_WithExplicitHeader(t *testing.T) {
 	data := []byte("Created!")
 	n, err := rw.Write(data)
 
-	assert.NoError(t, err, "Write should not return error")
+	require.NoError(t, err, "Write should not return error")
 	assert.Equal(t, len(data), n, "Write should return number of bytes written")
 	assert.Equal(t, len(data), rw.Size(), "Size should match bytes written")
 	assert.True(t, rw.Written(), "Written flag should be true after Write")
@@ -119,19 +120,19 @@ func TestResponseWriter_Write_MultipleWrites(t *testing.T) {
 	data3 := []byte(" How are you?")
 
 	n1, err1 := rw.Write(data1)
-	assert.NoError(t, err1, "first Write should not return error")
+	require.NoError(t, err1, "first Write should not return error")
 	assert.Equal(t, len(data1), n1, "first Write should return bytes written")
 	assert.Equal(t, len(data1), rw.Size(), "size should match first write")
 	assert.True(t, rw.Written(), "written flag should be true after first write")
 	assert.Equal(t, http.StatusOK, rw.Status(), "status should be 200 after first write")
 
 	n2, err2 := rw.Write(data2)
-	assert.NoError(t, err2, "second Write should not return error")
+	require.NoError(t, err2, "second Write should not return error")
 	assert.Equal(t, len(data2), n2, "second Write should return bytes written")
 	assert.Equal(t, len(data1)+len(data2), rw.Size(), "size should accumulate after second write")
 
 	n3, err3 := rw.Write(data3)
-	assert.NoError(t, err3, "third Write should not return error")
+	require.NoError(t, err3, "third Write should not return error")
 	assert.Equal(t, len(data3), n3, "third Write should return bytes written")
 	assert.Equal(
 		t,
@@ -158,7 +159,7 @@ func TestResponseWriter_Status_EdgeCases(t *testing.T) {
 		rw := newResponseWriter(originalWriter)
 
 		_, err := rw.Write([]byte("test"))
-		assert.NoError(t, err, "Write should not return error")
+		require.NoError(t, err, "Write should not return error")
 		assert.Equal(
 			t,
 			http.StatusOK,
@@ -174,7 +175,7 @@ func TestResponseWriter_Status_EdgeCases(t *testing.T) {
 
 		rw.WriteHeader(http.StatusNotFound)
 		_, err := rw.Write([]byte("test"))
-		assert.NoError(t, err, "Write should not return error")
+		require.NoError(t, err, "Write should not return error")
 		assert.Equal(
 			t,
 			http.StatusNotFound,
@@ -217,7 +218,7 @@ func TestResponseWriter_Size_AccumulatesCorrectly(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(string(rune('a'+i)), func(t *testing.T) {
 			n, err := rw.Write(tt.data)
-			assert.NoError(t, err, "Write should not return error")
+			require.NoError(t, err, "Write should not return error")
 			assert.Equal(t, len(tt.data), n, "Write should return number of bytes written")
 			assert.Equal(t, tt.expected, rw.Size(), "Size should accumulate correctly")
 		})
@@ -240,7 +241,7 @@ func TestResponseWriter_InterfaceCompliance(t *testing.T) {
 
 	data := []byte("test")
 	n, err := rw.Write(data)
-	assert.NoError(t, err, "Write should not return error")
+	require.NoError(t, err, "Write should not return error")
 	assert.Equal(t, len(data), n, "Write should return number of bytes written")
 
 	assert.Equal(
@@ -287,7 +288,7 @@ func TestResponseWriter_WriteError(t *testing.T) {
 	data := []byte("test data")
 	n, err := rw.Write(data)
 
-	assert.Error(t, err, "should return error from underlying writer")
+	require.Error(t, err, "should return error from underlying writer")
 	assert.Equal(t, 0, n, "should return 0 bytes written on error")
 	assert.Equal(t, 0, rw.Size(), "size should not be updated on error")
 	assert.True(
@@ -305,7 +306,7 @@ func TestResponseWriter_PartialWrite(t *testing.T) {
 	data := []byte("Hello, World!") // 13 bytes
 	n, err := rw.Write(data)
 
-	assert.NoError(t, err, "partial write should not return error")
+	require.NoError(t, err, "partial write should not return error")
 	assert.Equal(t, 5, n, "should write only maxBytes (5) bytes")
 	assert.Equal(t, 5, rw.Size(), "size should match actual bytes written, not requested")
 }

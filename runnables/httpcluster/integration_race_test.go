@@ -75,7 +75,7 @@ func testHttpClusterRaceCondition(t *testing.T) {
 	}, 10*time.Second, 100*time.Millisecond, "Server should be added to cluster")
 
 	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-	assert.NoError(t, err, "TCP connection should succeed when cluster reports server ready")
+	require.NoError(t, err, "TCP connection should succeed when cluster reports server ready")
 
 	if conn != nil {
 		require.NoError(t, conn.Close())
@@ -83,10 +83,10 @@ func testHttpClusterRaceCondition(t *testing.T) {
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://" + addr + "/health")
-	assert.NoError(t, err, "HTTP request should succeed when cluster reports server ready")
+	require.NoError(t, err, "HTTP request should succeed when cluster reports server ready")
 
 	if resp != nil {
-		assert.NoError(t, resp.Body.Close())
+		require.NoError(t, resp.Body.Close())
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	}
 
@@ -117,16 +117,16 @@ func testHttpClusterRaceCondition(t *testing.T) {
 		}, 10*time.Second, 100*time.Millisecond, "Server should be re-added")
 
 		conn, err := net.DialTimeout("tcp", newAddr, 500*time.Millisecond)
-		assert.NoError(t, err, "TCP connection should succeed immediately after restart")
+		require.NoError(t, err, "TCP connection should succeed immediately after restart")
 
 		if conn != nil {
 			require.NoError(t, conn.Close())
 		}
 
 		resp, err := client.Get("http://" + newAddr + "/health")
-		assert.NoError(t, err, "HTTP should work immediately after restart")
+		require.NoError(t, err, "HTTP should work immediately after restart")
 		if resp != nil {
-			assert.NoError(t, resp.Body.Close())
+			require.NoError(t, resp.Body.Close())
 		}
 	})
 
@@ -136,7 +136,7 @@ func testHttpClusterRaceCondition(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Cluster did not shutdown within timeout")
 	}
@@ -211,12 +211,12 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	resp1, err := client.Get("http://" + addr1 + "/svc1")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp1.StatusCode)
-	assert.NoError(t, resp1.Body.Close())
+	require.NoError(t, resp1.Body.Close())
 
 	resp2, err := client.Get("http://" + addr2 + "/svc2")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
-	assert.NoError(t, resp2.Body.Close())
+	require.NoError(t, resp2.Body.Close())
 
 	select {
 	case cluster.GetConfigSiphon() <- map[string]*httpserver.Config{
@@ -232,13 +232,13 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	resp1, err = client.Get("http://" + addr1 + "/svc1")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp1.StatusCode)
-	assert.NoError(t, resp1.Body.Close())
+	require.NoError(t, resp1.Body.Close())
 
 	resp2, err = client.Get("http://" + addr2 + "/svc2")
 	if err == nil && resp2 != nil {
-		assert.NoError(t, resp2.Body.Close())
+		require.NoError(t, resp2.Body.Close())
 	}
-	assert.Error(t, err, "Service2 should be stopped")
+	require.Error(t, err, "Service2 should be stopped")
 
 	cancel()
 
@@ -251,7 +251,7 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Cluster did not shutdown within timeout")
 	}
@@ -315,8 +315,8 @@ func TestHTTPClusterReadinessRaceCondition(t *testing.T) {
 	}, 10*time.Second, 50*time.Millisecond, "Server should be reported as running")
 
 	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-	assert.NoError(t, err, "TCP connection should succeed when cluster reports running")
+	require.NoError(t, err, "TCP connection should succeed when cluster reports running")
 	if conn != nil {
-		assert.NoError(t, conn.Close())
+		require.NoError(t, conn.Close())
 	}
 }

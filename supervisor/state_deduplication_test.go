@@ -9,6 +9,7 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestStateDeduplication tests that the startStateMonitor implementation
@@ -30,7 +31,7 @@ func TestStateDeduplication(t *testing.T) {
 
 	// Create a new supervisor with our test runnable
 	pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Track the broadcasts that occur
 	broadcasts := []StateMap{}

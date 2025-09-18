@@ -357,7 +357,7 @@ func TestContextPropagation(t *testing.T) {
 	// Wait for the server to shut down
 	select {
 	case err := <-runComplete:
-		assert.NoError(t, err, "Server should shut down without error")
+		require.NoError(t, err, "Server should shut down without error")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Server did not shut down in time")
 	}
@@ -674,10 +674,10 @@ func TestNewConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config, err := NewConfig(tt.addr, tt.routes, tt.opts...)
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, config)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.NotNil(t, config)
 				assert.Equal(t, tt.addr, config.ListenAddr)
 				// DrainTimeout is now set via options

@@ -83,10 +83,10 @@ func TestNewRunner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runner, err := NewRunner(tt.callback, tt.opts...)
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, runner)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.NotNil(t, runner)
 			}
 		})
@@ -180,7 +180,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 			}
 		}, 500*time.Millisecond, 10*time.Millisecond, "Run should complete")
 
-		assert.NoError(t, runErr, "Run should complete without error")
+		require.NoError(t, runErr, "Run should complete without error")
 		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
 		mockRunnable1.AssertExpectations(t)
 		mockRunnable2.AssertExpectations(t)
@@ -225,8 +225,8 @@ func TestCompositeRunner_Run(t *testing.T) {
 		err = runner.Run(context.Background())
 
 		// Verify error and state
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "runnable error")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "runnable error")
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 
 		mockRunnable1.AssertExpectations(t)
@@ -263,8 +263,8 @@ func TestCompositeRunner_Run(t *testing.T) {
 		err = runner.Run(context.Background())
 
 		// Verify error and state
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "child runnable failed")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "child runnable failed")
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 
 		// Verify mock expectations
@@ -332,7 +332,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 			t.Fatal("timeout waiting for Run to complete")
 		}
-		assert.NoError(t, runErr)
+		require.NoError(t, runErr)
 	})
 
 	t.Run("empty entries with later reload", func(t *testing.T) {
@@ -416,7 +416,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 			t.Fatal("timeout waiting for Run to complete")
 		}
-		assert.NoError(t, runErr)
+		require.NoError(t, runErr)
 
 		// Verify expectations
 		mockRunnable.AssertExpectations(t)

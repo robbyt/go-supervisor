@@ -60,8 +60,8 @@ func TestReloadConfig_ConfigEquality(t *testing.T) {
 
 	// Second reload should return ErrOldConfig since configs are equal
 	err = runner.reloadConfig()
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrOldConfig)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrOldConfig)
 
 	// Config should not have changed
 	assert.Same(t, config1, runner.getConfig())
@@ -92,12 +92,12 @@ func TestReloadConfig_ConfigChanges(t *testing.T) {
 
 	// Reload to config2 should succeed
 	err = runner.reloadConfig()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Same(t, config2, runner.getConfig())
 
 	// Reload to config3 should succeed
 	err = runner.reloadConfig()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Same(t, config3, runner.getConfig())
 }
 
@@ -140,7 +140,7 @@ func TestReloadConfig_WithFullRunner(t *testing.T) {
 
 		// Reload config
 		err = runner.reloadConfig()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify config was updated
 		updatedConfig := runner.getConfig()
@@ -168,8 +168,8 @@ func TestReloadConfig_ErrorCases(t *testing.T) {
 
 		// Create real runner - will fail during NewRunner due to error
 		_, err := NewRunner(WithConfigCallback(configCallback))
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrConfigCallback)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	// Test case: Error when configCallback returns a nil config
@@ -183,8 +183,8 @@ func TestReloadConfig_ErrorCases(t *testing.T) {
 
 		// Create real runner - will fail during NewRunner due to nil config
 		_, err := NewRunner(WithConfigCallback(configCallback))
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrConfigCallback)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	// Test case: Success when oldConfig is nil (initial config load)

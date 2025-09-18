@@ -38,6 +38,7 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/state"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MiddlewareComplianceTest validates that middleware follows the documented guidelines
@@ -288,7 +289,7 @@ func TestAbortingMiddlewareCompliance(t *testing.T) {
 			func(w http.ResponseWriter, r *http.Request) {},
 			abortingMiddleware,
 		)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		route.ServeHTTP(rec, req)
 

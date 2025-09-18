@@ -109,7 +109,7 @@ func testCompositeRaceCondition(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Composite did not shutdown within timeout")
 	}
@@ -201,7 +201,7 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Runner did not shutdown within timeout")
 	}

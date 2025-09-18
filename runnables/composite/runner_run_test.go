@@ -54,8 +54,8 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		err = runner.Run(context.Background())
 
 		// Verify the error
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "failed to transition to Running state")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to transition to Running state")
 		mockFSM.AssertExpectations(t)
 	})
 
@@ -86,7 +86,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		err = runner.Run(context.Background())
 
 		// Verify error is propagated
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "intentional error from runnable")
 		mockRunnable1.AssertExpectations(t)
 	})
@@ -136,8 +136,8 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		err = runner.Run(ctx)
 
 		// Verify the error
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "failed to transition to Stopped state")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to transition to Stopped state")
 		mockFSM.AssertExpectations(t)
 
 		require.Eventually(t, func() bool { return true }, 20*time.Millisecond, 5*time.Millisecond)
@@ -178,8 +178,8 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		err = runner.Run(context.Background())
 
 		// Verify the error
-		assert.Error(t, err)
-		assert.ErrorContains(t, err, "failed to transition to Booting state")
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to transition to Booting state")
 		mockFSM.AssertExpectations(t)
 	})
 
@@ -231,7 +231,7 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		err = runner.Run(ctx)
 
 		// No error expected with cached config
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		mockFSM.AssertExpectations(t)
 	})
 }

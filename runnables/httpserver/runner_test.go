@@ -174,7 +174,7 @@ func TestServerLifecycle(t *testing.T) {
 	server.Stop()
 	err = <-done
 
-	assert.NoError(t, err, "Server should shut down without error")
+	require.NoError(t, err, "Server should shut down without error")
 	assert.Equal(
 		t,
 		finitestate.StatusStopped,
@@ -195,7 +195,7 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 	})
 
 	err := server.stopServer(context.Background())
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrServerNotRunning)
 }
 

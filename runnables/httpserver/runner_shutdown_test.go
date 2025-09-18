@@ -41,8 +41,8 @@ func TestStopServerFailures(t *testing.T) {
 		runner.server = mockServer
 
 		err = runner.stopServer(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrGracefulShutdownTimeout)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGracefulShutdownTimeout)
 	})
 
 	t.Run("shutdown_error", func(t *testing.T) {
@@ -62,8 +62,8 @@ func TestStopServerFailures(t *testing.T) {
 		runner.server = mockServer
 
 		err = runner.stopServer(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrGracefulShutdown)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGracefulShutdown)
 		assert.Contains(t, err.Error(), customErr.Error())
 	})
 
@@ -84,7 +84,7 @@ func TestStopServerFailures(t *testing.T) {
 		runner.config.Store(nil)
 
 		err = runner.stopServer(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 }
 
@@ -137,7 +137,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 
 		// Call shutdown and verify state transitions
 		err = runner.shutdown(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify final state is Stopped
 		assert.Equal(t, "Stopped", runner.fsm.GetState())
@@ -167,8 +167,8 @@ func TestShutdownFSMTransitions(t *testing.T) {
 
 		// Call shutdown and expect error
 		err = runner.shutdown(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrGracefulShutdown)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGracefulShutdown)
 
 		// Verify error state is set
 		assert.Equal(t, "Error", runner.fsm.GetState())
@@ -200,7 +200,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 
 		// Call shutdown - initial FSM transition will fail but shutdown should continue
 		err = runner.shutdown(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify final state is Stopped
 		assert.Equal(t, "Stopped", runner.fsm.GetState())
@@ -225,7 +225,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 
 		// Call shutdown - initial FSM transition will fail but shutdown should continue
 		err = runner.shutdown(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify final state is Stopped despite initial transition failure
 		assert.Equal(t, "Stopped", runner.fsm.GetState())
@@ -249,8 +249,8 @@ func TestShutdownFSMTransitions(t *testing.T) {
 
 		// Call shutdown with nil server
 		err = runner.shutdown(context.Background())
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrServerNotRunning)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrServerNotRunning)
 
 		// Verify error state is set
 		assert.Equal(t, "Error", runner.fsm.GetState())
@@ -327,7 +327,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 	for _, err := range errorResults {
 		// Either err is nil or it's ErrServerNotRunning
 		if err != nil {
-			assert.ErrorIs(
+			require.ErrorIs(
 				t,
 				err,
 				ErrServerNotRunning,
@@ -364,7 +364,7 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 
 	// Stop the server once
 	err = runner.stopServer(context.Background())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Server should be nil after stopServer completes
 	assert.Nil(t, runner.server)
@@ -376,7 +376,7 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 
 	// Attempt to stop the new server
 	err = runner.stopServer(context.Background())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// The server should be nil again after the second shutdown
 	assert.Nil(t, runner.server)
@@ -464,7 +464,7 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 
 	// Verify shutdown behavior with timeout error
 	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrGracefulShutdownTimeout), "Expected shutdown timeout error")
+	require.ErrorIs(t, err, ErrGracefulShutdownTimeout, "Expected shutdown timeout error")
 	require.GreaterOrEqual(t, elapsed, drainTimeout, "Shutdown didn't wait the minimum time")
 	require.LessOrEqual(t, elapsed, drainTimeout+500*time.Millisecond, "Shutdown took too long")
 }

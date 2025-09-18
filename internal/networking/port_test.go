@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidatePort(t *testing.T) {
@@ -109,17 +110,17 @@ func TestValidatePort(t *testing.T) {
 			output, err := ValidatePort(tt.input)
 
 			if tt.expectedError != nil {
-				assert.Error(t, err)
+				require.Error(t, err)
 				if !errors.Is(tt.expectedError, ErrInvalidFormat) {
 					// For specific errors, check exact match
-					assert.ErrorIs(t, err, tt.expectedError)
+					require.ErrorIs(t, err, tt.expectedError)
 				} else {
 					// For format errors, just check that it's a format error (details may vary)
-					assert.True(t, errors.Is(err, ErrInvalidFormat), "Expected error to be a ErrInvalidFormat")
+					require.ErrorIs(t, err, ErrInvalidFormat, "Expected error to be a ErrInvalidFormat")
 				}
 				assert.Empty(t, output)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectedOutput, output)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRequestProcessor_IsAborted(t *testing.T) {
@@ -260,7 +261,7 @@ func TestRequestProcessor_IntegrationWithRoute(t *testing.T) {
 			},
 			middleware1, middleware2)
 
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/test", nil)

@@ -31,12 +31,12 @@ func TestPIDZero_NewPIDZero(t *testing.T) {
 
 	ctx := context.Background()
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	assert.NotNil(t, pid0)
-	assert.Equal(t, 1, len(pid0.runnables))
+	assert.Len(t, pid0.runnables, 1)
 
-	assert.Equal(t, pid0.String(), "Supervisor<runnables: 1>")
+	assert.Equal(t, "Supervisor<runnables: 1>", pid0.String())
 }
 
 // TestPIDZero_WithLogHandler tests the WithLogHandler option.
@@ -54,7 +54,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 	pid0, err := New(WithRunnables(mockRunnable), WithLogHandler(customHandler))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify that the logger was set correctly
 	// We can't directly compare the loggers, but we can verify it's not nil
@@ -68,7 +68,7 @@ func TestPIDZero_WithLogHandler(t *testing.T) {
 	mockRunnable2.On("GetState").Return("running").Maybe()
 	mockRunnable2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 	defaultPid0, err := New(WithRunnables(mockRunnable2), WithLogHandler(nil))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, defaultPid0.logger)
 }
 
@@ -87,7 +87,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 	pid0, err := New(WithRunnables(mockRunnable), WithSignals(customSignals...))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify that the signals were set correctly
 	assert.Equal(t, customSignals, pid0.subscribeSignals)
@@ -103,7 +103,7 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	mockRunnable2.On("GetState").Return("running").Maybe()
 	mockRunnable2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 	defaultPid0, err := New(WithRunnables(mockRunnable2))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, defaultPid0.subscribeSignals, 3)
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGINT)
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGTERM)
@@ -177,7 +177,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 			return resultErr != nil
 		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error when timeout occurs")
 
-		assert.Error(t, resultErr)
+		require.Error(t, resultErr)
 		assert.Contains(t, resultErr.Error(), "timeout waiting for runnable to start")
 		mockRunnable.AssertExpectations(t)
 	})
@@ -238,7 +238,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 			return resultErr != nil
 		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error from error channel")
 
-		assert.Error(t, resultErr)
+		require.Error(t, resultErr)
 		assert.Contains(t, resultErr.Error(), "runnable failed to start")
 		assert.Contains(t, resultErr.Error(), expectedErr.Error())
 
@@ -273,7 +273,7 @@ func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Ensure cleanup
 	t.Cleanup(func() {
@@ -316,7 +316,7 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		pid0.Shutdown()
@@ -338,7 +338,7 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	// Wait for Exec to finish due to SIGINT
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after SIGINT")
 	}
@@ -360,7 +360,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 	ctx := t.Context()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		pid0.Shutdown()
@@ -382,7 +382,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 	// Wait for Exec to finish due to SIGTERM
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after SIGTERM")
 	}
@@ -407,7 +407,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		pid0.Shutdown()
@@ -435,7 +435,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	// Wait for Exec to finish
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after SIGHUP and SIGINT")
 	}
@@ -470,7 +470,7 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable1, mockRunnable2))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pid0.listenForSignals()
 
@@ -491,7 +491,7 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	// Wait for Exec to finish due to SIGTERM
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after multiple signals")
 	}
@@ -513,7 +513,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 	mockService.On("GetState").Return("running").Maybe()
 	mockService.On("GetStateChan", mock.Anything).Return(serviceStateChan).Maybe()
 	pid0, err := New(WithContext(ctx), WithRunnables(mockService))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		pid0.Shutdown()
@@ -532,7 +532,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 	// Wait for Exec to finish
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time with no runnables")
 	}
@@ -554,7 +554,7 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		pid0.Shutdown()
@@ -577,7 +577,7 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	// Wait for Exec to finish
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after multiple SIGINT")
 	}
@@ -611,7 +611,7 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	defer cancel()
 
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Ensure cleanup
 	t.Cleanup(func() {
@@ -656,7 +656,7 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	// Wait for Exec to finish due to SIGTERM
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		t.Log("Exec finished without errors")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after SIGTERM and SIGHUP")
@@ -689,7 +689,7 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 	// Create PIDZero with the mock runnable
 	ctx, cancel := context.WithCancel(context.Background())
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	pid0.listenForSignals()
 
 	execDone := make(chan error, 1)
@@ -703,7 +703,7 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 	// Wait for Exec to finish due to SIGTERM
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		t.Log("Exec finished without errors")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Exec did not finish in time after SIGTERM and SIGHUP")

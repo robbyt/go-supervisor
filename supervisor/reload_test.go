@@ -8,6 +8,7 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPIDZero_ReloadManager tests the reload manager functionality.
@@ -26,7 +27,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		done := make(chan struct{})
 		go func() {
@@ -78,7 +79,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender1, sender2))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		done := make(chan struct{})
 		go func() {
@@ -118,7 +119,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 		p, err := New(WithContext(ctx), WithRunnables(sender))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		done := make(chan struct{})
 		go func() {
@@ -164,7 +165,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		defer cancel()
 
 		pid0, err := New(WithContext(ctx), WithRunnables(mockService1, mockService2))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Start supervisor
 		execDone := make(chan error, 1)
@@ -189,7 +190,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		pid0.Shutdown()
 		select {
 		case err := <-execDone:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-time.After(time.Second):
 			t.Fatal("shutdown timed out")
 		}

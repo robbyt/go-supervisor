@@ -64,7 +64,7 @@ func testSingleRunnerRaceCondition(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "Server should report as running")
 
 	conn, err := net.DialTimeout("tcp", port, 100*time.Millisecond)
-	assert.NoError(t, err, "TCP connection should succeed when IsRunning() returns true")
+	require.NoError(t, err, "TCP connection should succeed when IsRunning() returns true")
 
 	if conn != nil {
 		require.NoError(t, conn.Close())
@@ -72,10 +72,10 @@ func testSingleRunnerRaceCondition(t *testing.T) {
 
 	client := &http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get("http://" + port + "/health")
-	assert.NoError(t, err, "HTTP request should succeed when IsRunning()=true")
+	require.NoError(t, err, "HTTP request should succeed when IsRunning()=true")
 
 	if resp != nil {
-		assert.NoError(t, resp.Body.Close())
+		require.NoError(t, resp.Body.Close())
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	}
 
@@ -85,7 +85,7 @@ func testSingleRunnerRaceCondition(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Server did not shutdown within timeout")
 	}
@@ -142,7 +142,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	resp, err := client.Get("http://" + port + "/status")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.NoError(t, resp.Body.Close())
+	require.NoError(t, resp.Body.Close())
 
 	cancel()
 
@@ -155,7 +155,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	defer timeoutCancel()
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-timeoutCtx.Done():
 		t.Fatal("Server did not shutdown within timeout")
 	}

@@ -59,8 +59,8 @@ type HeaderInfo struct {
 // HeaderResponse represents the complete header inspection response
 type HeaderResponse struct {
 	Message         string       `json:"message"`
-	RequestHeaders  []HeaderInfo `json:"request_headers"`
-	ResponseHeaders []HeaderInfo `json:"response_headers,omitempty"`
+	RequestHeaders  []HeaderInfo `json:"requestHeaders"`
+	ResponseHeaders []HeaderInfo `json:"responseHeaders,omitempty"`
 	Timestamp       string       `json:"timestamp"`
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -36,7 +37,7 @@ func TestNew(t *testing.T) {
 		// Create route and test
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, handlers...)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -60,7 +61,7 @@ func TestNew(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -89,7 +90,7 @@ func TestNew(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -112,7 +113,7 @@ func TestNew(t *testing.T) {
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {},
 			headerMiddleware, overrideMiddleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -135,7 +136,7 @@ func TestNew(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -159,7 +160,7 @@ func TestNew(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -182,7 +183,7 @@ func TestJSON(t *testing.T) {
 
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 		func(w http.ResponseWriter, r *http.Request) {}, middleware)
-	assert.NoError(t, err, "route creation should not fail")
+	require.NoError(t, err, "route creation should not fail")
 
 	route.ServeHTTP(rec, req)
 
@@ -208,7 +209,7 @@ func TestCORS(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -247,7 +248,7 @@ func TestCORS(t *testing.T) {
 
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {}, middleware)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 
@@ -288,7 +289,7 @@ func TestSecurity(t *testing.T) {
 
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 		func(w http.ResponseWriter, r *http.Request) {}, middleware)
-	assert.NoError(t, err, "route creation should not fail")
+	require.NoError(t, err, "route creation should not fail")
 
 	route.ServeHTTP(rec, req)
 
@@ -323,7 +324,7 @@ func TestAdd(t *testing.T) {
 
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 		func(w http.ResponseWriter, r *http.Request) {}, middleware)
-	assert.NoError(t, err, "route creation should not fail")
+	require.NoError(t, err, "route creation should not fail")
 
 	route.ServeHTTP(rec, req)
 
@@ -350,7 +351,7 @@ func TestHeadersIntegration(t *testing.T) {
 		route, err := httpserver.NewRouteFromHandlerFunc("test", "/test",
 			func(w http.ResponseWriter, r *http.Request) {},
 			jsonMw, securityMw, customMw)
-		assert.NoError(t, err, "route creation should not fail")
+		require.NoError(t, err, "route creation should not fail")
 
 		route.ServeHTTP(rec, req)
 

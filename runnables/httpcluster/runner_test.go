@@ -127,7 +127,7 @@ func TestNewRunner(t *testing.T) {
 		}
 
 		_, err := NewRunner(invalidOption)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to apply option")
 	})
 }
@@ -211,7 +211,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -243,7 +243,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -273,7 +273,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -329,7 +329,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		defer stopCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-stopCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -346,7 +346,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		}
 
 		err = runner.processConfigUpdate(t.Context(), configs)
-		assert.NoError(t, err) // Should not error, just ignore
+		require.NoError(t, err) // Should not error, just ignore
 
 		assert.Equal(t, finitestate.StatusNew, runner.GetState())
 	})
@@ -391,7 +391,7 @@ func TestRunnerStateTransitions(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -560,7 +560,7 @@ func TestRunnerConcurrency(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -721,7 +721,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -766,7 +766,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -797,7 +797,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -833,7 +833,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -880,7 +880,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
