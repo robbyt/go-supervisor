@@ -719,9 +719,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			assert.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -745,9 +745,13 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		cancel()
 
-		require.Eventually(t, func() bool {
-			return !runner.IsRunning()
-		}, time.Second, 10*time.Millisecond)
+		// Wait for Run to complete before checking expectations
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 
 		for _, mock := range createdServers {
 			mock.AssertExpectations(t)
@@ -764,9 +768,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			assert.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -783,6 +787,14 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}, time.Second, 10*time.Millisecond)
 
 		cancel()
+
+		// Wait for Run to complete
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 	})
 
 	t.Run("server readiness timeout", func(t *testing.T) {
@@ -795,9 +807,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			assert.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -814,6 +826,14 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}, 15*time.Second, 100*time.Millisecond)
 
 		cancel()
+
+		// Wait for Run to complete
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 	})
 
 	t.Run("mixed success and failure", func(t *testing.T) {
