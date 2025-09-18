@@ -127,7 +127,7 @@ func TestNewRunner(t *testing.T) {
 		}
 
 		_, err := NewRunner(invalidOption)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to apply option")
 	})
 }
@@ -211,7 +211,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -243,7 +243,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -273,7 +273,7 @@ func TestRunnerRun(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -329,7 +329,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		defer stopCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-stopCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -346,7 +346,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		}
 
 		err = runner.processConfigUpdate(t.Context(), configs)
-		assert.NoError(t, err) // Should not error, just ignore
+		require.NoError(t, err) // Should not error, just ignore
 
 		assert.Equal(t, finitestate.StatusNew, runner.GetState())
 	})
@@ -391,17 +391,17 @@ func TestRunnerStateTransitions(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
 
-		// Check state progression
+		// Check state progression - wait for all 5 states
 		require.Eventually(t, func() bool {
 			mu.Lock()
 			defer mu.Unlock()
-			return len(collectedStates) >= 4
-		}, time.Second, 10*time.Millisecond)
+			return len(collectedStates) >= 5
+		}, 2*time.Second, 10*time.Millisecond, "Should collect all 5 state transitions")
 
 		// Should see: New -> Booting -> Running -> Stopping -> Stopped
 		mu.Lock()
@@ -560,7 +560,7 @@ func TestRunnerConcurrency(t *testing.T) {
 		defer timeoutCancel()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
@@ -719,9 +719,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			require.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -745,9 +745,13 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		cancel()
 
-		require.Eventually(t, func() bool {
-			return !runner.IsRunning()
-		}, time.Second, 10*time.Millisecond)
+		// Wait for Run to complete before checking expectations
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 
 		for _, mock := range createdServers {
 			mock.AssertExpectations(t)
@@ -764,9 +768,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			require.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -783,6 +787,14 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}, time.Second, 10*time.Millisecond)
 
 		cancel()
+
+		// Wait for Run to complete
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 	})
 
 	t.Run("server readiness timeout", func(t *testing.T) {
@@ -795,9 +807,9 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 
+		runErr := make(chan error, 1)
 		go func() {
-			err := runner.Run(ctx)
-			require.NoError(t, err)
+			runErr <- runner.Run(ctx)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -814,6 +826,14 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}, 15*time.Second, 100*time.Millisecond)
 
 		cancel()
+
+		// Wait for Run to complete
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Runner did not shutdown within timeout")
+		}
 	})
 
 	t.Run("mixed success and failure", func(t *testing.T) {
@@ -833,7 +853,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -880,7 +900,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 
 		go func() {
 			err := runner.Run(ctx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {

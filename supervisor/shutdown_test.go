@@ -8,6 +8,7 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPIDZero_StartShutdownManager_TriggersShutdown verifies that receiving a signal
@@ -31,7 +32,7 @@ func TestPIDZero_StartShutdownManager_TriggersShutdown(t *testing.T) {
 	// Create a supervisor with the mock runnable
 	// Pass the specific context so we can monitor its cancellation
 	pidZero, err := New(WithContext(supervisorCtx), WithRunnables(mockService))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Start the shutdown manager in a goroutine
 	pidZero.wg.Add(1)
@@ -78,7 +79,7 @@ func TestPIDZero_StartShutdownManager_ContextCancel(t *testing.T) {
 
 	// Create a supervisor with the mock runnable
 	pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Start the shutdown manager in a goroutine
 	pidZero.wg.Add(1)
@@ -125,7 +126,7 @@ func TestPIDZero_StartShutdownManager_NoSenders(t *testing.T) {
 
 	// Create a supervisor with the non-sender runnable
 	pidZero, err := New(WithContext(ctx), WithRunnables(nonSenderRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Start the shutdown manager in a goroutine
 	pidZero.wg.Add(1)
@@ -184,7 +185,7 @@ func TestPIDZero_Shutdown_WithTimeoutNotExceeded(t *testing.T) {
 		WithRunnables(runnable),
 		WithShutdownTimeout(2*time.Second),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Run the supervisor
 	execDone := make(chan error, 1)
@@ -204,7 +205,7 @@ func TestPIDZero_Shutdown_WithTimeoutNotExceeded(t *testing.T) {
 
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Run did not complete after shutdown")
 	}
@@ -251,7 +252,7 @@ func TestPIDZero_Shutdown_WithTimeoutExceeded(t *testing.T) {
 		WithRunnables(runnable),
 		WithShutdownTimeout(200*time.Millisecond), // Shorter than our test duration
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Run the supervisor
 	execDone := make(chan error, 1)

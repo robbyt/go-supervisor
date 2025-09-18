@@ -50,7 +50,7 @@ func TestContextValuePropagation(t *testing.T) {
 		// Send a response
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write([]byte("OK"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}
 
 	// Create a route with the test handler
@@ -116,7 +116,7 @@ func TestContextValuePropagation(t *testing.T) {
 	// Server should shut down
 	select {
 	case err := <-errChan:
-		assert.NoError(t, err, "Server should shut down cleanly")
+		require.NoError(t, err, "Server should shut down cleanly")
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timed out waiting for server to shut down")
 	}

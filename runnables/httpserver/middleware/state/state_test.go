@@ -7,6 +7,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupRequest creates a basic HTTP request for testing
@@ -52,7 +53,7 @@ func executeHandlerWithState(
 	t.Helper()
 	// Create a route with state middleware and the handler
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(stateProvider))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
 

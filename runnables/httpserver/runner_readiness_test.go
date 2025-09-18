@@ -38,7 +38,7 @@ func TestServerReadinessProbe(t *testing.T) {
 		defer cancel()
 
 		err := runner.serverReadinessProbe(ctx, "test.invalid:80")
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrServerReadinessTimeout)
 	})
 
@@ -57,7 +57,7 @@ func TestServerReadinessProbe(t *testing.T) {
 		go func() {
 			conn, err := listener.Accept()
 			if err == nil {
-				require.NoError(t, conn.Close())
+				assert.NoError(t, conn.Close())
 			}
 		}()
 

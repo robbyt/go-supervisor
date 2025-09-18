@@ -17,7 +17,7 @@ import (
 // dynamic updates via ReloadWithConfig at runtime.
 type WorkerConfig struct {
 	Interval time.Duration `json:"interval"`
-	JobName  string        `json:"job_name"`
+	JobName  string        `json:"jobName"`
 }
 
 func (wc WorkerConfig) String() string {

@@ -70,7 +70,7 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 2, "Both servers should be marked for start")
-		assert.Len(t, toStop, 0, "No servers should be marked for stop")
+		assert.Empty(t, toStop, "No servers should be marked for stop")
 		assert.Contains(t, toStart, "server1", "server1 should be marked for start")
 		assert.Contains(t, toStart, "server2", "server2 should be marked for start")
 
@@ -93,7 +93,7 @@ func TestNewEntries_EmptyPrevious(t *testing.T) {
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 1)
-		assert.Len(t, toStop, 0)
+		assert.Empty(t, toStop)
 		assert.Contains(t, toStart, "server1")
 	})
 }
@@ -120,7 +120,7 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 
 		assert.Equal(t, 1, entries.count()) // Server marked for stop
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 0)
+		assert.Empty(t, toStart)
 		assert.Len(t, toStop, 1)
 		assert.Contains(t, toStop, "server1")
 
@@ -151,8 +151,8 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 
 		assert.Equal(t, 0, entries.count()) // Server not copied (no runtime to stop)
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 0)
-		assert.Len(t, toStop, 0)
+		assert.Empty(t, toStart)
+		assert.Empty(t, toStop)
 	})
 
 	t.Run("remove with nil config", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestNewEntries_ServerRemoval(t *testing.T) {
 
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 0)
+		assert.Empty(t, toStart)
 		assert.Len(t, toStop, 1)
 		assert.Contains(t, toStop, "server1")
 	})
@@ -207,7 +207,7 @@ func TestNewEntries_ServerAddition(t *testing.T) {
 		assert.Equal(t, 2, entries.count())
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 1)
-		assert.Len(t, toStop, 0)
+		assert.Empty(t, toStop)
 		assert.Contains(t, toStart, "server2")
 
 		// Check server1 unchanged
@@ -289,7 +289,7 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 		assert.Equal(t, 1, entries.count(), "Non-running server config change should just update")
 		toStart, toStop := entries.getPendingActions()
 		assert.Len(t, toStart, 1)
-		assert.Len(t, toStop, 0)
+		assert.Empty(t, toStop)
 		assert.Contains(t, toStart, "server1")
 
 		entry := entries.get("server1")
@@ -315,8 +315,8 @@ func TestNewEntries_ServerConfigChange(t *testing.T) {
 
 		assert.Equal(t, 1, entries.count())
 		toStart, toStop := entries.getPendingActions()
-		assert.Len(t, toStart, 0)
-		assert.Len(t, toStop, 0)
+		assert.Empty(t, toStart)
+		assert.Empty(t, toStop)
 
 		entry := entries.get("server1")
 		require.NotNil(t, entry)
@@ -652,8 +652,8 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 			t, processExistingServer("server1", oldEntry, nil),
 		)
 
-		assert.Len(t, entries, 0)
-		assert.Len(t, keys, 0, "Nothing should be yielded for non-running servers")
+		assert.Empty(t, entries)
+		assert.Empty(t, keys, "Nothing should be yielded for non-running servers")
 	})
 
 	t.Run("nil old entry", func(t *testing.T) {
@@ -661,8 +661,8 @@ func TestProcessExistingServer_ServerRemoval(t *testing.T) {
 			t, processExistingServer("server1", nil, nil),
 		)
 
-		assert.Len(t, entries, 0)
-		assert.Len(t, keys, 0, "Nothing should be yielded for nil entries")
+		assert.Empty(t, entries)
+		assert.Empty(t, keys, "Nothing should be yielded for nil entries")
 	})
 }
 

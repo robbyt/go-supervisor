@@ -59,7 +59,7 @@ func TestRunServer(t *testing.T) {
 	// Check that Run() didn't return an error
 	select {
 	case err := <-errCh:
-		assert.NoError(t, err, "Run() should not return an error")
+		require.NoError(t, err, "Run() should not return an error")
 	case <-time.After(100 * time.Millisecond):
 		// This is expected - the server is still running
 	}

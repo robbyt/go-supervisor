@@ -87,7 +87,7 @@ func TestNewRoute_Internal(t *testing.T) {
 			route, err := newRoute(tt.routeName, tt.path, tt.handlers...)
 
 			if tt.expectError {
-				assert.Error(t, err, "should return error for invalid input")
+				require.Error(t, err, "should return error for invalid input")
 				assert.Nil(t, route, "should return nil route on error")
 				assert.Contains(
 					t,
@@ -96,10 +96,10 @@ func TestNewRoute_Internal(t *testing.T) {
 					"error message should contain expected text",
 				)
 			} else {
-				assert.NoError(t, err, "should not return error for valid input")
+				require.NoError(t, err, "should not return error for valid input")
 				assert.NotNil(t, route, "should return non-nil route")
 				assert.Equal(t, tt.path, route.Path, "route path should match input")
-				assert.Equal(t, len(tt.handlers), len(route.Handlers), "handler count should match")
+				assert.Len(t, route.Handlers, len(tt.handlers), "handler count should match")
 			}
 		})
 	}
@@ -195,7 +195,7 @@ func TestRoutes_Equal(t *testing.T) {
 	// the .Equal check looks at the memory space, to see if the handler is the SAME object in memory
 	sameHandler := func(w http.ResponseWriter, r *http.Request) {
 		_, err := w.Write([]byte("same"))
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}
 
 	tests := []struct {
@@ -249,7 +249,7 @@ func TestRoutes_Equal(t *testing.T) {
 			routes2: Routes{
 				testRoute(t, "v1", "/test", func(w http.ResponseWriter, r *http.Request) {
 					_, err := w.Write([]byte("different"))
-					require.NoError(t, err)
+					assert.NoError(t, err)
 				}),
 			},
 			expected: true,
@@ -381,11 +381,11 @@ func TestNewRouteFromHandlerFuncWithMiddleware(t *testing.T) {
 				tt.middlewares...)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, route)
 				assert.Contains(t, err.Error(), tt.errorMsg)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.NotNil(t, route)
 				assert.Equal(t, tt.path, route.Path)
 				assert.NotEmpty(t, route.Handlers)

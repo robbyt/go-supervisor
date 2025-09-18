@@ -7,6 +7,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupRequest creates a basic HTTP request for testing
@@ -38,7 +39,7 @@ func executeHandlerWithMetrics(
 	t.Helper()
 	// Create a route with metrics middleware and the handler
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New())
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
 

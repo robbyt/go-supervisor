@@ -7,6 +7,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func createTestRoute(t *testing.T, handler http.HandlerFunc) *httpserver.Route {
@@ -17,7 +18,7 @@ func createTestRoute(t *testing.T, handler http.HandlerFunc) *httpserver.Route {
 		handler,
 		New(),
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	return route
 }
 
@@ -63,7 +64,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 		route.ServeHTTP(rec, req)
 
 		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-		assert.Equal(
+		assert.JSONEq(
 			t,
 			`{"message": "Hello World", "status": "success"}`,
 			rec.Body.String(),
@@ -224,7 +225,7 @@ func TestJSONEnforcerMiddleware(t *testing.T) {
 
 		assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		body := rec.Body.String()
-		assert.Equal(
+		assert.JSONEq(
 			t,
 			`{"response":"Hello World"}`,
 			body,

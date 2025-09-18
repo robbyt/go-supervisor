@@ -25,7 +25,7 @@ func getRestartTestPort(tb testing.TB) string {
 		require.NoError(tb, err)
 	}()
 	_, port, err := net.SplitHostPort(listener.Addr().String())
-	require.NoError(tb, err)
+	assert.NoError(tb, err)
 	return "127.0.0.1:" + port
 }
 
@@ -38,13 +38,13 @@ func createRestartTestHTTPConfig(tb testing.TB, addr string, routeName string) *
 		func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte(routeName))
-			require.NoError(tb, err)
+			assert.NoError(tb, err)
 		},
 	)
-	require.NoError(tb, err)
+	assert.NoError(tb, err) //nolint:testifylint // Helper function called from both main tests and goroutines
 
 	config, err := httpserver.NewConfig(addr, httpserver.Routes{*route})
-	require.NoError(tb, err)
+	assert.NoError(tb, err)
 	return config
 }
 
@@ -83,7 +83,7 @@ func TestPortBindingRaceCondition(t *testing.T) {
 
 			go func() {
 				err := runner.Run(ctx)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 			}()
 
 			require.Eventually(t, func() bool {
@@ -172,7 +172,7 @@ func TestConcurrentServerManagement(t *testing.T) {
 
 	go func() {
 		err := runner.Run(ctx)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -257,7 +257,7 @@ func TestConcurrentRestartStress(t *testing.T) {
 
 	go func() {
 		err := runner.Run(ctx)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}()
 
 	require.Eventually(t, func() bool {
@@ -362,7 +362,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 			defer cancel()
 			go func() {
 				err := runner.Run(ctx)
-				require.NoError(b, err)
+				assert.NoError(b, err)
 			}()
 
 			// Wait for runner to start
@@ -443,7 +443,7 @@ func BenchmarkServerRestartsNoDelay(b *testing.B) {
 	defer cancel()
 	go func() {
 		err := runner.Run(ctx)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}()
 
 	// Wait for runner to start
@@ -514,7 +514,7 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 
 	go func() {
 		err := runner.Run(ctx)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}()
 
 	// Wait for runner to start

@@ -10,6 +10,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupRequest creates a basic HTTP request for testing
@@ -55,7 +56,7 @@ func executeHandlerWithLogger(
 	t.Helper()
 	// Create a route with logger middleware and the handler
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logHandler))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
 
@@ -84,7 +85,7 @@ func TestLogger(t *testing.T) {
 		// Check response
 		resp := rec.Result()
 		body, err := io.ReadAll(resp.Body)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "test response", string(body))
 

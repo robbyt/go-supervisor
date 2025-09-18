@@ -114,7 +114,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		go func() {
 			err := runner.Run(runCtx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -197,7 +197,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		defer cancel()
 		go func() {
 			err := runner.Run(runCtx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		require.Eventually(t, func() bool {
@@ -292,7 +292,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		defer cancel()
 		go func() {
 			err := runner.Run(runCtx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		// Verify runner reaches Running state
@@ -401,7 +401,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		defer cancel()
 		go func() {
 			err := runner.Run(runCtx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		// Verify runner reaches Running state
@@ -491,7 +491,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		defer cancel()
 		go func() {
 			err := runner.Run(runCtx)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}()
 
 		// Verify runner reaches Running state
@@ -1176,7 +1176,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		// Make sure initial config is loaded
 		initialConfigLoaded := runner.getConfig()
 		assert.NotNil(t, initialConfigLoaded)
-		assert.Equal(t, 2, len(initialConfigLoaded.Entries))
+		assert.Len(t, initialConfigLoaded.Entries, 2)
 
 		// Set runCtx (normally done by Run)
 		runner.runnablesMu.Lock()
@@ -1190,7 +1190,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		// Verify config was updated
 		updatedConfig := runner.getConfig()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 2, len(updatedConfig.Entries))
+		assert.Len(t, updatedConfig.Entries, 2)
 		assert.Equal(t, mockRunnable3, updatedConfig.Entries[0].Runnable)
 		assert.Equal(t, mockRunnable4, updatedConfig.Entries[1].Runnable)
 
@@ -1348,7 +1348,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		// Verify config was updated
 		updatedConfig := runner.getConfig()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 0, len(updatedConfig.Entries), "Config should have empty entries")
+		assert.Empty(t, updatedConfig.Entries, "Config should have empty entries")
 	})
 }
 

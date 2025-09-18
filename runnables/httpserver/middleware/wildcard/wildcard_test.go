@@ -7,6 +7,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupRequest creates a basic HTTP request for testing
@@ -39,7 +40,7 @@ func executeHandlerWithWildcard(
 	t.Helper()
 	// Create route with wildcard middleware and the handler
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(prefix))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
 
@@ -67,7 +68,7 @@ func TestWildcard_ExactPrefixMatch(t *testing.T) {
 	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "", rec.Body.String())
+	assert.Empty(t, rec.Body.String())
 }
 
 func TestWildcard_NonMatchingPrefix(t *testing.T) {
@@ -114,7 +115,7 @@ func TestWildcard_RootPath(t *testing.T) {
 	executeHandlerWithWildcard(t, handler, "/", rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "", rec.Body.String())
+	assert.Empty(t, rec.Body.String())
 }
 
 func TestWildcard_PrefixWithoutTrailingSlash(t *testing.T) {

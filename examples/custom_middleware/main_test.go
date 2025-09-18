@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,7 +46,7 @@ func TestBuildRoutes(t *testing.T) {
 			t,
 			routeMap,
 			path,
-			fmt.Sprintf("route %s should exist at path %s", name, path),
+			"route %s should exist at path %s", name, path,
 		)
 	}
 }
@@ -127,7 +126,7 @@ func TestRouteResponses(t *testing.T) {
 			if tt.checkJSON {
 				var jsonData any
 				err := json.Unmarshal(body, &jsonData)
-				assert.NoError(t, err, "response should be valid JSON")
+				require.NoError(t, err, "response should be valid JSON")
 			}
 
 			if tt.checkContent != "" {
@@ -330,7 +329,7 @@ func TestRunServer(t *testing.T) {
 	select {
 	case err := <-done:
 		// The supervisor should stop cleanly when context is cancelled
-		assert.NoError(t, err, "supervisor should stop cleanly")
+		require.NoError(t, err, "supervisor should stop cleanly")
 	case <-time.After(5 * time.Second):
 		t.Fatal("supervisor did not stop within timeout")
 	}
@@ -359,13 +358,13 @@ func TestHeadersMiddlewareIntegration(t *testing.T) {
 
 		for _, path := range paths {
 			resp, err := http.Get(server.URL + path)
-			require.NoError(t, err, fmt.Sprintf("HTTP request to %s should not fail", path))
+			require.NoError(t, err, "HTTP request to %s should not fail", path)
 			assert.NoError(t, resp.Body.Close())
 
 			assert.Equal(t, "application/json", resp.Header.Get("Content-Type"),
-				fmt.Sprintf("path %s should have JSON content type", path))
+				"path %s should have JSON content type", path)
 			assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"),
-				fmt.Sprintf("path %s should have no-cache header", path))
+				"path %s should have no-cache header", path)
 		}
 	})
 
@@ -374,16 +373,16 @@ func TestHeadersMiddlewareIntegration(t *testing.T) {
 
 		for _, path := range apiPaths {
 			resp, err := http.Get(server.URL + path)
-			require.NoError(t, err, fmt.Sprintf("HTTP request to %s should not fail", path))
+			require.NoError(t, err, "HTTP request to %s should not fail", path)
 			assert.NoError(t, resp.Body.Close())
 
 			assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"),
-				fmt.Sprintf("API path %s should have CORS origin header", path))
+				"API path %s should have CORS origin header", path)
 			assert.Equal(
 				t,
 				"GET,POST,PUT,DELETE,OPTIONS",
 				resp.Header.Get("Access-Control-Allow-Methods"),
-				fmt.Sprintf("API path %s should have CORS methods header", path),
+				"API path %s should have CORS methods header", path,
 			)
 		}
 	})
@@ -393,15 +392,15 @@ func TestHeadersMiddlewareIntegration(t *testing.T) {
 
 		for _, path := range paths {
 			resp, err := http.Get(server.URL + path)
-			require.NoError(t, err, fmt.Sprintf("HTTP request to %s should not fail", path))
+			require.NoError(t, err, "HTTP request to %s should not fail", path)
 			assert.NoError(t, resp.Body.Close())
 
 			assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"),
-				fmt.Sprintf("path %s should have content type options header", path))
+				"path %s should have content type options header", path)
 			assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"),
-				fmt.Sprintf("path %s should have frame options header", path))
+				"path %s should have frame options header", path)
 			assert.Equal(t, "1; mode=block", resp.Header.Get("X-XSS-Protection"),
-				fmt.Sprintf("path %s should have XSS protection header", path))
+				"path %s should have XSS protection header", path)
 		}
 	})
 }

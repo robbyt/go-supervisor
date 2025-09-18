@@ -449,7 +449,7 @@ func TestRequestHeaderEdgeCases(t *testing.T) {
 
 		route.ServeHTTP(rec, req)
 
-		assert.Equal(t, "", capturedHeaders.Get("Empty-Value"))
+		assert.Empty(t, capturedHeaders.Get("Empty-Value"))
 	})
 
 	t.Run("request header case sensitivity", func(t *testing.T) {

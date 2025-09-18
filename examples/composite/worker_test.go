@@ -101,7 +101,7 @@ func TestWorker_NewWorker_Validation(t *testing.T) {
 			worker, err := NewWorker(tc.config, logger)
 			if tc.expectError {
 				require.Error(t, err, "Expected an error for invalid config")
-				assert.ErrorContains(t, err, tc.errorMsg, "Error message mismatch")
+				require.ErrorContains(t, err, tc.errorMsg, "Error message mismatch")
 				assert.Nil(t, worker, "Worker should be nil on error")
 			} else {
 				require.NoError(t, err, "Expected no error for valid config")
@@ -151,7 +151,7 @@ func TestWorker_Run_Stop(t *testing.T) {
 	select {
 	case err := <-runErrChan:
 		// Expect nil error because stop should be graceful context cancellation
-		assert.NoError(t, err, "Worker Run should return nil error on graceful stop")
+		require.NoError(t, err, "Worker Run should return nil error on graceful stop")
 	case <-time.After(1 * time.Second): // Timeout waiting for Run to exit
 		t.Fatal("Worker Run did not return after Stop() was called")
 	}
@@ -201,7 +201,7 @@ func TestWorker_Run_ContextCancel(t *testing.T) {
 	select {
 	case err := <-runErrChan:
 		// Expect nil error for graceful context cancellation
-		assert.NoError(t, err, "Worker Run should return nil error on context cancel")
+		require.NoError(t, err, "Worker Run should return nil error on context cancel")
 	case <-time.After(1 * time.Second):
 		t.Fatal("Worker Run did not return after context cancellation")
 	}

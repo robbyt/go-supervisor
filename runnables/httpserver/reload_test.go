@@ -116,7 +116,7 @@ func TestRapidReload(t *testing.T) {
 				return false
 			}
 			ok := resp.StatusCode == http.StatusOK
-			assert.Nil(t, resp.Body.Close(), "Failed to close response body")
+			assert.NoError(t, resp.Body.Close(), "Failed to close response body")
 			return ok
 		}, 2*time.Second, 100*time.Millisecond, "Server should eventually respond to HTTP requests")
 	}
@@ -210,7 +210,7 @@ func TestReload(t *testing.T) {
 			handlerCalled = true
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("initial"))
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)
@@ -436,7 +436,7 @@ func TestReload(t *testing.T) {
 			handlerCalled = true
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("unchanged"))
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 		route, err := NewRouteFromHandlerFunc("v1", "/", handler)
 		require.NoError(t, err)

@@ -91,7 +91,7 @@ func TestIntegration_BasicServerLifecycle(t *testing.T) {
 
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
@@ -219,7 +219,7 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
@@ -301,7 +301,7 @@ func TestIntegration_StateReporting(t *testing.T) {
 
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
@@ -413,7 +413,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
@@ -549,7 +549,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 
 	select {
 	case err := <-runErr:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Runner did not stop within timeout")
 	}
@@ -588,7 +588,7 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	toStart1, toStop1 := entries1.getPendingActions()
 
 	assert.Len(t, toStart1, 1, "First config should trigger one server start")
-	assert.Len(t, toStop1, 0, "First config should not trigger any stops")
+	assert.Empty(t, toStop1, "First config should not trigger any stops")
 	assert.Contains(t, toStart1, "test-server", "test-server should be marked for start")
 
 	// Simulate the server being started by updating the entry with runtime info
@@ -617,8 +617,8 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	entries2 := committedEntries.buildPendingEntries(desiredEntries).(*entries)
 	toStart2, toStop2 := entries2.getPendingActions()
 
-	assert.Len(t, toStart2, 0, "Identical config should not trigger any starts")
-	assert.Len(t, toStop2, 0, "Identical config should not trigger any stops")
+	assert.Empty(t, toStart2, "Identical config should not trigger any starts")
+	assert.Empty(t, toStop2, "Identical config should not trigger any stops")
 
 	// Verify the server entry action is set to actionNone
 	entry2 := entries2.get("test-server")
@@ -630,6 +630,6 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	entries3 := entries2.commit().(*entries).buildPendingEntries(desiredEntries3).(*entries)
 	toStart3, toStop3 := entries3.getPendingActions()
 
-	assert.Len(t, toStart3, 0, "Multiple identical configs should not trigger any starts")
-	assert.Len(t, toStop3, 0, "Multiple identical configs should not trigger any stops")
+	assert.Empty(t, toStart3, "Multiple identical configs should not trigger any starts")
+	assert.Empty(t, toStop3, "Multiple identical configs should not trigger any stops")
 }

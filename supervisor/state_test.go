@@ -5,6 +5,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPIDZero_GetState tests the GetState method with Stateable and non-Stateable runnables.
@@ -47,7 +48,7 @@ func TestPIDZero_GetState(t *testing.T) {
 			// Create a supervisor with the mock runnable
 			runnable := tt.setupMock()
 			pidZero, err := New(WithRunnables(runnable))
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			// Get the state of the runnable
 			state := pidZero.GetCurrentState(runnable)
@@ -82,7 +83,7 @@ func TestPIDZero_GetStates(t *testing.T) {
 
 	// Create a supervisor with the mock runnables
 	pidZero, err := New(WithRunnables(mockService1, mockService2, nonStateableRunnable))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Get the states of all runnables
 	states := pidZero.GetCurrentStates()

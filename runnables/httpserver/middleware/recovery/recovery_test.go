@@ -10,6 +10,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupRequest creates a basic HTTP request for testing
@@ -39,7 +40,7 @@ func executeHandlerWithRecovery(
 	t.Helper()
 	// Create a route with recovery middleware and the handler
 	route, err := httpserver.NewRouteFromHandlerFunc("test", "/test", handler, New(logHandler))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	route.ServeHTTP(rec, req)
 }
 
@@ -75,7 +76,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 		// Verify response
 		resp := rec.Result()
 		body, err := io.ReadAll(resp.Body)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 		assert.Equal(t, "Internal Server Error\n", string(body))
 
@@ -98,7 +99,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 		// Verify response - should still return 500 error
 		resp := rec.Result()
 		body, err := io.ReadAll(resp.Body)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 		assert.Equal(t, "Internal Server Error\n", string(body))
 

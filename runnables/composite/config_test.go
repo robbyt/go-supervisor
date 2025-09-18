@@ -44,7 +44,7 @@ func TestNewConfig(t *testing.T) {
 			cfg, err := NewConfig(tt.configName, tt.entries)
 
 			if tt.expectError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, cfg)
 			} else {
 				require.NoError(t, err)

@@ -27,8 +27,8 @@ func TestBootConfigCreateFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	err = runner.boot()
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrCreateConfig)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrCreateConfig)
 }
 
 // TestBootFailure tests various boot failure scenarios
@@ -37,7 +37,7 @@ func TestBootFailure(t *testing.T) {
 
 	t.Run("Missing config callback", func(t *testing.T) {
 		_, err := NewRunner()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "config callback is required")
 	})
 
@@ -47,9 +47,9 @@ func TestBootFailure(t *testing.T) {
 			WithConfigCallback(callback),
 		)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, runner)
-		assert.ErrorIs(t, err, ErrConfigCallback)
+		require.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Config callback returns error", func(t *testing.T) {
@@ -58,9 +58,9 @@ func TestBootFailure(t *testing.T) {
 			WithConfigCallback(callback),
 		)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, runner)
-		assert.ErrorIs(t, err, ErrConfigCallback)
+		require.ErrorIs(t, err, ErrConfigCallback)
 	})
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {
@@ -80,14 +80,14 @@ func TestBootFailure(t *testing.T) {
 			WithConfigCallback(callback),
 		)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, runner)
 
 		// Test actual run
 		err = runner.Run(t.Context())
-		assert.Error(t, err)
+		require.Error(t, err)
 		// With our readiness probe, the error format is different but should be propagated properly
-		assert.ErrorIs(t, err, ErrServerBoot)
+		require.ErrorIs(t, err, ErrServerBoot)
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 	})
 }

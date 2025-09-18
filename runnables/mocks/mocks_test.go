@@ -13,6 +13,7 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestInterfaceGuards uses compile-time type assertions to ensure that mock implementations
@@ -61,7 +62,7 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		mockObj.Stop()
 		mockObj.Reload()
 		name := mockObj.String()
@@ -76,7 +77,7 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		mockObj.Stop()
 		mockObj.Reload()
 		name := mockObj.String()
@@ -91,7 +92,7 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		mockObj.Stop()
 		mockObj.Reload()
 		name := mockObj.String()
@@ -106,7 +107,7 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		mockObj.Stop()
 		mockObj.Reload()
 		name := mockObj.String()

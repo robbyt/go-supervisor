@@ -12,37 +12,53 @@ linters:
     - noctx         # Finds sending http request without context.Context
     - prealloc      # Temporarily disable until slice allocation issues are fixed
   enable:
-    - bodyclose     # Checks HTTP response body is closed
-    - contextcheck  # Check whether the function uses a non-inherited context
-    - dupl          # Find duplicate code
-    - dupword       # Find duplicate words in comments and strings
-    - errorlint     # Check error handling
-    - whitespace    # Check for unnecessary whitespace
-    - misspell      # Find commonly misspelled English words
-    - unconvert     # Remove unnecessary type conversions
-    - reassign      # Checks that package variables are not reassigned
-    - tagalign      # Check that struct tags are well aligned
-    - nilerr        # Finds code that returns nil even if it checks that the error is not nil
-    - thelper       # Detects test helpers which should start with t.Helper()
+    - bodyclose      # Ensure HTTP response bodies are closed
+    - contextcheck   # Ensure functions use a non-inherited context
+    - dupl           # Detect duplicate code
+    - dupword        # Detect duplicate words in comments/strings
+    - errcheck       # Check for unchecked errors
+    - errorlint      # Enforce idiomatic error handling
+    - govet          # Report suspicious constructs
+    - ineffassign    # Detect unused variable assignments
+    - misspell       # Detect misspelled English words
+    - nilerr         # Detect returning nil after error checks
+    - nolintlint     # Check for invalid/missing nolint directives
+    - reassign       # Prevent package variable reassignment
+    - staticcheck    # Advanced static analysis
+    - tagalign       # Check struct tag alignment
+    - tagliatelle    # Enforce struct tag formatting
+    - testifylint    # Avoid common testify mistakes
+    - thelper        # Ensure test helpers use t.Helper()
+    - unconvert      # Remove unnecessary type conversions
+    - unused         # Detect unused code
+    - whitespace     # Detect unnecessary whitespace
   settings:
     errcheck:
       check-blank: true
-      # Standard exclusions for common patterns:
       exclude-functions:
-        # Ignoring error from fmt.Fprintf is almost always okay in HTTP handlers
         - fmt.Fprintf
-        # Common test library functions that rarely need error checking
         - (*github.com/stretchr/testify/mock.Mock).Get
         - (net.Listener).Addr
         - (sync/atomic.Value).Load
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    tagalign:
+      strict: true
+      order:
+        - json
+        - toml
+        - yaml
+        - xml
+        - env_interpolation
 
 formatters:
   enable:
-    - gci           # Control Go package import order
-    - gofmt         # Format Go source code
-    - gofumpt       # Stricter Go formatting
-    - goimports     # Check and format imports
-    - golines       # Formats long lines
+    - gci
+    - gofmt
+    - goimports
+    - gofumpt
 
 issues:
   max-issues-per-linter: 20

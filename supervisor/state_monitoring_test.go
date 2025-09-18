@@ -78,7 +78,7 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	// Verify the supervisor shuts down cleanly
 	select {
 	case err := <-execDone:
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	case <-time.After(1 * time.Second):
 		t.Fatal("Supervisor did not shut down in time")
 	}
