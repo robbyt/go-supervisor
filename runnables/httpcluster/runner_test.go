@@ -396,12 +396,12 @@ func TestRunnerStateTransitions(t *testing.T) {
 			t.Fatal("Runner did not stop within timeout")
 		}
 
-		// Check state progression
+		// Check state progression - wait for all 5 states
 		require.Eventually(t, func() bool {
 			mu.Lock()
 			defer mu.Unlock()
-			return len(collectedStates) >= 4
-		}, time.Second, 10*time.Millisecond)
+			return len(collectedStates) >= 5
+		}, 2*time.Second, 10*time.Millisecond, "Should collect all 5 state transitions")
 
 		// Should see: New -> Booting -> Running -> Stopping -> Stopped
 		mu.Lock()
