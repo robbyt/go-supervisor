@@ -89,6 +89,14 @@ func testCompositeRaceCondition(t *testing.T) {
 		return runner.IsRunning()
 	}, 5*time.Second, 50*time.Millisecond, "Composite should report as running")
 
+	// Wait for all Run() methods to be called using Eventually
+	require.Eventually(t, func() bool {
+		// Check if all three mocks have been called with Run
+		return mock1.AssertCalled(t, "Run", mock.Anything) &&
+			mock2.AssertCalled(t, "Run", mock.Anything) &&
+			mock3.AssertCalled(t, "Run", mock.Anything)
+	}, 5*time.Second, 50*time.Millisecond, "All mocks should have Run() called")
+
 	// CRITICAL TEST: When composite reports running, all children should be running
 	assert.True(t, mock1.IsRunning(),
 		"RACE CONDITION: Composite reports running but child 1 not running")
@@ -96,11 +104,6 @@ func testCompositeRaceCondition(t *testing.T) {
 		"RACE CONDITION: Composite reports running but child 2 not running")
 	assert.True(t, mock3.IsRunning(),
 		"RACE CONDITION: Composite reports running but child 3 not running")
-
-	// All runnables should have received Run() call
-	mock1.AssertCalled(t, "Run", mock.Anything)
-	mock2.AssertCalled(t, "Run", mock.Anything)
-	mock3.AssertCalled(t, "Run", mock.Anything)
 
 	// Test child states through composite
 	childStates := runner.GetChildStates()
