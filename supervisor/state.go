@@ -163,7 +163,6 @@ func (p *PIDZero) broadcastState() {
 // Stateable runnable. It blocks until the context is done, coordinating state updates
 // from all state-emitting services.
 func (p *PIDZero) startStateMonitor() {
-	defer p.wg.Done()
 	p.logger.Debug("Starting state monitor...")
 
 	// Create a WaitGroup to track state monitoring goroutines

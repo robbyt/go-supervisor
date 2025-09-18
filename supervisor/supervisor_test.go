@@ -224,7 +224,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Send an error through the error channel
+		// Send an error through the error channel (simulating a runnable failure)
 		expectedErr := errors.New("runnable startup error")
 		go func() {
 			time.Sleep(20 * time.Millisecond)
@@ -239,15 +239,15 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		}, 200*time.Millisecond, 10*time.Millisecond, "Should return error from error channel")
 
 		require.Error(t, resultErr)
-		assert.Contains(t, resultErr.Error(), "runnable failed to start")
-		assert.Contains(t, resultErr.Error(), expectedErr.Error())
+		assert.Equal(t, expectedErr, resultErr, "Should return the exact error from error channel")
 
-		// Verify the error was put back in the channel for reap() to process
+		// Verify the error channel doesn't have any remaining errors
+		// since blockUntilRunnableReady should have consumed it
 		select {
-		case err := <-sv.errorChan:
-			assert.Equal(t, expectedErr, err, "Error should be put back in channel")
+		case <-sv.errorChan:
+			t.Fatal("Error channel should not have remaining errors")
 		default:
-			t.Fatal("Error was not put back in the channel")
+			// This is expected - error was consumed by blockUntilRunnableReady
 		}
 
 		mockRunnable.AssertExpectations(t)

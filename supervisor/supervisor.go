@@ -190,8 +190,7 @@ func (p *PIDZero) Run() error {
 	// Start a single reload manager if any runnable is reloadable
 	for _, r := range p.runnables {
 		if _, ok := r.(Reloadable); ok {
-			p.wg.Add(1)
-			go p.startReloadManager()
+			p.wg.Go(p.startReloadManager)
 			break
 		}
 	}
@@ -199,8 +198,7 @@ func (p *PIDZero) Run() error {
 	// Start a single state monitor if any runnable reports state
 	for _, r := range p.runnables {
 		if _, ok := r.(Stateable); ok {
-			p.wg.Add(1)
-			go p.startStateMonitor()
+			p.wg.Go(p.startStateMonitor)
 			break
 		}
 	}
@@ -208,16 +206,20 @@ func (p *PIDZero) Run() error {
 	// Start a single shutdown manager if any runnable can trigger shutdown
 	for _, r := range p.runnables {
 		if _, ok := r.(ShutdownSender); ok {
-			p.wg.Add(1)
-			go p.startShutdownManager()
+			p.wg.Go(p.startShutdownManager)
 			break
 		}
 	}
 
 	// Start each service in sequence
 	for _, r := range p.runnables {
-		p.wg.Add(1)
-		go p.startRunnable(r) // start this runnable in a separate goroutine
+		p.wg.Go(func() {
+			err := p.startRunnable(r)
+			if err != nil {
+				p.logger.Error("Runnable exited with error", "runnable", r, "error", err)
+				p.errorChan <- err
+			}
+		})
 
 		// if this Runnable implements the Stateable block here until IsRunning()
 		if stateable, ok := r.(Stateable); ok {
@@ -263,9 +265,7 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 		)
 		select {
 		case err := <-p.errorChan:
-			// error received from `startRunnable`- put it back in the channel for reap() to process it later
-			p.errorChan <- err
-			return fmt.Errorf("runnable failed to start: %w", err)
+			return err
 		case <-startupCtx.Done():
 			return fmt.Errorf("timeout waiting for runnable to start: %w", startupCtx.Err())
 		case <-p.ctx.Done():
@@ -362,9 +362,7 @@ func (p *PIDZero) listenForSignals() {
 }
 
 // startRunnable starts a service and sends any errors to the error channel
-func (p *PIDZero) startRunnable(r Runnable) {
-	defer p.wg.Done()
-
+func (p *PIDZero) startRunnable(r Runnable) error {
 	// Log the initial state if available
 	if stateable, ok := r.(Stateable); ok {
 		initialState := stateable.GetState()
@@ -378,31 +376,16 @@ func (p *PIDZero) startRunnable(r Runnable) {
 
 	// Run the runnable with the child context
 	err := r.Run(runCtx)
-	logger := p.logger.With("runnable", r)
-	if err == nil {
-		logger.Debug("Runnable completed without error")
-		return
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		// Filter out expected cancellation errors
-		logger.Debug("Runnable stopped gracefully", "reason", err)
-		return
-	}
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Filter out expected cancellation errors
+			p.logger.Debug("Runnable stopped gracefully", "reason", err, "runnable", r)
+			return nil
+		}
 
-	// Unexpected error - log and send to the errorChan
-	logger = logger.With("error", err)
-	if stateable, ok := r.(Stateable); ok {
-		logger.Error("Service failed", "state", stateable.GetState())
-	} else {
-		logger.Error("Service failed")
+		return err
 	}
-
-	select {
-	case p.errorChan <- fmt.Errorf("failed to start runnable: %w", err):
-		// Error sent successfully
-	default:
-		logger.Warn("Unable to send error to errorChan (full or closed?)")
-	}
+	return nil
 }
 
 // reap listens indefinitely for errors or OS signals and handles them appropriately.

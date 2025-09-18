@@ -5,7 +5,6 @@ import "sync"
 // startShutdownManager starts goroutines to listen for shutdown notifications
 // from any runnables that implement ShutdownSender. It blocks until the context is done.
 func (p *PIDZero) startShutdownManager() {
-	defer p.wg.Done()
 	p.logger.Debug("Starting shutdown manager...")
 
 	var shutdownWg sync.WaitGroup

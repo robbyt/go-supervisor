@@ -25,7 +25,6 @@ func (p *PIDZero) ReloadAll() {
 // and calls the reload method on all reloadable services. This will also prevent
 // multiple reloads from happening concurrently.
 func (p *PIDZero) startReloadManager() {
-	defer p.wg.Done()
 	p.logger.Debug("Starting reload manager...")
 
 	// iterate all the runnables, and find the ones that are can send reload notifications

@@ -34,9 +34,8 @@ func TestPIDZero_StartShutdownManager_TriggersShutdown(t *testing.T) {
 	pidZero, err := New(WithContext(supervisorCtx), WithRunnables(mockService))
 	require.NoError(t, err)
 
-	// Start the shutdown manager in a goroutine
-	pidZero.wg.Add(1)
-	go pidZero.startShutdownManager()
+	// Start the shutdown manager using wg.Go
+	pidZero.wg.Go(pidZero.startShutdownManager)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -81,9 +80,8 @@ func TestPIDZero_StartShutdownManager_ContextCancel(t *testing.T) {
 	pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
 	require.NoError(t, err)
 
-	// Start the shutdown manager in a goroutine
-	pidZero.wg.Add(1)
-	go pidZero.startShutdownManager()
+	// Start the shutdown manager using wg.Go
+	pidZero.wg.Go(pidZero.startShutdownManager)
 
 	// Give the manager a moment to start its internal listener goroutine
 	time.Sleep(100 * time.Millisecond) // Increased sleep duration
@@ -128,9 +126,8 @@ func TestPIDZero_StartShutdownManager_NoSenders(t *testing.T) {
 	pidZero, err := New(WithContext(ctx), WithRunnables(nonSenderRunnable))
 	require.NoError(t, err)
 
-	// Start the shutdown manager in a goroutine
-	pidZero.wg.Add(1)
-	go pidZero.startShutdownManager()
+	// Start the shutdown manager using wg.Go
+	pidZero.wg.Go(pidZero.startShutdownManager)
 
 	// Give the manager a moment to start
 	time.Sleep(50 * time.Millisecond)
