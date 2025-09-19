@@ -8,12 +8,19 @@ on:
 
 permissions:
   contents: read
+  # Optional: allow read access to pull request. Use with `only-new-issues` option.
+  pull-requests: read
+  # Optional: allow write access to checks to allow the action to annotate code in the PR.
+  checks: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Fetch all history for proper SonarQube analysis
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -28,8 +35,36 @@ jobs:
       - name: go mod tidy (fails if changes are needed)
         run: go mod tidy --diff
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          cache-invalidation-interval: 30
+
       - name: Go test
-        run: make test
-        
+        run: |
+          go test \
+          -cover -coverprofile=unit.coverage.out \
+          github.com/robbyt/go-supervisor/internal/... \
+          github.com/robbyt/go-supervisor/runnables/... \
+          github.com/robbyt/go-supervisor/supervisor/...
+
       - name: Build examples
         run: cd examples/http && go build .
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=robbyt_go-supervisor
+            -Dsonar.organization=robbyt
+            -Dsonar.go.coverage.reportPaths=unit.coverage.out
+            -Dsonar.sources=.
+            -Dsonar.coverage.exclusions=examples/**
+            -Dsonar.exclusions=**/*_test.go
+            -Dsonar.tests=.
+            -Dsonar.test.inclusions=**/*_test.go
+            -Dsonar.language=go
+            -Dsonar.sourceEncoding=UTF-8
