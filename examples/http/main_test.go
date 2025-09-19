@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,8 +41,15 @@ func TestRunServer(t *testing.T) {
 		errCh <- sv.Run()
 	}()
 
-	// Give the server a moment to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the server to be ready by checking if it responds to requests
+	assert.Eventually(t, func() bool {
+		resp, err := http.Get("http://localhost:8080/status")
+		if err != nil {
+			return false
+		}
+		defer func() { assert.NoError(t, resp.Body.Close()) }()
+		return resp.StatusCode == http.StatusOK
+	}, 2*time.Second, 50*time.Millisecond, "Server should become ready")
 
 	// Make a request to the server
 	resp, err := http.Get("http://localhost:8080/status")
@@ -56,12 +64,14 @@ func TestRunServer(t *testing.T) {
 	// Stop the supervisor
 	sv.Shutdown()
 
-	// Check that Run() didn't return an error
+	// Wait for Run() to complete and check the result
 	select {
 	case err := <-errCh:
-		require.NoError(t, err, "Run() should not return an error")
-	case <-time.After(100 * time.Millisecond):
-		// This is expected - the server is still running
+		if err != nil && !errors.Is(err, context.Canceled) {
+			require.NoError(t, err, "Run() should not return an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() should have completed within timeout")
 	}
 }
 
