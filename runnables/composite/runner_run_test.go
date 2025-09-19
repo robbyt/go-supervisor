@@ -30,7 +30,10 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		// Setup mock runnable
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable").Maybe()
-		mockRunnable.On("Run", mock.Anything).Return(nil)
+		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable.On("Stop").Maybe()
 
 		// Create entries
@@ -108,7 +111,10 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.DelayStop = 0 // No delay on Stop to avoid flakiness
 		mockRunnable.On("String").Return("runnable").Maybe()
-		mockRunnable.On("Run", mock.Anything).Return(nil)
+		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable.On("Stop").Maybe() // Use Maybe() instead of Once() to be more resilient
 
 		// Create entries
@@ -198,7 +204,10 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable").Maybe()
-		mockRunnable.On("Run", mock.Anything).Return(nil)
+		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable.On("Stop").Maybe() // Add Stop expectation
 
 		// Create config callback that returns nil after initial configuration

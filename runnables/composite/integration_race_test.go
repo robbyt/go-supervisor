@@ -31,24 +31,39 @@ func TestIntegration_CompositeNoRaceCondition(t *testing.T) {
 
 func testCompositeRaceCondition(t *testing.T) {
 	t.Helper()
+	// Channel to signal when Run() methods are called
+	runCalled := make(chan struct{}, 3)
+
 	// Create mock runnables using the mocks package
 	mock1 := mocks.NewMockRunnableWithStateable()
 	mock2 := mocks.NewMockRunnableWithStateable()
 	mock3 := mocks.NewMockRunnableWithStateable()
 	mock1.On("String").Return("service1")
-	mock1.On("Run", mock.Anything).Return(nil)
+	mock1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock1.On("Stop").Return()
 	mock1.On("IsRunning").Return(true)
 	mock1.On("GetState").Return("Running")
 
 	mock2.On("String").Return("service2")
-	mock2.On("Run", mock.Anything).Return(nil)
+	mock2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock2.On("Stop").Return()
 	mock2.On("IsRunning").Return(true)
 	mock2.On("GetState").Return("Running")
 
 	mock3.On("String").Return("service3")
-	mock3.On("Run", mock.Anything).Return(nil)
+	mock3.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock3.On("Stop").Return()
 	mock3.On("IsRunning").Return(true)
 	mock3.On("GetState").Return("Running")
@@ -80,6 +95,16 @@ func testCompositeRaceCondition(t *testing.T) {
 		return runner.IsRunning()
 	}, 5*time.Second, 50*time.Millisecond, "Composite should report as running")
 
+	// Wait for all Run() methods to be called using channel synchronization
+	for i := 0; i < 3; i++ {
+		select {
+		case <-runCalled:
+			// One Run() method was called
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Timeout waiting for Run() calls, only received %d of 3", i)
+		}
+	}
+
 	// CRITICAL TEST: When composite reports running, all children should be running
 	assert.True(t, mock1.IsRunning(),
 		"RACE CONDITION: Composite reports running but child 1 not running")
@@ -87,11 +112,6 @@ func testCompositeRaceCondition(t *testing.T) {
 		"RACE CONDITION: Composite reports running but child 2 not running")
 	assert.True(t, mock3.IsRunning(),
 		"RACE CONDITION: Composite reports running but child 3 not running")
-
-	// All runnables should have received Run() call
-	mock1.AssertCalled(t, "Run", mock.Anything)
-	mock2.AssertCalled(t, "Run", mock.Anything)
-	mock3.AssertCalled(t, "Run", mock.Anything)
 
 	// Test child states through composite
 	childStates := runner.GetChildStates()
@@ -132,12 +152,18 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 
 	// Set up mock expectations for normal operation
 	mock1.On("String").Return("mock-service-1")
-	mock1.On("Run", mock.Anything).Return(nil)
+	mock1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock1.On("Stop").Return()
 	mock1.On("GetState").Return("Running")
 
 	mock2.On("String").Return("mock-service-2")
-	mock2.On("Run", mock.Anything).Return(nil)
+	mock2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock2.On("Stop").Return()
 	mock2.On("GetState").Return("Running")
 
