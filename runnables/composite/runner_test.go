@@ -344,10 +344,14 @@ func TestCompositeRunner_Run(t *testing.T) {
 	t.Run("empty entries with later reload", func(t *testing.T) {
 		t.Parallel()
 
+		// Channel to signal when Run() is called
+		runStarted := make(chan struct{})
+
 		// Setup mock runnable for reload
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable1").Maybe()
 		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			close(runStarted) // Signal that Run was called
 			ctx := args.Get(0).(context.Context)
 			<-ctx.Done() // Block until cancelled like a real service
 		})
@@ -414,6 +418,14 @@ func TestCompositeRunner_Run(t *testing.T) {
 			updatedCfg.Entries[0].Runnable,
 			"Config should contain the mock runnable",
 		)
+
+		// Wait for the new runnable to actually start
+		select {
+		case <-runStarted:
+			// Run() was called, safe to proceed
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timeout waiting for runnable to start after reload")
+		}
 
 		// Cancel context to stop runner
 		cancel()
