@@ -31,12 +31,16 @@ func TestIntegration_CompositeNoRaceCondition(t *testing.T) {
 
 func testCompositeRaceCondition(t *testing.T) {
 	t.Helper()
+	// Channel to signal when Run() methods are called
+	runCalled := make(chan struct{}, 3)
+
 	// Create mock runnables using the mocks package
 	mock1 := mocks.NewMockRunnableWithStateable()
 	mock2 := mocks.NewMockRunnableWithStateable()
 	mock3 := mocks.NewMockRunnableWithStateable()
 	mock1.On("String").Return("service1")
 	mock1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
 		ctx := args.Get(0).(context.Context)
 		<-ctx.Done() // Block until cancelled like a real service
 	})
@@ -46,6 +50,7 @@ func testCompositeRaceCondition(t *testing.T) {
 
 	mock2.On("String").Return("service2")
 	mock2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
 		ctx := args.Get(0).(context.Context)
 		<-ctx.Done() // Block until cancelled like a real service
 	})
@@ -55,6 +60,7 @@ func testCompositeRaceCondition(t *testing.T) {
 
 	mock3.On("String").Return("service3")
 	mock3.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		runCalled <- struct{}{} // Signal that Run was called
 		ctx := args.Get(0).(context.Context)
 		<-ctx.Done() // Block until cancelled like a real service
 	})
@@ -89,13 +95,15 @@ func testCompositeRaceCondition(t *testing.T) {
 		return runner.IsRunning()
 	}, 5*time.Second, 50*time.Millisecond, "Composite should report as running")
 
-	// Wait for all Run() methods to be called using Eventually
-	require.Eventually(t, func() bool {
-		// Check if all three mocks have been called with Run
-		return mock1.AssertCalled(t, "Run", mock.Anything) &&
-			mock2.AssertCalled(t, "Run", mock.Anything) &&
-			mock3.AssertCalled(t, "Run", mock.Anything)
-	}, 5*time.Second, 50*time.Millisecond, "All mocks should have Run() called")
+	// Wait for all Run() methods to be called using channel synchronization
+	for i := 0; i < 3; i++ {
+		select {
+		case <-runCalled:
+			// One Run() method was called
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Timeout waiting for Run() calls, only received %d of 3", i)
+		}
+	}
 
 	// CRITICAL TEST: When composite reports running, all children should be running
 	assert.True(t, mock1.IsRunning(),
