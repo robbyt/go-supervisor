@@ -110,6 +110,56 @@ func TestPIDZero_WithSignals(t *testing.T) {
 	assert.Contains(t, defaultPid0.subscribeSignals, syscall.SIGHUP)
 }
 
+// TestPIDZero_OptionEdgeCases tests edge cases in option functions.
+func TestPIDZero_OptionEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	mockRunnable := mocks.NewMockRunnable()
+	stateChan := make(chan string)
+	mockRunnable.On("Run", mock.Anything).Return(nil).Maybe()
+	mockRunnable.On("Stop").Maybe()
+	mockRunnable.On("GetState").Return("running").Maybe()
+	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
+
+	t.Run("zero timeout values are ignored", func(t *testing.T) {
+		pid0, err := New(
+			WithRunnables(mockRunnable),
+			WithStartupTimeout(0),  // Should be ignored
+			WithStartupInitial(0),  // Should be ignored
+			WithShutdownTimeout(0), // 0 is valid for infinite wait
+		)
+		require.NoError(t, err)
+
+		// Should use default values when 0 is passed (ignored)
+		assert.Equal(t, DefaultStartupTimeout, pid0.startupTimeout)
+		assert.Equal(t, DefaultStartupInitial, pid0.startupInitial)
+		assert.Equal(t, DefaultShutdownTimeout, pid0.shutdownTimeout) // 0 is ignored, uses default
+	})
+
+	t.Run("nil context is ignored", func(t *testing.T) {
+		pid0, err := New(
+			WithRunnables(mockRunnable),
+		)
+		require.NotNil(t, pid0)
+		require.NoError(t, err)
+		assert.NotNil(t, pid0.ctx)
+	})
+
+	t.Run("empty runnables slice returns an error", func(t *testing.T) {
+		_, err := New(
+			WithRunnables(), // Empty slice
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no runnables provided")
+	})
+
+	t.Run("no runnables slice returns an error", func(t *testing.T) {
+		_, err := New()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no runnables provided")
+	})
+}
+
 func TestBlockUntilRunnableReady(t *testing.T) {
 	t.Parallel()
 
@@ -227,8 +277,10 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		// Send an error through the error channel (simulating a runnable failure)
 		expectedErr := errors.New("runnable startup error")
 		go func() {
-			time.Sleep(20 * time.Millisecond)
-			sv.errorChan <- expectedErr
+			assert.Eventually(t, func() bool {
+				sv.errorChan <- expectedErr
+				return true
+			}, 50*time.Millisecond, 1*time.Millisecond, "Should send error to channel")
 		}()
 
 		// Call blockUntilRunnableReady - should return the error
@@ -252,6 +304,37 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 
 		mockRunnable.AssertExpectations(t)
 	})
+}
+
+// TestBlockUntilRunnableReady_TickerRetry tests the ticker retry logic with multiple checks.
+func TestBlockUntilRunnableReady_TickerRetry(t *testing.T) {
+	t.Parallel()
+
+	// Create mock that becomes ready after multiple ticker retries
+	mockRunnable := mocks.NewMockRunnableWithStateable()
+	mockRunnable.On("String").Return("delayed-ready-runnable").Maybe()
+
+	// First few calls return false, then true
+	mockRunnable.On("IsRunning").Return(false).Times(4) // Initial check + 3 ticker retries
+	mockRunnable.On("IsRunning").Return(true).Once()    // Finally becomes ready
+
+	sv, err := New(
+		WithRunnables(mockRunnable),
+		WithStartupTimeout(500*time.Millisecond),
+		WithStartupInitial(5*time.Millisecond), // Very short initial delay
+	)
+	require.NoError(t, err)
+
+	// This should succeed after several ticker retries
+	var resultErr error
+	result := assert.Eventually(t, func() bool {
+		resultErr = sv.blockUntilRunnableReady(mockRunnable)
+		return resultErr == nil
+	}, 300*time.Millisecond, 1*time.Millisecond, "Should succeed after ticker retries")
+
+	assert.True(t, result, "blockUntilRunnableReady should eventually succeed")
+	require.NoError(t, resultErr)
+	mockRunnable.AssertExpectations(t)
 }
 
 // Tests for error handling and reaping processes
@@ -300,6 +383,58 @@ func TestPIDZero_Reap_ErrorFromRunnable(t *testing.T) {
 	mockRunnable.AssertExpectations(t)
 }
 
+// TestPIDZero_StartRunnable_ContextCancellationError tests filtering of context cancellation errors.
+func TestPIDZero_StartRunnable_ContextCancellationError(t *testing.T) {
+	t.Parallel()
+
+	// Create a runnable that returns context.Canceled
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("Run", mock.Anything).Return(context.Canceled).Once()
+
+	// Setup for Stateable interface
+	stateChan := make(chan string)
+	mockRunnable.On("GetState").Return("stopped").Maybe()
+	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
+	require.NoError(t, err)
+
+	// startRunnable should filter out the context.Canceled error and return nil
+	err = pid0.startRunnable(mockRunnable)
+	require.NoError(t, err, "Context cancellation errors should be filtered out")
+
+	mockRunnable.AssertExpectations(t)
+}
+
+// TestPIDZero_StartRunnable_DeadlineExceededError tests filtering of deadline exceeded errors.
+func TestPIDZero_StartRunnable_DeadlineExceededError(t *testing.T) {
+	t.Parallel()
+
+	// Create a runnable that returns context.DeadlineExceeded
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("Run", mock.Anything).Return(context.DeadlineExceeded).Once()
+
+	// Setup for Stateable interface
+	stateChan := make(chan string)
+	mockRunnable.On("GetState").Return("stopped").Maybe()
+	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
+	require.NoError(t, err)
+
+	// startRunnable should filter out the deadline exceeded error and return nil
+	err = pid0.startRunnable(mockRunnable)
+	require.NoError(t, err, "Deadline exceeded errors should be filtered out")
+
+	mockRunnable.AssertExpectations(t)
+}
+
 // TestPIDZero_Reap_HandleSIGINT tests that receiving SIGINT initiates shutdown.
 func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	t.Parallel()
@@ -329,11 +464,15 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 		execDone <- pid0.Run()
 	}()
 
-	// Allow some time for services to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Send SIGINT signal
-	pid0.SignalChan <- syscall.SIGINT
+	// Wait for services to start and send SIGINT signal
+	var signalSent bool
+	assert.Eventually(t, func() bool {
+		if !signalSent {
+			pid0.SignalChan <- syscall.SIGINT
+			signalSent = true
+		}
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGINT signal")
 
 	// Wait for Exec to finish due to SIGINT
 	select {
@@ -373,11 +512,15 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 		execDone <- pid0.Run()
 	}()
 
-	// Allow some time for services to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Send SIGTERM signal
-	pid0.SignalChan <- syscall.SIGTERM
+	// Wait for services to start and send SIGTERM signal
+	var signalSent bool
+	assert.Eventually(t, func() bool {
+		if !signalSent {
+			pid0.SignalChan <- syscall.SIGTERM
+			signalSent = true
+		}
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGTERM signal")
 
 	// Wait for Exec to finish due to SIGTERM
 	select {
@@ -420,17 +563,19 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 		execDone <- pid0.Run()
 	}()
 
-	// Allow some time for services to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Send SIGHUP signal
-	pid0.SignalChan <- syscall.SIGHUP
-
-	// Allow some time for reload to occur
-	time.Sleep(100 * time.Millisecond)
-
-	// Send SIGINT to shutdown
-	pid0.SignalChan <- syscall.SIGINT
+	// Wait for services to start and send SIGHUP signal
+	var signalsSent int
+	assert.Eventually(t, func() bool {
+		switch signalsSent {
+		case 0:
+			pid0.SignalChan <- syscall.SIGHUP
+			signalsSent++
+		case 1:
+			pid0.SignalChan <- syscall.SIGINT // Send shutdown after reload
+			signalsSent++
+		}
+		return signalsSent >= 2
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGHUP then SIGINT")
 
 	// Wait for Exec to finish
 	select {
@@ -480,13 +625,19 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 		execDone <- pid0.Run()
 	}()
 
-	// Send SIGHUP signal
-	pid0.SignalChan <- syscall.SIGHUP
-
-	time.Sleep(100 * time.Millisecond)
-
-	// Send SIGTERM signal
-	pid0.SignalChan <- syscall.SIGTERM
+	// Wait and send multiple signals
+	var signalsSent int
+	assert.Eventually(t, func() bool {
+		switch signalsSent {
+		case 0:
+			pid0.SignalChan <- syscall.SIGHUP
+			signalsSent++
+		case 1:
+			pid0.SignalChan <- syscall.SIGTERM
+			signalsSent++
+		}
+		return signalsSent >= 2
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGHUP then SIGTERM")
 
 	// Wait for Exec to finish due to SIGTERM
 	select {
@@ -567,12 +718,15 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 		execDone <- pid0.Run()
 	}()
 
-	// Allow some time for services to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Send two SIGINT signals
-	pid0.SignalChan <- syscall.SIGINT
-	pid0.SignalChan <- syscall.SIGINT
+	// Wait for services to start and send two SIGINT signals
+	var signalsSent int
+	assert.Eventually(t, func() bool {
+		if signalsSent < 2 {
+			pid0.SignalChan <- syscall.SIGINT
+			signalsSent++
+		}
+		return signalsSent >= 2
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send two SIGINT signals")
 
 	// Wait for Exec to finish
 	select {
@@ -642,13 +796,13 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 		pid0.SignalChan <- syscall.SIGHUP
 	}()
 
-	// Allow some time for services to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Trigger both goroutines to proceed
-	close(trigger1)
-	time.Sleep(100 * time.Microsecond)
-	close(trigger2)
+	// Wait for services to start and trigger both goroutines
+	assert.Eventually(t, func() bool {
+		close(trigger1)
+		time.Sleep(1 * time.Millisecond) // Brief delay between triggers
+		close(trigger2)
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should trigger signal goroutines")
 
 	// Wait for both goroutines to finish
 	wg.Wait()
@@ -714,4 +868,195 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 
 	// Ensure Stop was called only once
 	mockRunnable.AssertNumberOfCalls(t, "Stop", 1)
+}
+
+// TestPIDZero_Reap_UnhandledSignal tests the default case in signal handling.
+func TestPIDZero_Reap_UnhandledSignal(t *testing.T) {
+	t.Parallel()
+
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("String").Return("unhandledSignalRunnable").Maybe()
+	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
+	mockRunnable.On("Stop").Once()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use a custom signal that's not handled specifically
+	pid0, err := New(
+		WithContext(ctx),
+		WithRunnables(mockRunnable),
+		WithSignals(syscall.SIGUSR1), // Custom signal not in switch statement
+	)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		pid0.Shutdown()
+	})
+
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pid0.Run()
+	}()
+
+	// Wait for startup and send unhandled signal
+	var signalSent bool
+	assert.Eventually(t, func() bool {
+		if !signalSent {
+			pid0.SignalChan <- syscall.SIGUSR1 // Should hit default case and continue
+			signalSent = true
+		}
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send unhandled signal")
+
+	// Use context cancellation to trigger shutdown cleanly
+	cancel()
+
+	// Should complete
+	select {
+	case err := <-execDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not complete")
+	}
+
+	mockRunnable.AssertExpectations(t)
+}
+
+// TestPIDZero_Run_ShutdownSenderInterface tests the ShutdownSender interface path.
+func TestPIDZero_Run_ShutdownSenderInterface(t *testing.T) {
+	t.Parallel()
+
+	mockShutdownService := mocks.NewMockRunnableWithShutdownSender()
+	mockShutdownService.On("String").Return("shutdownSender").Maybe()
+	mockShutdownService.On("Run", mock.Anything).Return(nil).Once()
+	mockShutdownService.On("Stop").Once()
+	mockShutdownService.On("GetShutdownTrigger").Return(make(chan struct{})).Once()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pid0, err := New(WithContext(ctx), WithRunnables(mockShutdownService))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		pid0.Shutdown()
+	})
+
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pid0.Run()
+	}()
+
+	// Wait and send shutdown signal
+	var signalSent bool
+	assert.Eventually(t, func() bool {
+		if !signalSent {
+			pid0.SignalChan <- syscall.SIGINT
+			signalSent = true
+		}
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send shutdown signal")
+
+	// Wait for completion
+	select {
+	case err := <-execDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not finish in time")
+	}
+
+	mockShutdownService.AssertExpectations(t)
+}
+
+// TestPIDZero_Run_RunnableStartupFailure tests error handling when a runnable fails to start.
+func TestPIDZero_Run_RunnableStartupFailure(t *testing.T) {
+	t.Parallel()
+
+	// Create a failing stateable runnable
+	mockRunnable := mocks.NewMockRunnableWithStateable()
+	mockRunnable.On("String").Return("failing-runnable").Maybe()
+	mockRunnable.On("IsRunning").Return(false) // Never becomes ready, called multiple times during timeout
+	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
+	mockRunnable.On("Stop").Once()
+
+	// Setup for Stateable interface
+	stateChan := make(chan string)
+	mockRunnable.On("GetState").Return("stopped").Times(3) // Called during startup + shutdown (pre+post)
+	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pid0, err := New(
+		WithContext(ctx),
+		WithRunnables(mockRunnable),
+		WithStartupTimeout(50*time.Millisecond), // Short timeout to trigger failure
+		WithStartupInitial(10*time.Millisecond),
+	)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		pid0.Shutdown()
+	})
+
+	// Run should return an error due to startup timeout
+	err = pid0.Run()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timeout waiting for runnable to start")
+
+	mockRunnable.AssertExpectations(t)
+}
+
+// TestPIDZero_Shutdown_NoTimeout tests the indefinite wait path when no shutdown timeout is set.
+func TestPIDZero_Shutdown_NoTimeout(t *testing.T) {
+	t.Parallel()
+
+	mockRunnable := mocks.NewMockRunnableWithStateable()
+	mockRunnable.On("String").Return("noTimeoutRunnable").Maybe()
+	mockRunnable.DelayStop = 50 * time.Millisecond // Small delay to test wait
+	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
+	mockRunnable.On("Stop").Once()
+	mockRunnable.On("IsRunning").Return(true)
+
+	// Setup for Stateable interface
+	stateChan := make(chan string)
+	mockRunnable.On("GetState").Return("running").Times(3) // Called during startup and shutdown
+	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pid0, err := New(
+		WithContext(ctx),
+		WithRunnables(mockRunnable),
+	)
+	require.NoError(t, err)
+	// Manually set shutdown timeout to 0 to test infinite wait path
+	pid0.shutdownTimeout = 0
+
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pid0.Run()
+	}()
+
+	// Wait and trigger shutdown
+	var signalSent bool
+	assert.Eventually(t, func() bool {
+		if !signalSent {
+			pid0.SignalChan <- syscall.SIGINT
+			signalSent = true
+		}
+		return true
+	}, 200*time.Millisecond, 10*time.Millisecond, "Should send shutdown signal")
+
+	// Should complete without timeout warnings
+	select {
+	case err := <-execDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not complete")
+	}
+
+	mockRunnable.AssertExpectations(t)
 }
