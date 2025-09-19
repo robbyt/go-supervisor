@@ -130,12 +130,18 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil)
+		mockRunnable1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable1.On("Stop").Once()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Run", mock.Anything).Return(nil)
+		mockRunnable2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable2.On("Stop").Once()
 
 		// Create entries
@@ -341,7 +347,10 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Setup mock runnable for reload
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable1").Maybe()
-		mockRunnable.On("Run", mock.Anything).Return(nil)
+		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done() // Block until cancelled like a real service
+		})
 		mockRunnable.On("Stop").Maybe()
 
 		// Initially empty, later populated

@@ -144,12 +144,18 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 
 	// Set up mock expectations for normal operation
 	mock1.On("String").Return("mock-service-1")
-	mock1.On("Run", mock.Anything).Return(nil)
+	mock1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock1.On("Stop").Return()
 	mock1.On("GetState").Return("Running")
 
 	mock2.On("String").Return("mock-service-2")
-	mock2.On("Run", mock.Anything).Return(nil)
+	mock2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done() // Block until cancelled like a real service
+	})
 	mock2.On("Stop").Return()
 	mock2.On("GetState").Return("Running")
 
