@@ -3,7 +3,7 @@ module github.com/robbyt/go-supervisor
 go 1.25.1
 
 require (
-	github.com/robbyt/go-fsm v1.4.1
+	github.com/robbyt/go-fsm v1.5.0
 	github.com/stretchr/testify v1.11.1
 )
 
