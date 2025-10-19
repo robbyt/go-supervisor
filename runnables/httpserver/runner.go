@@ -34,7 +34,7 @@ type HttpServer interface {
 
 type fsm interface {
 	GetState() string
-	GetStateChanWithTimeout(ctx context.Context) <-chan string
+	GetStateChan(ctx context.Context) <-chan string
 	Transition(state string) error
 	SetState(state string) error
 	TransitionBool(state string) bool

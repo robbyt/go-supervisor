@@ -32,25 +32,12 @@ type Machine struct {
 	broadcastManager *broadcast.Manager
 }
 
-// GetStateChanWithTimeout returns a channel that emits the state whenever it changes.
-// The channel is closed when the provided context is canceled.
-// For v1 API compatibility, the current state is sent immediately to the channel.
-func (s *Machine) GetStateChanWithTimeout(ctx context.Context) <-chan string {
-	return s.getStateChanInternal(ctx, broadcast.WithTimeout(5*time.Second))
-}
-
 // GetStateChan returns a channel that emits the state whenever it changes.
 // The channel is closed when the provided context is canceled.
 // For v1 API compatibility, the current state is sent immediately to the channel.
+// A 5-second broadcast timeout is used to prevent slow consumers from blocking state updates.
 func (s *Machine) GetStateChan(ctx context.Context) <-chan string {
-	return s.getStateChanInternal(ctx)
-}
-
-// GetStateChanWithOptions returns a channel that emits the state whenever it changes
-// with custom broadcast options.
-// For v1 API compatibility, the current state is sent immediately to the channel.
-func (s *Machine) GetStateChanWithOptions(ctx context.Context, opts ...broadcast.Option) <-chan string {
-	return s.getStateChanInternal(ctx, opts...)
+	return s.getStateChanInternal(ctx, broadcast.WithTimeout(5*time.Second))
 }
 
 // getStateChanInternal is a helper that creates a channel and sends the current state to it.

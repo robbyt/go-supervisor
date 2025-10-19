@@ -56,7 +56,7 @@ func (m *MockStateMachine) GetState() string {
 
 // GetStateChan mocks the GetStateChan method of the stateMachine interface.
 // It returns a channel that emits the state machine's state whenever it changes.
-func (m *MockStateMachine) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
 	return args.Get(0).(<-chan string)
 }

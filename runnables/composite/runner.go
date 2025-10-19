@@ -16,7 +16,7 @@ type ConfigCallback[T runnable] func() (*Config[T], error)
 
 type fsm interface {
 	GetState() string
-	GetStateChanWithTimeout(ctx context.Context) <-chan string
+	GetStateChan(ctx context.Context) <-chan string
 	Transition(state string) error
 	TransitionIfCurrentState(state string, targetState string) error
 	SetState(state string) error
