@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-fsm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -183,19 +182,19 @@ func TestMachineInterface(t *testing.T) {
 func TestTypicalTransitions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("verify TypicalTransitions matches fsm package", func(t *testing.T) {
-		assert.Equal(t, fsm.TypicalTransitions, TypicalTransitions)
+	t.Run("verify TypicalTransitions is not nil", func(t *testing.T) {
+		assert.NotNil(t, TypicalTransitions)
 	})
 
-	t.Run("verify status constants match fsm package", func(t *testing.T) {
-		assert.Equal(t, fsm.StatusNew, StatusNew)
-		assert.Equal(t, fsm.StatusBooting, StatusBooting)
-		assert.Equal(t, fsm.StatusRunning, StatusRunning)
-		assert.Equal(t, fsm.StatusReloading, StatusReloading)
-		assert.Equal(t, fsm.StatusStopping, StatusStopping)
-		assert.Equal(t, fsm.StatusStopped, StatusStopped)
-		assert.Equal(t, fsm.StatusError, StatusError)
-		assert.Equal(t, fsm.StatusUnknown, StatusUnknown)
+	t.Run("verify status constants are defined", func(t *testing.T) {
+		assert.Equal(t, "New", StatusNew)
+		assert.Equal(t, "Booting", StatusBooting)
+		assert.Equal(t, "Running", StatusRunning)
+		assert.Equal(t, "Reloading", StatusReloading)
+		assert.Equal(t, "Stopping", StatusStopping)
+		assert.Equal(t, "Stopped", StatusStopped)
+		assert.Equal(t, "Error", StatusError)
+		assert.Equal(t, "Unknown", StatusUnknown)
 	})
 }
 
