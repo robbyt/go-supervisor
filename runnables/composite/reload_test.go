@@ -46,7 +46,7 @@ func (m *MockStateMachine) TransitionIfCurrentState(current, next string) error 
 	return args.Error(0)
 }
 
-func (m *MockStateMachine) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+func (m *MockStateMachine) GetStateChan(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
 	return args.Get(0).(<-chan string)
 }

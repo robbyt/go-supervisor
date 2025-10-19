@@ -111,7 +111,7 @@ func (m *MockFSMForStateError) GetState() string {
 	return args.String(0)
 }
 
-func (m *MockFSMForStateError) GetStateChanWithTimeout(ctx context.Context) <-chan string {
+func (m *MockFSMForStateError) GetStateChan(ctx context.Context) <-chan string {
 	args := m.Called(ctx)
 	return args.Get(0).(<-chan string)
 }

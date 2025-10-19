@@ -216,7 +216,7 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 		defer cancel()
 
 		// Get state channel with timeout
-		stateChan := machine.GetStateChanWithTimeout(ctx)
+		stateChan := machine.GetStateChan(ctx)
 		require.NotNil(t, stateChan)
 
 		// Should receive initial state
@@ -272,7 +272,7 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 		defer cancel()
 
 		// Get state channel with timeout
-		stateChan := machine.GetStateChanWithTimeout(ctx)
+		stateChan := machine.GetStateChan(ctx)
 		require.NotNil(t, stateChan)
 
 		// Wait for context to timeout
@@ -290,8 +290,8 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 		defer cancel()
 
 		// Get multiple state channels
-		stateChan1 := machine.GetStateChanWithTimeout(ctx)
-		stateChan2 := machine.GetStateChanWithTimeout(ctx)
+		stateChan1 := machine.GetStateChan(ctx)
+		stateChan2 := machine.GetStateChan(ctx)
 		require.NotNil(t, stateChan1)
 		require.NotNil(t, stateChan2)
 		assert.NotEqual(t, stateChan1, stateChan2, "Should create different channel instances")

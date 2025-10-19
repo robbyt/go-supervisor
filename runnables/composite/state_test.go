@@ -138,7 +138,7 @@ func TestGetStateChan_PassThrough(t *testing.T) {
 
 	// Create a mock FSM
 	mockFSM := new(MockStateMachine)
-	mockFSM.On("GetStateChanWithTimeout", mock.Anything).Return(stateCh)
+	mockFSM.On("GetStateChan", mock.Anything).Return(stateCh)
 
 	// Create a runner
 	cb := func() (*Config[*mocks.Runnable], error) {
