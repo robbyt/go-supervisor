@@ -86,7 +86,7 @@ func (e *entries) getPendingActions() (toStart, toStop []string) {
 			toStop = append(toStop, id)
 		}
 	}
-	return
+	return toStart, toStop
 }
 
 // get returns a server entry by ID, or nil if not found.
