@@ -5,9 +5,7 @@
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=robbyt_go-supervisor&metric=coverage)](https://sonarcloud.io/summary/new_code?id=robbyt_go-supervisor)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Your Go app needs graceful shutdown and termination handling. If you don't "trap" a SIGTERM from a `ctrl-c`, your app may exit without cleaning up resources or saving the final state. This is especially important for long-running applications.
-
-This service supervisor for Go applications provides lifecycle management for multiple services and supports graceful shutdown, hot reloading, and state monitoring. It uses an interface-based capability design that makes it easy to incrementally implement service features without unnecessary complexity.
+A service supervisor for Go applications that manages lifecycle for multiple services. Handles graceful shutdown with OS signal support (SIGINT, SIGTERM), configuration hot reloading (SIGHUP), and state monitoring. Service capabilities are added by implementing optional interfaces.
 
 ## Features
 
@@ -27,7 +25,7 @@ go get github.com/robbyt/go-supervisor
 
 ## Quick Start
 
-To begin using the go-supervisor, you first need to define your "runnable" with a few functions. At very least it needs to have a `Run(ctx context.Context) error` and `Stop()`, implementing the Runnable interface. Additional capabilities can be implemented in your code, and the supervisor will take advantage of them while running. See `supervisor/interfaces.go` for more info.
+Define a runnable service by implementing the Runnable interface with `Run(ctx context.Context) error` and `Stop()` methods. Additional capabilities (Reloadable, Stateable) can be implemented as needed. See `supervisor/interfaces.go` for interface details.
 
 ```go
 package main
@@ -169,7 +167,7 @@ func (s *ConfigurableService) Reload() {
 
 ## Example Runnables
 
-The package includes some ready-to-use runnables for common use cases:
+The package includes the following runnable implementations:
 
 - **HTTP Server**: A configurable HTTP server with routing and middleware support (`runnables/httpserver`)
 - **Composite**: A container for managing multiple Runnables using generics (`runnables/composite`)
