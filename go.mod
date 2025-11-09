@@ -1,6 +1,6 @@
 module github.com/robbyt/go-supervisor
 
-go 1.25.3
+go 1.25.4
 
 require (
 	github.com/robbyt/go-fsm/v2 v2.1.0
