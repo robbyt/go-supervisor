@@ -130,14 +130,17 @@ func (r *Runner) waitForIsRunning(
 ) bool {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	initialRetry := 5 * time.Millisecond
+	retryDelay := 5 * time.Millisecond
 	maxRetry := 1 * time.Second
+
+	timer := time.NewTimer(retryDelay)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return false
-		case <-time.After(initialRetry):
+		case <-timer.C:
 			if server.IsRunning() {
 				return true
 			}
@@ -147,8 +150,8 @@ func (r *Runner) waitForIsRunning(
 				return false
 			}
 
-			// Exponentially increase the backoff delay
-			initialRetry = min(time.Duration(float64(initialRetry)*1.5), maxRetry)
+			retryDelay = min(time.Duration(float64(retryDelay)*1.5), maxRetry)
+			timer.Reset(retryDelay)
 		}
 	}
 }
