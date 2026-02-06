@@ -17,6 +17,8 @@ limitations under the License.
 package supervisor
 
 // ReloadAll triggers a reload of all runnables that implement the Reloadable interface.
+// This call blocks until the reload manager accepts the signal. Callers that need
+// non-blocking behavior should invoke this in a goroutine.
 func (p *PIDZero) ReloadAll() {
 	p.reloadListener <- struct{}{}
 }
@@ -36,7 +38,7 @@ func (p *PIDZero) startReloadManager() {
 					select {
 					case <-p.ctx.Done():
 						return
-					case <-rldSender.GetReloadTrigger():
+					case <-s.GetReloadTrigger():
 						p.reloadListener <- struct{}{}
 						p.logger.Debug("Reload notifier received from runnable", "runnable", r)
 					}

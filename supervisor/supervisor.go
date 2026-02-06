@@ -411,7 +411,7 @@ func (p *PIDZero) reap() error {
 				return nil // exit reap loop
 			case syscall.SIGHUP: // Reload runnables on SIGHUP
 				p.logger.Debug("Received signal", "signal", sig)
-				p.ReloadAll()
+				go p.ReloadAll()
 				continue // keep on reaping!
 			default:
 				p.logger.Debug("Unhandled signal received", "signal", sig)
