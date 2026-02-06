@@ -182,6 +182,11 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		return nil
 	}
 
+	// Grow the error channel so every child can report without dropping
+	if len(cfg.Entries) > cap(r.serverErrors) {
+		r.serverErrors = make(chan error, len(cfg.Entries))
+	}
+
 	logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
 
 	// Use a temporary WaitGroup to track that all goroutines have started.
