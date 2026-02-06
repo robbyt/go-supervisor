@@ -24,7 +24,7 @@ func TestStateDeduplication(t *testing.T) {
 		runnable := mocks.NewMockRunnableWithStateable()
 		runnable.On("String").Return("test-runnable")
 		runnable.On("GetStateChan", mock.Anything).Return(stateChan)
-		runnable.On("GetState").Return("initial")
+		runnable.On("GetState").Return("initial").Maybe()
 
 		pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
 		require.NoError(t, err)
@@ -68,7 +68,6 @@ func TestStateDeduplication(t *testing.T) {
 		stateChan <- "initial"
 
 		t.Log("Sending 'running' state")
-		runnable.On("GetState").Return("running")
 		stateChan <- "running"
 
 		t.Log("Sending 'running' state again (should be ignored)")
@@ -78,14 +77,12 @@ func TestStateDeduplication(t *testing.T) {
 		stateChan <- "running"
 
 		t.Log("Sending 'stopped' state")
-		runnable.On("GetState").Return("stopped")
 		stateChan <- "stopped"
 
 		t.Log("Sending 'stopped' state again (should be ignored)")
 		stateChan <- "stopped"
 
 		t.Log("Sending 'error' state")
-		runnable.On("GetState").Return("error")
 		stateChan <- "error"
 
 		synctest.Wait()
@@ -109,5 +106,7 @@ func TestStateDeduplication(t *testing.T) {
 			t, 1, statesReceived["error"],
 			"Should receive exactly one 'error' state broadcast",
 		)
+
+		runnable.AssertExpectations(t)
 	})
 }

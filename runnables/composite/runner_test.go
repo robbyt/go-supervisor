@@ -601,5 +601,9 @@ func TestCompositeRunner_MultipleChildFailures(t *testing.T) {
 		default:
 			t.Fatal("runner should return an error from failing children")
 		}
+
+		mockRunnable1.AssertExpectations(t)
+		mockRunnable2.AssertExpectations(t)
+		mockRunnable3.AssertExpectations(t)
 	})
 }

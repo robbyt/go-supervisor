@@ -120,6 +120,10 @@ func testCompositeRaceCondition(t *testing.T) {
 		mock1.AssertCalled(t, "Stop")
 		mock2.AssertCalled(t, "Stop")
 		mock3.AssertCalled(t, "Stop")
+
+		mock1.AssertExpectations(t)
+		mock2.AssertExpectations(t)
+		mock3.AssertExpectations(t)
 	})
 }
 
@@ -198,5 +202,8 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 
 		mock1.AssertCalled(t, "Stop")
 		mock2.AssertCalled(t, "Stop")
+
+		mock1.AssertExpectations(t)
+		mock2.AssertExpectations(t)
 	})
 }
