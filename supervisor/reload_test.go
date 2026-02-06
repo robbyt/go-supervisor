@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -201,6 +202,67 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		// Verify expectations
 		mockService1.AssertExpectations(t)
 		mockService2.AssertExpectations(t)
+	})
+
+	t.Run("ReloadSender goroutines do not leak after shutdown", func(t *testing.T) {
+		sender1 := mocks.NewMockRunnableWithReloadSender()
+		sender2 := mocks.NewMockRunnableWithReloadSender()
+
+		reloadTrigger1 := make(chan struct{})
+		reloadTrigger2 := make(chan struct{})
+		stateChan1 := make(chan string)
+		stateChan2 := make(chan string)
+
+		var reloadCount atomic.Int32
+		sender1.On("GetReloadTrigger").Return(reloadTrigger1)
+		sender2.On("GetReloadTrigger").Return(reloadTrigger2)
+		sender1.On("Run", mock.Anything).Return(nil)
+		sender2.On("Run", mock.Anything).Return(nil)
+		sender1.On("Reload").Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
+		sender2.On("Reload").Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
+		sender1.On("Stop").Return()
+		sender2.On("Stop").Return()
+		sender1.On("GetState").Return("running").Maybe()
+		sender2.On("GetState").Return("running").Maybe()
+		sender1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
+		sender2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
+
+		p, err := New(WithContext(context.Background()), WithRunnables(sender1, sender2))
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- p.Run()
+		}()
+
+		require.Eventually(t, func() bool {
+			return p.ctx.Err() == nil
+		}, time.Second, 5*time.Millisecond)
+
+		// Trigger a reload so we know the sender goroutines are active
+		reloadTrigger1 <- struct{}{}
+
+		require.Eventually(t, func() bool {
+			return reloadCount.Load() > 0
+		}, time.Second, 10*time.Millisecond)
+
+		goroutinesBefore := runtime.NumGoroutine()
+
+		p.Shutdown()
+		require.Eventually(t, func() bool {
+			select {
+			case err := <-done:
+				assert.NoError(t, err)
+				return true
+			default:
+				return false
+			}
+		}, 2*time.Second, 10*time.Millisecond, "shutdown timed out")
+
+		// After shutdown, goroutine count should drop (sender goroutines cleaned up)
+		require.Eventually(t, func() bool {
+			return runtime.NumGoroutine() < goroutinesBefore
+		}, 2*time.Second, 10*time.Millisecond, "goroutine count did not decrease after shutdown, possible leak")
 	})
 
 	t.Run("SIGTERM handled while reload is in progress", func(t *testing.T) {
