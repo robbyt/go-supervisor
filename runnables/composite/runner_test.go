@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -531,73 +532,74 @@ func TestCompositeRunner_Stop(t *testing.T) {
 
 func TestCompositeRunner_MultipleChildFailures(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		failErr := errors.New("child failed")
+		started := make(chan struct{})
 
-	failErr := errors.New("child failed")
-	started := make(chan struct{})
+		mockRunnable1 := mocks.NewMockRunnable()
+		mockRunnable1.On("String").Return("failer1").Maybe()
+		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			started <- struct{}{}
+			time.Sleep(20 * time.Millisecond)
+		}).Return(failErr)
 
-	mockRunnable1 := mocks.NewMockRunnable()
-	mockRunnable1.On("String").Return("failer1").Maybe()
-	mockRunnable1.On("Stop").Maybe()
-	mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		started <- struct{}{}
-		time.Sleep(20 * time.Millisecond)
-		// Return real error (goes through startRunnable's error path)
-	}).Return(failErr)
+		mockRunnable2 := mocks.NewMockRunnable()
+		mockRunnable2.On("String").Return("failer2").Maybe()
+		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			started <- struct{}{}
+			time.Sleep(20 * time.Millisecond)
+		}).Return(failErr)
 
-	mockRunnable2 := mocks.NewMockRunnable()
-	mockRunnable2.On("String").Return("failer2").Maybe()
-	mockRunnable2.On("Stop").Maybe()
-	mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		started <- struct{}{}
-		time.Sleep(20 * time.Millisecond)
-	}).Return(failErr)
+		mockRunnable3 := mocks.NewMockRunnable()
+		mockRunnable3.On("String").Return("failer3").Maybe()
+		mockRunnable3.On("Stop").Maybe()
+		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			started <- struct{}{}
+			time.Sleep(20 * time.Millisecond)
+		}).Return(failErr)
 
-	mockRunnable3 := mocks.NewMockRunnable()
-	mockRunnable3.On("String").Return("failer3").Maybe()
-	mockRunnable3.On("Stop").Maybe()
-	mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		started <- struct{}{}
-		time.Sleep(20 * time.Millisecond)
-	}).Return(failErr)
+		entries := []RunnableEntry[*mocks.Runnable]{
+			{Runnable: mockRunnable1},
+			{Runnable: mockRunnable2},
+			{Runnable: mockRunnable3},
+		}
 
-	entries := []RunnableEntry[*mocks.Runnable]{
-		{Runnable: mockRunnable1},
-		{Runnable: mockRunnable2},
-		{Runnable: mockRunnable3},
-	}
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", entries)
+		}
 
-	configCallback := func() (*Config[*mocks.Runnable], error) {
-		return NewConfig("test", entries)
-	}
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
 
-	runner, err := NewRunner(configCallback)
-	require.NoError(t, err)
+		assert.Equal(t, 1, cap(runner.serverErrors), "initial capacity should be 1")
 
-	// Channel capacity should grow in boot() to match entry count
-	assert.Equal(t, 1, cap(runner.serverErrors), "initial capacity should be 1")
+		runErr := make(chan error, 1)
+		go func() {
+			runErr <- runner.Run(t.Context())
+		}()
 
-	runErr := make(chan error, 1)
-	go func() {
-		runErr <- runner.Run(t.Context())
-	}()
+		// Advance virtual clock past the mock's default 1ms Run delay
+		time.Sleep(10 * time.Millisecond)
+		synctest.Wait()
 
-	// Wait for all children to start
-	for range 3 {
-		<-started
-	}
+		for range 3 {
+			<-started
+		}
 
-	// Verify channel was resized
-	assert.Equal(t, 3, cap(runner.serverErrors), "capacity should match entry count after boot")
+		assert.Equal(t, 3, cap(runner.serverErrors), "capacity should match entry count after boot")
 
-	// Run() should return with the first error
-	require.Eventually(t, func() bool {
+		// Advance virtual clock past 20ms sleep in callbacks so children return errors
+		time.Sleep(30 * time.Millisecond)
+		synctest.Wait()
+
 		select {
 		case err := <-runErr:
 			require.Error(t, err)
 			require.ErrorIs(t, err, ErrRunnableFailed)
-			return true
 		default:
-			return false
+			t.Fatal("runner should return an error from failing children")
 		}
-	}, 2*time.Second, 10*time.Millisecond, "runner should return an error from failing children")
+	})
 }
