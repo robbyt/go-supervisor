@@ -36,13 +36,11 @@ func (r *Runner[T]) Reload() {
 	newConfig, err := r.configCallback()
 	if err != nil {
 		logger.Error("Failed to get updated config", "error", err)
-		// TODO: consider removing the setStateError() call here
 		r.setStateError()
 		return
 	}
 	if newConfig == nil {
 		logger.Error("Config callback returned nil during reload")
-		// TODO: consider removing the setStateError() call here
 		r.setStateError()
 		return
 	}
