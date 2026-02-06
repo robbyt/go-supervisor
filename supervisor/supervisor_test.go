@@ -468,7 +468,7 @@ func TestPIDZero_Reap_HandleSIGINT(t *testing.T) {
 	var signalSent bool
 	assert.Eventually(t, func() bool {
 		if !signalSent {
-			pid0.SignalChan <- syscall.SIGINT
+			pid0.signalChan <- syscall.SIGINT
 			signalSent = true
 		}
 		return true
@@ -516,7 +516,7 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 	var signalSent bool
 	assert.Eventually(t, func() bool {
 		if !signalSent {
-			pid0.SignalChan <- syscall.SIGTERM
+			pid0.signalChan <- syscall.SIGTERM
 			signalSent = true
 		}
 		return true
@@ -568,10 +568,10 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		switch signalsSent {
 		case 0:
-			pid0.SignalChan <- syscall.SIGHUP
+			pid0.signalChan <- syscall.SIGHUP
 			signalsSent++
 		case 1:
-			pid0.SignalChan <- syscall.SIGINT // Send shutdown after reload
+			pid0.signalChan <- syscall.SIGINT // Send shutdown after reload
 			signalsSent++
 		}
 		return signalsSent >= 2
@@ -630,10 +630,10 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		switch signalsSent {
 		case 0:
-			pid0.SignalChan <- syscall.SIGHUP
+			pid0.signalChan <- syscall.SIGHUP
 			signalsSent++
 		case 1:
-			pid0.SignalChan <- syscall.SIGTERM
+			pid0.signalChan <- syscall.SIGTERM
 			signalsSent++
 		}
 		return signalsSent >= 2
@@ -678,7 +678,7 @@ func TestPIDZero_Reap_NoRunnables(t *testing.T) {
 	}()
 
 	// Send SIGINT signal to shutdown
-	pid0.SignalChan <- syscall.SIGINT
+	pid0.signalChan <- syscall.SIGINT
 
 	// Wait for Exec to finish
 	select {
@@ -722,7 +722,7 @@ func TestPIDZero_Reap_ShutdownCalledOnce(t *testing.T) {
 	var signalsSent int
 	assert.Eventually(t, func() bool {
 		if signalsSent < 2 {
-			pid0.SignalChan <- syscall.SIGINT
+			pid0.signalChan <- syscall.SIGINT
 			signalsSent++
 		}
 		return signalsSent >= 2
@@ -787,13 +787,13 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-trigger1
-		pid0.SignalChan <- syscall.SIGTERM
+		pid0.signalChan <- syscall.SIGTERM
 	}()
 
 	go func() {
 		defer wg.Done()
 		<-trigger2
-		pid0.SignalChan <- syscall.SIGHUP
+		pid0.signalChan <- syscall.SIGHUP
 	}()
 
 	// Wait for services to start and trigger both goroutines
@@ -903,7 +903,7 @@ func TestPIDZero_Reap_UnhandledSignal(t *testing.T) {
 	var signalSent bool
 	assert.Eventually(t, func() bool {
 		if !signalSent {
-			pid0.SignalChan <- syscall.SIGUSR1 // Should hit default case and continue
+			pid0.signalChan <- syscall.SIGUSR1 // Should hit default case and continue
 			signalSent = true
 		}
 		return true
@@ -952,7 +952,7 @@ func TestPIDZero_Run_ShutdownSenderInterface(t *testing.T) {
 	var signalSent bool
 	assert.Eventually(t, func() bool {
 		if !signalSent {
-			pid0.SignalChan <- syscall.SIGINT
+			pid0.signalChan <- syscall.SIGINT
 			signalSent = true
 		}
 		return true
@@ -1044,7 +1044,7 @@ func TestPIDZero_Shutdown_NoTimeout(t *testing.T) {
 	var signalSent bool
 	assert.Eventually(t, func() bool {
 		if !signalSent {
-			pid0.SignalChan <- syscall.SIGINT
+			pid0.signalChan <- syscall.SIGINT
 			signalSent = true
 		}
 		return true
