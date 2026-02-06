@@ -16,6 +16,9 @@ type ReloadableWithConfig interface {
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set of runnables is started.
 func (r *Runner[T]) Reload() {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+
 	logger := r.logger.WithGroup("Reload")
 	logger.Debug("Reloading...")
 	defer func() {

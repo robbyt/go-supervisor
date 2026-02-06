@@ -30,6 +30,7 @@ type Runner[T runnable] struct {
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
 
+	reloadMu    sync.Mutex
 	runnablesMu sync.Mutex
 
 	// will be set by Run()
