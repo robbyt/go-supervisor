@@ -536,15 +536,10 @@ func TestPIDZero_Reap_HandleSIGTERM(t *testing.T) {
 // TestPIDZero_Reap_HandleSIGHUP tests that receiving SIGHUP triggers reload.
 func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	t.Parallel()
-	mockRunnable := new(mocks.Runnable)
+	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Reload").Once()
 	mockRunnable.On("Stop").Once()
-
-	// Setup for Stateable interface
-	stateChan := make(chan string)
-	mockRunnable.On("GetState").Return("running").Maybe()
-	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -552,32 +547,20 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable))
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		pid0.Shutdown()
-	})
-
-	pid0.listenForSignals()
-
 	execDone := make(chan error, 1)
 	go func() {
 		execDone <- pid0.Run()
 	}()
 
-	// Wait for services to start and send SIGHUP signal
-	var signalsSent int
-	assert.Eventually(t, func() bool {
-		switch signalsSent {
-		case 0:
-			pid0.signalChan <- syscall.SIGHUP
-			signalsSent++
-		case 1:
-			pid0.signalChan <- syscall.SIGINT // Send shutdown after reload
-			signalsSent++
-		}
-		return signalsSent >= 2
-	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGHUP then SIGINT")
+	pid0.signalChan <- syscall.SIGHUP
 
-	// Wait for Exec to finish
+	// Wait for reload to complete before sending shutdown signal
+	require.Eventually(t, func() bool {
+		return !mockRunnable.IsMethodCallable(t, "Reload")
+	}, 1*time.Second, 10*time.Millisecond, "Reload was not called after SIGHUP")
+
+	pid0.signalChan <- syscall.SIGINT
+
 	select {
 	case err := <-execDone:
 		require.NoError(t, err)
@@ -588,28 +571,20 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	mockRunnable.AssertExpectations(t)
 }
 
-// TestPIDZero_Reap_MultipleSignals tests handling multiple signals.
+// TestPIDZero_Reap_MultipleSignals tests that SIGHUP triggers reload on multiple
+// runnables, followed by SIGTERM triggering clean shutdown.
 func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	t.Parallel()
-	mockRunnable1 := new(mocks.Runnable)
-	mockRunnable2 := new(mocks.Runnable)
+	mockRunnable1 := mocks.NewMockRunnable()
+	mockRunnable2 := mocks.NewMockRunnable()
 	mockRunnable1.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Once()
 
-	// TODO: these should be called by the hup, need to investigate!
 	mockRunnable1.On("Reload").Once()
 	mockRunnable2.On("Reload").Once()
 
 	mockRunnable1.On("Stop").Once()
 	mockRunnable2.On("Stop").Once()
-
-	// Setup for Stateable interface
-	stateChan1 := make(chan string)
-	stateChan2 := make(chan string)
-	mockRunnable1.On("GetState").Return("running").Maybe()
-	mockRunnable2.On("GetState").Return("running").Maybe()
-	mockRunnable1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
-	mockRunnable2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -617,29 +592,21 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	pid0, err := New(WithContext(ctx), WithRunnables(mockRunnable1, mockRunnable2))
 	require.NoError(t, err)
 
-	pid0.listenForSignals()
-
 	execDone := make(chan error, 1)
 	go func() {
-		// Start the blocking supervisor in the background
 		execDone <- pid0.Run()
 	}()
 
-	// Wait and send multiple signals
-	var signalsSent int
-	assert.Eventually(t, func() bool {
-		switch signalsSent {
-		case 0:
-			pid0.signalChan <- syscall.SIGHUP
-			signalsSent++
-		case 1:
-			pid0.signalChan <- syscall.SIGTERM
-			signalsSent++
-		}
-		return signalsSent >= 2
-	}, 200*time.Millisecond, 10*time.Millisecond, "Should send SIGHUP then SIGTERM")
+	pid0.signalChan <- syscall.SIGHUP
 
-	// Wait for Exec to finish due to SIGTERM
+	// Wait for reload to complete on both runnables before sending shutdown
+	require.Eventually(t, func() bool {
+		return !mockRunnable1.IsMethodCallable(t, "Reload") &&
+			!mockRunnable2.IsMethodCallable(t, "Reload")
+	}, 1*time.Second, 10*time.Millisecond, "Reload was not called on both runnables after SIGHUP")
+
+	pid0.signalChan <- syscall.SIGTERM
+
 	select {
 	case err := <-execDone:
 		require.NoError(t, err)

@@ -232,41 +232,28 @@ func TestCompositeRunner_Run(t *testing.T) {
 	})
 
 	t.Run("runnable fails during startup", func(t *testing.T) {
-		// Setup mock runnables
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1")
-		mockRunnable1.On("Run", mock.Anything).Return(nil)
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("runnable1")
+		mockRunnable.On("Run", mock.Anything).Return(errors.New("failed to start"))
 
-		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2")
-		mockRunnable2.On("Run", mock.Anything).Return(errors.New("failed to start"))
-
-		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable2, Config: nil},
+			{Runnable: mockRunnable, Config: nil},
 		}
 
-		// Create config callback
 		configCallback := func() (*Config[*mocks.Runnable], error) {
 			return NewConfig("test", entries)
 		}
 
-		// Create runner
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Run
 		err = runner.Run(context.Background())
 
-		// Verify error and state
 		require.Error(t, err)
 		require.ErrorContains(t, err, "child runnable failed")
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
 
-		// Verify mock expectations
-		mockRunnable1.AssertExpectations(t)
-		mockRunnable2.AssertExpectations(t)
+		mockRunnable.AssertExpectations(t)
 	})
 
 	t.Run("missing config", func(t *testing.T) {
