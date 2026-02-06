@@ -25,7 +25,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		sender.On("GetReloadTrigger").Return(reloadTrigger)
 		sender.On("Run", mock.Anything).Return(nil)
-		sender.On("Reload").Return()
+		sender.On("Reload").Return().Once()
 		sender.On("Stop").Return()
 		sender.On("GetState").Return("running").Maybe()
 		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
@@ -43,12 +43,9 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		// Trigger reload
 		reloadTrigger <- struct{}{}
 
-		// Allow reload to process
-		time.Sleep(100 * time.Millisecond)
-
-		// Verify reload was called once
-		sender.AssertCalled(t, "Reload")
-		sender.AssertNumberOfCalls(t, "Reload", 1)
+		require.Eventually(t, func() bool {
+			return !sender.IsMethodCallable(t, "Reload")
+		}, 1*time.Second, 10*time.Millisecond)
 
 		p.Shutdown()
 		<-done
@@ -71,8 +68,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender1.On("Run", mock.Anything).Return(nil)
 		sender2.On("Run", mock.Anything).Return(nil)
 
-		sender1.On("Reload").Return()
-		sender2.On("Reload").Return()
+		sender1.On("Reload").Return().Times(2)
+		sender2.On("Reload").Return().Times(2)
 
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
@@ -96,11 +93,9 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		reloadTrigger1 <- struct{}{}
 		reloadTrigger2 <- struct{}{}
 
-		time.Sleep(100 * time.Millisecond)
-
-		// Expect each service to have Reload() called twice
-		sender1.AssertNumberOfCalls(t, "Reload", 2)
-		sender2.AssertNumberOfCalls(t, "Reload", 2)
+		require.Eventually(t, func() bool {
+			return !sender1.IsMethodCallable(t, "Reload") && !sender2.IsMethodCallable(t, "Reload")
+		}, 1*time.Second, 10*time.Millisecond)
 
 		p.Shutdown()
 		<-done
@@ -177,18 +172,16 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 			execDone <- pid0.Run()
 		}()
 
-		// Allow time for services to start
-		time.Sleep(10 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			return pid0.ctx.Err() == nil
+		}, time.Second, 5*time.Millisecond)
 
-		// Manually trigger reload via API call
 		pid0.ReloadAll()
 
-		// Allow time for reload to complete
-		time.Sleep(50 * time.Millisecond)
-
-		// Verify both services were reloaded
-		mockService1.AssertNumberOfCalls(t, "Reload", 1)
-		mockService2.AssertNumberOfCalls(t, "Reload", 1)
+		require.Eventually(t, func() bool {
+			return !mockService1.IsMethodCallable(t, "Reload") &&
+				!mockService2.IsMethodCallable(t, "Reload")
+		}, 1*time.Second, 10*time.Millisecond)
 
 		// Shutdown and wait for completion
 		pid0.Shutdown()

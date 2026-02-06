@@ -262,7 +262,6 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 
 	// Now test that the channel receives state changes
 	go func() {
-		time.Sleep(50 * time.Millisecond)
 		err := server.fsm.SetState(finitestate.StatusRunning)
 		assert.NoError(t, err)
 	}()
