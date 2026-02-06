@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,4 +159,51 @@ func TestRunnerRaceConditions(t *testing.T) {
 	runner.Stop()
 
 	<-errChan
+}
+
+// TestGetConfig_ConcurrentAccess attempts to prove a race condition in getConfig()
+// when multiple goroutines call it concurrently with nil config.
+// Since NewRunner eagerly loads config during construction, all concurrent
+// getConfig() calls find non-nil config and never hit the callback path.
+func TestGetConfig_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	var callbackCount atomic.Int64
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+
+	cfgCallback := func() (*Config, error) {
+		callbackCount.Add(1)
+		return NewConfig(port, Routes{*route}, WithDrainTimeout(1*time.Second))
+	}
+
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// NewRunner calls getConfig() once during construction
+	assert.Equal(t, int64(1), callbackCount.Load())
+
+	const goroutines = 10
+	configs := make([]*Config, goroutines)
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Go(func() {
+			configs[i] = runner.getConfig()
+		})
+	}
+	wg.Wait()
+
+	// Callback should still only have been called once — config was already loaded by NewRunner
+	assert.Equal(t, int64(1), callbackCount.Load())
+
+	// All goroutines got the same config
+	for i := range configs {
+		assert.Same(t, configs[0], configs[i])
+	}
 }

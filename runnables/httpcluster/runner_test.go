@@ -497,14 +497,12 @@ func TestRunnerConcurrency(t *testing.T) {
 		// Send multiple configs concurrently
 		const numConfigs = 10
 		var wg sync.WaitGroup
-		wg.Add(numConfigs)
 
 		testCtx, testCancel := context.WithCancel(t.Context())
 		defer testCancel()
 
-		for i := 0; i < numConfigs; i++ {
-			go func(i int) {
-				defer wg.Done()
+		for range numConfigs {
+			wg.Go(func() {
 				// Each concurrent update uses a different port
 				addr := networking.GetRandomListeningPort(t)
 				configs := map[string]*httpserver.Config{
@@ -519,7 +517,7 @@ func TestRunnerConcurrency(t *testing.T) {
 				case <-ctx.Done():
 					// Timeout is ok for buffered channel
 				}
-			}(i)
+			})
 		}
 
 		wg.Wait()
@@ -553,11 +551,9 @@ func TestRunnerConcurrency(t *testing.T) {
 		// Read state concurrently
 		const numReaders = 50
 		var wg sync.WaitGroup
-		wg.Add(numReaders)
 
-		for i := 0; i < numReaders; i++ {
-			go func() {
-				defer wg.Done()
+		for range numReaders {
+			wg.Go(func() {
 				state := runner.GetState()
 				assert.NotEmpty(t, state)
 
@@ -566,7 +562,7 @@ func TestRunnerConcurrency(t *testing.T) {
 
 				str := runner.String()
 				assert.Contains(t, str, "HTTPCluster")
-			}()
+			})
 		}
 
 		wg.Wait()
@@ -593,13 +589,11 @@ func TestRunnerConcurrency(t *testing.T) {
 		// Call Stop concurrently
 		const numStops = 10
 		var wg sync.WaitGroup
-		wg.Add(numStops)
 
-		for i := 0; i < numStops; i++ {
-			go func() {
-				defer wg.Done()
+		for range numStops {
+			wg.Go(func() {
 				runner.Stop()
-			}()
+			})
 		}
 
 		wg.Wait()
