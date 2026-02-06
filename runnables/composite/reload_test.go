@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -1556,4 +1557,62 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable3.AssertExpectations(t)
 		mockRunnable4.AssertExpectations(t)
 	})
+}
+
+func TestCompositeRunner_ConcurrentReload(t *testing.T) {
+	t.Parallel()
+
+	mockRunnable := mocks.NewMockRunnable()
+	mockRunnable.On("String").Return("concurrent-reloader").Maybe()
+	mockRunnable.On("Reload").Return()
+	mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(context.Canceled).Maybe()
+	mockRunnable.On("Stop").Return().Maybe()
+
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: mockRunnable, Config: nil},
+	}
+
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", entries)
+	}
+
+	runner, err := NewRunner(configCallback)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(ctx)
+	}()
+
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, 2*time.Second, 10*time.Millisecond)
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			runner.Reload()
+		})
+	}
+	wg.Wait()
+
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, 2*time.Second, 10*time.Millisecond, "runner should be Running after concurrent reloads, not Error")
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-runErr:
+			assert.NoError(t, err)
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
 }
