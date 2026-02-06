@@ -379,7 +379,7 @@ func TestRunnerConfigUpdate_TOCTOU(t *testing.T) {
 	// check outside the mutex causes a problem.
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		_ = runner.processConfigUpdate(ctx, configs)
+		assert.NoError(t, runner.processConfigUpdate(ctx, configs))
 	})
 	wg.Go(func() {
 		cancel()
