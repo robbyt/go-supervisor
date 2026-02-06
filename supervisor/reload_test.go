@@ -2,6 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -198,5 +201,85 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		// Verify expectations
 		mockService1.AssertExpectations(t)
 		mockService2.AssertExpectations(t)
+	})
+
+	t.Run("SIGTERM handled while reload is in progress", func(t *testing.T) {
+		mockService := mocks.NewMockRunnable()
+		mockService.On("String").Return("SlowReloader").Maybe()
+		mockService.On("Run", mock.Anything).Return(nil)
+		mockService.On("Stop").Return()
+		mockService.DelayReload = 500 * time.Millisecond
+		mockService.On("Reload").Return()
+
+		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- pid0.Run()
+		}()
+
+		require.Eventually(t, func() bool {
+			return pid0.ctx.Err() == nil
+		}, time.Second, 5*time.Millisecond)
+
+		pid0.ReloadAll()
+
+		// Send SIGTERM while reload is in progress - the reap loop must stay responsive
+		pid0.SignalChan <- syscall.SIGTERM
+
+		require.Eventually(t, func() bool {
+			select {
+			case err := <-done:
+				assert.NoError(t, err)
+				return true
+			default:
+				return false
+			}
+		}, 2*time.Second, 10*time.Millisecond, "SIGTERM was not handled while reload was in progress")
+
+		mockService.AssertCalled(t, "Stop")
+	})
+
+	t.Run("concurrent ReloadAll is safe under race detector", func(t *testing.T) {
+		mockService := mocks.NewMockRunnable()
+		mockService.On("String").Return("ConcurrentReloader").Maybe()
+		mockService.On("Run", mock.Anything).Return(nil)
+		mockService.On("Stop").Return()
+		mockService.On("Reload").Return()
+
+		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
+		require.NoError(t, err)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- pid0.Run()
+		}()
+
+		require.Eventually(t, func() bool {
+			return pid0.ctx.Err() == nil
+		}, time.Second, 5*time.Millisecond)
+
+		var wg sync.WaitGroup
+		var callCount atomic.Int32
+		for range 10 {
+			wg.Go(func() {
+				pid0.ReloadAll()
+				callCount.Add(1)
+			})
+		}
+		wg.Wait()
+		assert.Equal(t, int32(10), callCount.Load(), "all ReloadAll calls should return")
+
+		pid0.Shutdown()
+		require.Eventually(t, func() bool {
+			select {
+			case err := <-done:
+				assert.NoError(t, err)
+				return true
+			default:
+				return false
+			}
+		}, 2*time.Second, 10*time.Millisecond, "shutdown timed out")
 	})
 }
