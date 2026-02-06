@@ -42,7 +42,7 @@ const (
 type PIDZero struct {
 	ctx                context.Context
 	runnables          []Runnable
-	SignalChan         chan os.Signal
+	signalChan         chan os.Signal
 	errorChan          chan error
 	wg                 sync.WaitGroup
 	cancel             context.CancelFunc
@@ -149,7 +149,7 @@ func New(opts ...Option) (*PIDZero, error) {
 
 	p := &PIDZero{
 		runnables:        []Runnable{},
-		SignalChan:       make(chan os.Signal, 1), // OS signals must be buffered
+		signalChan:       make(chan os.Signal, 1), // OS signals must be buffered
 		errorChan:        make(chan error, 1),     // will be adjusted later
 		ctx:              ctx,
 		cancel:           cancel,
@@ -293,7 +293,7 @@ func (p *PIDZero) Shutdown() {
 	p.shutdownOnce.Do(func() {
 		shutdownStart := time.Now()
 		p.logger.Info("Graceful shutdown has been initiated...")
-		signal.Stop(p.SignalChan) // stop listening for new signals
+		signal.Stop(p.signalChan) // stop listening for new signals
 
 		// Stop each runnable in reverse order
 		for i := len(p.runnables) - 1; i >= 0; i-- {
@@ -353,11 +353,23 @@ func (p *PIDZero) Shutdown() {
 	})
 }
 
-// listenForSignals starts listening for OS signals, sending them to the internal SignalChan.
+// SendSignal injects a signal into the supervisor's signal handling loop.
+// This is useful for integration testing where OS signals cannot be sent directly,
+// or for programmatically triggering signal-based behavior from application code.
+// Calls made after shutdown are ignored.
+func (p *PIDZero) SendSignal(sig os.Signal) {
+	select {
+	case p.signalChan <- sig:
+	case <-p.ctx.Done():
+		p.logger.Warn("SendSignal called after shutdown", "signal", sig)
+	}
+}
+
+// listenForSignals starts listening for OS signals, sending them to the internal signalChan.
 func (p *PIDZero) listenForSignals() {
 	p.signalListenerOnce.Do(func() {
 		p.logger.Debug("Listening for signals")
-		signal.Notify(p.SignalChan, p.subscribeSignals...)
+		signal.Notify(p.signalChan, p.subscribeSignals...)
 	})
 }
 
@@ -403,7 +415,7 @@ func (p *PIDZero) reap() error {
 			p.logger.Debug("Supervisor context canceled")
 			p.Shutdown()
 			return nil // exit reap loop
-		case sig := <-p.SignalChan:
+		case sig := <-p.signalChan:
 			switch sig {
 			case syscall.SIGINT, syscall.SIGTERM:
 				p.logger.Debug("Received signal", "signal", sig)

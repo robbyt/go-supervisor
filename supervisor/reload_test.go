@@ -288,7 +288,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		pid0.ReloadAll()
 
 		// Send SIGTERM while reload is in progress - the reap loop must stay responsive
-		pid0.SignalChan <- syscall.SIGTERM
+		pid0.signalChan <- syscall.SIGTERM
 
 		require.Eventually(t, func() bool {
 			select {
