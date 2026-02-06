@@ -16,6 +16,8 @@ limitations under the License.
 
 package supervisor
 
+import "sync"
+
 // ReloadAll triggers a reload of all runnables that implement the Reloadable interface.
 // This call blocks until the reload manager accepts the signal. Callers that need
 // non-blocking behavior should invoke this in a goroutine.
@@ -29,27 +31,34 @@ func (p *PIDZero) ReloadAll() {
 func (p *PIDZero) startReloadManager() {
 	p.logger.Debug("Starting reload manager...")
 
-	// iterate all the runnables, and find the ones that are can send reload notifications
-	// and start a goroutine to listen for signals from them.
+	var senderWg sync.WaitGroup
+
 	for _, run := range p.runnables {
 		if rldSender, ok := run.(ReloadSender); ok {
-			go func(r Runnable, s ReloadSender) {
+			senderWg.Go(func() {
 				for {
 					select {
 					case <-p.ctx.Done():
 						return
-					case <-s.GetReloadTrigger():
-						p.reloadListener <- struct{}{}
-						p.logger.Debug("Reload notifier received from runnable", "runnable", r)
+					case <-rldSender.GetReloadTrigger():
+						select {
+						case p.reloadListener <- struct{}{}:
+							p.logger.Debug("Reload notifier received from runnable", "runnable", run)
+						case <-p.ctx.Done():
+							return
+						}
 					}
 				}
-			}(run, rldSender)
+			})
 		}
 	}
 
 	for {
 		select {
 		case <-p.ctx.Done():
+			p.logger.Debug("Reload manager shutting down, waiting for sender listeners...")
+			senderWg.Wait()
+			p.logger.Debug("All sender listeners exited")
 			return
 		case <-p.reloadListener:
 			reloads := p.reloadAllRunnables()
