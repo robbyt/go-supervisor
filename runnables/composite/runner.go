@@ -111,7 +111,7 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	}
 
 	// Start all child runnables
-	if err := r.boot(ctx); err != nil {
+	if err := r.boot(runCtx); err != nil {
 		r.setStateError()
 		return fmt.Errorf("failed to start child runnables: %w", err)
 	}
@@ -128,7 +128,8 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 		r.logger.Debug("Local context canceled")
 	case err := <-r.serverErrors:
 		r.setStateError()
-		return fmt.Errorf("%w: %w", ErrRunnableFailed, err)
+		stopErr := r.stopAllRunnables()
+		return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
 	}
 
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusRunning, finitestate.StatusStopping); err != nil {
