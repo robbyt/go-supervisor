@@ -352,6 +352,55 @@ func TestRunnerConfigUpdate(t *testing.T) {
 	})
 }
 
+func TestRunnerConfigUpdate_TOCTOU(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewRunner()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(ctx)
+	}()
+
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, time.Second, 5*time.Millisecond)
+
+	addr := networking.GetRandomListeningPort(t)
+	configs := map[string]*httpserver.Config{
+		"server1": createTestHTTPConfig(t, addr),
+	}
+
+	// Race: call processConfigUpdate directly (bypassing the single-goroutine
+	// event loop) while simultaneously stopping, to test whether the IsRunning()
+	// check outside the mutex causes a problem.
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		_ = runner.processConfigUpdate(ctx, configs)
+	})
+	wg.Go(func() {
+		cancel()
+	})
+	wg.Wait()
+
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-runErr:
+			assert.NoError(t, err)
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
+
+	state := runner.GetState()
+	assert.NotEqual(t, finitestate.StatusError, state,
+		"runner should not end in Error state from concurrent config update + stop")
+}
+
 func TestRunnerStateTransitions(t *testing.T) {
 	t.Parallel()
 	t.Run("normal state flow", func(t *testing.T) {
