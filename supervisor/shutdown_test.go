@@ -27,8 +27,8 @@ func TestPIDZero_StartShutdownManager_TriggersShutdown(t *testing.T) {
 	shutdownChan := make(chan struct{}, 1)
 
 	mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
-	mockService.On("String").Return("mockShutdownService").Maybe()
-	mockService.On("Stop").Return().Maybe()
+	mockService.On("String").Return("mockShutdownService")
+	mockService.On("Stop").Return().Once()
 
 	pidZero, err := New(WithContext(supervisorCtx), WithRunnables(mockService))
 	require.NoError(t, err)
@@ -58,8 +58,6 @@ func TestPIDZero_StartShutdownManager_ContextCancel(t *testing.T) {
 		shutdownChan := make(chan struct{})
 
 		mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
-		mockService.On("String").Return("mockShutdownService").Maybe()
-		mockService.On("Stop").Return().Maybe()
 
 		pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
 		require.NoError(t, err)
@@ -82,9 +80,6 @@ func TestPIDZero_StartShutdownManager_NoSenders(t *testing.T) {
 		defer cancel()
 
 		nonSenderRunnable := mocks.NewMockRunnable()
-		nonSenderRunnable.On("Run", mock.Anything).Return(nil).Maybe()
-		nonSenderRunnable.On("Stop").Maybe()
-		nonSenderRunnable.On("String").Return("simpleRunnable").Maybe()
 
 		pidZero, err := New(WithContext(ctx), WithRunnables(nonSenderRunnable))
 		require.NoError(t, err)
@@ -117,8 +112,6 @@ func TestPIDZero_Shutdown_WithTimeoutNotExceeded(t *testing.T) {
 	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
 		close(stopCalled)
 	})
-
-	runnable.On("String").Return("blockingRunnable").Maybe()
 
 	pidZero, err := New(
 		WithRunnables(runnable),
@@ -177,8 +170,6 @@ func TestPIDZero_Shutdown_WithTimeoutExceeded(t *testing.T) {
 	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
 		time.Sleep(50 * time.Millisecond)
 	})
-
-	runnable.On("String").Return("stuckRunnable").Maybe()
 
 	pidZero, err := New(
 		WithRunnables(runnable),

@@ -97,14 +97,7 @@ func TestNewRunner(t *testing.T) {
 func TestCompositeRunner_String(t *testing.T) {
 	t.Parallel()
 	mockRunnable1 := mocks.NewMockRunnable()
-	mockRunnable1.On("String").Return("runnable1").Maybe()
-	mockRunnable1.On("Stop").Maybe()
-	mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
-
 	mockRunnable2 := mocks.NewMockRunnable()
-	mockRunnable2.On("String").Return("runnable2").Maybe()
-	mockRunnable2.On("Stop").Maybe()
-	mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
 
 	entries := []RunnableEntry[*mocks.Runnable]{
 		{Runnable: mockRunnable1, Config: nil},
@@ -130,7 +123,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 	t.Run("successful run and graceful shutdown", func(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
+		mockRunnable1.On("String").Return("runnable1")
 		mockRunnable1.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			ctx := args.Get(0).(context.Context)
 			<-ctx.Done() // Block until cancelled like a real service
@@ -138,7 +131,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 		mockRunnable1.On("Stop").Once()
 
 		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
+		mockRunnable2.On("String").Return("runnable2")
 		mockRunnable2.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			ctx := args.Get(0).(context.Context)
 			<-ctx.Done() // Block until cancelled like a real service
@@ -196,7 +189,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 	t.Run("runnable fails during execution", func(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
+		mockRunnable1.On("String").Return("runnable1")
 
 		var capturedRunner *Runner[*mocks.Runnable]
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
@@ -211,7 +204,6 @@ func TestCompositeRunner_Run(t *testing.T) {
 			// Wait until context is cancelled
 			<-args.Get(0).(context.Context).Done()
 		}).Return(nil)
-		mockRunnable1.On("Stop").Maybe()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -242,14 +234,12 @@ func TestCompositeRunner_Run(t *testing.T) {
 	t.Run("runnable fails during startup", func(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("String").Return("runnable1")
+		mockRunnable1.On("Run", mock.Anything).Return(nil)
 
 		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
+		mockRunnable2.On("String").Return("runnable2")
 		mockRunnable2.On("Run", mock.Anything).Return(errors.New("failed to start"))
-		mockRunnable2.On("Stop").Maybe()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -350,13 +340,13 @@ func TestCompositeRunner_Run(t *testing.T) {
 
 		// Setup mock runnable for reload
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.On("String").Return("runnable1").Maybe()
+		mockRunnable.On("String").Return("runnable1")
 		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			close(runStarted) // Signal that Run was called
 			ctx := args.Get(0).(context.Context)
 			<-ctx.Done() // Block until cancelled like a real service
 		})
-		mockRunnable.On("Stop").Maybe()
+		mockRunnable.On("Stop").Once()
 
 		// Initially empty, later populated
 		var useUpdatedEntries atomic.Bool
@@ -450,18 +440,9 @@ func TestCompositeRunner_Stop(t *testing.T) {
 
 	// Create reusable mock setup function
 	setupMocksAndConfig := func() (entries []RunnableEntry[*mocks.Runnable], configFunc func() (*Config[*mocks.Runnable], error)) {
-		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable1.On("Stop").Maybe()
-
 		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Run", mock.Anything).Return(nil).Maybe()
-		mockRunnable2.On("Stop").Maybe()
 
-		// Create entries
 		entries = []RunnableEntry[*mocks.Runnable]{
 			{Runnable: mockRunnable1, Config: nil},
 			{Runnable: mockRunnable2, Config: nil},
@@ -537,24 +518,21 @@ func TestCompositeRunner_MultipleChildFailures(t *testing.T) {
 		started := make(chan struct{})
 
 		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("failer1").Maybe()
-		mockRunnable1.On("Stop").Maybe()
+		mockRunnable1.On("String").Return("failer1")
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			started <- struct{}{}
 			time.Sleep(20 * time.Millisecond)
 		}).Return(failErr)
 
 		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("failer2").Maybe()
-		mockRunnable2.On("Stop").Maybe()
+		mockRunnable2.On("String").Return("failer2")
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			started <- struct{}{}
 			time.Sleep(20 * time.Millisecond)
 		}).Return(failErr)
 
 		mockRunnable3 := mocks.NewMockRunnable()
-		mockRunnable3.On("String").Return("failer3").Maybe()
-		mockRunnable3.On("Stop").Maybe()
+		mockRunnable3.On("String").Return("failer3")
 		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			started <- struct{}{}
 			time.Sleep(20 * time.Millisecond)

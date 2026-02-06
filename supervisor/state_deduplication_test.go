@@ -24,7 +24,6 @@ func TestStateDeduplication(t *testing.T) {
 		runnable := mocks.NewMockRunnableWithStateable()
 		runnable.On("String").Return("test-runnable")
 		runnable.On("GetStateChan", mock.Anything).Return(stateChan)
-		runnable.On("GetState").Return("initial").Maybe()
 
 		pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
 		require.NoError(t, err)

@@ -21,14 +21,11 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		// Setup mock
 		sender := mocks.NewMockRunnableWithReloadSender()
 		reloadTrigger := make(chan struct{})
-		stateChan := make(chan string)
 
 		sender.On("GetReloadTrigger").Return(reloadTrigger)
 		sender.On("Run", mock.Anything).Return(nil)
 		sender.On("Reload").Return().Once()
 		sender.On("Stop").Return()
-		sender.On("GetState").Return("running").Maybe()
-		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender))
 		require.NoError(t, err)
@@ -59,8 +56,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		reloadTrigger1 := make(chan struct{})
 		reloadTrigger2 := make(chan struct{})
-		stateChan1 := make(chan string)
-		stateChan2 := make(chan string)
 
 		sender1.On("GetReloadTrigger").Return(reloadTrigger1)
 		sender2.On("GetReloadTrigger").Return(reloadTrigger2)
@@ -73,11 +68,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
-
-		sender1.On("GetState").Return("running").Maybe()
-		sender2.On("GetState").Return("running").Maybe()
-		sender1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
-		sender2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender1, sender2))
 		require.NoError(t, err)
@@ -109,13 +99,10 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		sender := mocks.NewMockRunnableWithReloadSender()
 		reloadTrigger := make(chan struct{})
-		stateChan := make(chan string)
 
 		sender.On("GetReloadTrigger").Return(reloadTrigger)
 		sender.On("Run", mock.Anything).Return(nil)
 		sender.On("Stop").Return()
-		sender.On("GetState").Return("running").Maybe()
-		sender.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
 		p, err := New(WithContext(ctx), WithRunnables(sender))
 		require.NoError(t, err)
@@ -146,9 +133,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		// Setup multiple reloadable services that aren't reload senders
 		mockService1 := mocks.NewMockRunnable()
 		mockService2 := mocks.NewMockRunnable()
-
-		mockService1.On("String").Return("ReloadableService1").Maybe()
-		mockService2.On("String").Return("ReloadableService2").Maybe()
 
 		mockService1.On("Reload").Once()
 		mockService2.On("Reload").Once()
@@ -203,8 +187,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		reloadTrigger1 := make(chan struct{})
 		reloadTrigger2 := make(chan struct{})
-		stateChan1 := make(chan string)
-		stateChan2 := make(chan string)
 
 		var reloadCount atomic.Int32
 		sender1.On("GetReloadTrigger").Return(reloadTrigger1)
@@ -215,10 +197,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender2.On("Reload").Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
-		sender1.On("GetState").Return("running").Maybe()
-		sender2.On("GetState").Return("running").Maybe()
-		sender1.On("GetStateChan", mock.Anything).Return(stateChan1).Maybe()
-		sender2.On("GetStateChan", mock.Anything).Return(stateChan2).Maybe()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender1, sender2))
 		require.NoError(t, err)
@@ -260,7 +238,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 	t.Run("SIGTERM handled while reload is in progress", func(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
-		mockService.On("String").Return("SlowReloader").Maybe()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
 		mockService.DelayReload = 500 * time.Millisecond
@@ -298,7 +275,6 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 	t.Run("concurrent ReloadAll is safe under race detector", func(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
-		mockService.On("String").Return("ConcurrentReloader").Maybe()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
 		mockService.On("Reload").Return()

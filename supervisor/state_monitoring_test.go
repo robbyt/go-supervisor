@@ -18,11 +18,11 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	t.Parallel()
 
 	mockStateable := mocks.NewMockRunnableWithStateable()
-	mockStateable.On("String").Return("stateable-runnable").Maybe()
+	mockStateable.On("String").Return("stateable-runnable")
 	mockStateable.On("Run", mock.Anything).Return(nil)
 	mockStateable.On("Stop").Once()
 	mockStateable.On("GetState").Return("initial").Once()
-	mockStateable.On("GetState").Return("running").Maybe()
+	mockStateable.On("GetState").Return("running")
 
 	stateChan := make(chan string, 5)
 	mockStateable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
@@ -83,11 +83,7 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 		mockService := mocks.NewMockRunnableWithStateable()
 		stateChan := make(chan string, 2)
 		mockService.On("GetStateChan", mock.Anything).Return(stateChan).Once()
-		mockService.On("String").Return("mock-service").Maybe()
-		mockService.On("Run", mock.Anything).Return(nil).Maybe()
-		mockService.On("Stop").Maybe()
-		mockService.On("GetState").Return("initial").Maybe()
-		mockService.On("IsRunning").Return(true).Maybe()
+		mockService.On("String").Return("mock-service")
 
 		pid0, err := New(WithContext(ctx), WithRunnables(mockService))
 		require.NoError(t, err)
