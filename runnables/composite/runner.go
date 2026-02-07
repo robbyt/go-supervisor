@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/supervisor/lifecycle"
 )
 
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
@@ -26,6 +27,7 @@ type fsm interface {
 // as a single unit. It satisfies the Runnable, Reloadable, and Stateable interfaces.
 type Runner[T runnable] struct {
 	fsm            fsm
+	lc             *lifecycle.StartStop
 	configMu       sync.Mutex // Only used for getConfig()
 	currentConfig  atomic.Pointer[Config[T]]
 	configCallback ConfigCallback[T]
@@ -53,6 +55,7 @@ func NewRunner[T runnable](
 ) (*Runner[T], error) {
 	logger := slog.Default().WithGroup("composite.Runner")
 	r := &Runner[T]{
+		lc:             lifecycle.New(),
 		currentConfig:  atomic.Pointer[Config[T]]{},
 		configCallback: configCallback,
 		serverErrors:   make(chan error, 1),
@@ -75,6 +78,7 @@ func NewRunner[T runnable](
 	// Create FSM after the optional logger has been configured
 	fsm, err := finitestate.New(
 		r.logger.WithGroup("fsm").Handler(),
+		finitestate.TypicalTransitions,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
@@ -99,7 +103,9 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// store the Run context and cancel function in the runner so that Reload() and Stop() can use them later
+	done := r.lc.Started()
+	defer done()
+
 	r.runnablesMu.Lock()
 	r.ctx = runCtx
 	r.cancel = runCancel
@@ -122,10 +128,13 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to Running state: %w", err)
 	}
 
-	// Wait for context cancellation or errors
+	// Wait for context cancellation, stop signal, or errors
 	select {
 	case <-runCtx.Done():
 		r.logger.Debug("Local context canceled")
+	case <-r.lc.StopCh():
+		r.logger.Debug("Stop() called")
+		runCancel()
 	case err := <-r.serverErrors:
 		r.setStateError()
 		stopErr := r.stopAllRunnables()
@@ -153,17 +162,9 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 	return nil
 }
 
-// Stop will cancel the context, causing all child runnables to stop.
+// Stop signals the runner to shut down and blocks until Run() completes.
 func (r *Runner[T]) Stop() {
-	r.runnablesMu.Lock()
-	cancel := r.cancel
-	r.runnablesMu.Unlock()
-
-	if cancel == nil {
-		r.logger.Warn("Cancel function is nil, skipping Stop")
-		return
-	}
-	cancel()
+	r.lc.Stop()
 }
 
 // boot starts all child runnables in the order they're defined.

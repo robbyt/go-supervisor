@@ -7,7 +7,6 @@ import (
 
 	"github.com/robbyt/go-fsm/v2"
 	"github.com/robbyt/go-fsm/v2/hooks"
-	"github.com/robbyt/go-fsm/v2/hooks/broadcast"
 	"github.com/robbyt/go-fsm/v2/transitions"
 )
 
@@ -25,80 +24,68 @@ const (
 // TypicalTransitions is a set of standard transitions for a finite state machine.
 var TypicalTransitions = transitions.Typical
 
-// Machine is a wrapper around go-fsm v2 that provides the v1 API compatibility.
-// It manages both the FSM and broadcast functionality.
+// Machine wraps go-fsm v2 to provide a simplified API with broadcast support.
 type Machine struct {
 	*fsm.Machine
-	broadcastManager *broadcast.Manager
 }
 
 // GetStateChan returns a channel that emits the state whenever it changes.
-// The channel is closed when the provided context is canceled.
-// For v1 API compatibility, the current state is sent immediately to the channel.
-// A 5-second broadcast timeout is used to prevent slow consumers from blocking state updates.
+// The current state is sent immediately. The channel is closed when the
+// provided context is canceled.
 func (s *Machine) GetStateChan(ctx context.Context) <-chan string {
-	return s.getStateChanInternal(ctx, broadcast.WithTimeout(5*time.Second))
-}
-
-// getStateChanInternal is a helper that creates a channel and sends the current state to it.
-// This maintains v1 API compatibility where GetStateChan immediately sends the current state.
-func (s *Machine) getStateChanInternal(ctx context.Context, opts ...broadcast.Option) <-chan string {
-	wrappedCh := make(chan string, 1)
-
-	userCh, err := s.broadcastManager.GetStateChan(ctx, opts...)
-	if err != nil {
-		close(wrappedCh)
-		return wrappedCh
+	sourceCh := make(chan string, 1)
+	if err := s.Machine.GetStateChan(ctx, sourceCh); err != nil {
+		ch := make(chan string)
+		close(ch)
+		return ch
 	}
 
-	currentState := s.GetState()
-	wrappedCh <- currentState
+	// go-fsm sends the current state synchronously into sourceCh before
+	// returning. Forward it into outCh now so callers can do non-blocking reads.
+	outCh := make(chan string, 1)
+	outCh <- <-sourceCh
 
 	go func() {
-		defer close(wrappedCh)
-		for state := range userCh {
-			wrappedCh <- state
+		defer close(outCh)
+		for {
+			select {
+			case state := <-sourceCh:
+				outCh <- state
+			case <-ctx.Done():
+				// Drain any state already buffered in sourceCh before closing.
+				select {
+				case state := <-sourceCh:
+					outCh <- state
+				default:
+				}
+				return
+			}
 		}
 	}()
 
-	return wrappedCh
+	return outCh
 }
 
-// New creates a new finite state machine with the specified logger using "standard" state transitions.
-// This function provides compatibility with the v1 API while using v2 under the hood.
-func New(handler slog.Handler) (*Machine, error) {
+// New creates a new finite state machine with the specified logger and transitions.
+func New(handler slog.Handler, t *transitions.Config) (*Machine, error) {
 	registry, err := hooks.NewRegistry(
 		hooks.WithLogHandler(handler),
-		hooks.WithTransitions(TypicalTransitions),
+		hooks.WithTransitions(t),
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	broadcastManager := broadcast.NewManager(handler)
-
-	err = registry.RegisterPostTransitionHook(hooks.PostTransitionHookConfig{
-		Name:   "broadcast",
-		From:   []string{"*"},
-		To:     []string{"*"},
-		Action: broadcastManager.BroadcastHook,
-	})
 	if err != nil {
 		return nil, err
 	}
 
 	f, err := fsm.New(
 		StatusNew,
-		TypicalTransitions,
+		t,
 		fsm.WithLogHandler(handler),
 		fsm.WithCallbackRegistry(registry),
+		fsm.WithBroadcastTimeout(5*time.Second),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Machine{
-		Machine:          f,
-		broadcastManager: broadcastManager,
-	}, nil
+	return &Machine{Machine: f}, nil
 }

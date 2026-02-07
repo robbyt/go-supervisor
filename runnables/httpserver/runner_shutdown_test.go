@@ -446,21 +446,19 @@ func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 		}
 	}()
 
-	// Wait for handler to start, then initiate shutdown
-	require.Eventually(t, func() bool {
-		select {
-		case <-started:
-			server.Stop()
-			return true
-		default:
-			return false
-		}
-	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
+	// Wait for handler to start
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handler did not start in time")
+	}
 
-	// Measure shutdown time
+	// Measure shutdown time — Stop() blocks until Run() completes
 	start := time.Now()
-	err = <-done
+	server.Stop()
 	elapsed := time.Since(start)
+
+	err = <-done
 
 	// Verify shutdown behavior with timeout error
 	require.Error(t, err)
@@ -528,21 +526,19 @@ func TestRun_ShutdownWithDrainTimeout(t *testing.T) {
 		}
 	}()
 
-	// Wait for handler to start, then initiate shutdown
-	require.Eventually(t, func() bool {
-		select {
-		case <-started:
-			server.Stop()
-			return true
-		default:
-			return false
-		}
-	}, 2*time.Second, 10*time.Millisecond, "Handler did not start in time")
+	// Wait for handler to start
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handler did not start in time")
+	}
 
-	// Measure shutdown time
+	// Measure shutdown time — Stop() blocks until Run() completes
 	start := time.Now()
-	err = <-done
+	server.Stop()
 	elapsed := time.Since(start)
+
+	err = <-done
 
 	// Verify shutdown behavior
 	require.NoError(t, err)

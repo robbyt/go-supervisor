@@ -19,9 +19,6 @@ func TestGetState(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	// Test initial state
 	assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
@@ -47,9 +44,6 @@ func TestGetStateChan(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	// Create a context with timeout for safety
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
@@ -87,9 +81,6 @@ func TestIsRunning(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	// Test when state is not running
 	err := server.fsm.SetState(finitestate.StatusNew)
@@ -131,9 +122,6 @@ func TestSetStateError(t *testing.T) {
 		server, listenPort := createTestServer(t,
 			func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 		t.Logf("Server listening on port %s", listenPort)
-		t.Cleanup(func() {
-			server.Stop()
-		})
 
 		// Set a known state that can transition to error
 		err := server.fsm.SetState(finitestate.StatusNew)
@@ -149,9 +137,6 @@ func TestSetStateError(t *testing.T) {
 		server, listenPort := createTestServer(t,
 			func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 		t.Logf("Server listening on port %s", listenPort)
-		t.Cleanup(func() {
-			server.Stop()
-		})
 
 		// Set a state that won't normally transition to error
 		// Force it to be in Running state first
@@ -172,14 +157,11 @@ func TestSetStateError(t *testing.T) {
 		server, listenPort := createTestServer(t,
 			func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 		t.Logf("Server listening on port %s", listenPort)
-		t.Cleanup(func() {
-			server.Stop()
-		})
 
 		// Get typical transitions to use as base
 		logger := slog.Default().WithGroup("testFSM")
 		// Create valid FSM but force it to a specific state
-		validFSM, err := finitestate.New(logger.Handler())
+		validFSM, err := finitestate.New(logger.Handler(), finitestate.TypicalTransitions)
 		require.NoError(t, err)
 
 		// Force it to be in Stopping state
@@ -208,9 +190,6 @@ func TestWaitForState(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	// Set the state to Running
 	err := server.fsm.SetState(finitestate.StatusRunning)
@@ -238,9 +217,6 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
