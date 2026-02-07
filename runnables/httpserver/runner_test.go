@@ -190,9 +190,6 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	err := server.stopServer(context.Background())
 	require.Error(t, err)

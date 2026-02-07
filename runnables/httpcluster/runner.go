@@ -10,6 +10,7 @@ import (
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/supervisor"
+	"github.com/robbyt/go-supervisor/supervisor/lifecycle"
 )
 
 const (
@@ -30,6 +31,7 @@ type fsm interface {
 // It implements supervisor.Runnable and supervisor.Stateable interfaces.
 type Runner struct {
 	fsm fsm
+	lc  *lifecycle.StartStop
 	mu  sync.RWMutex
 
 	// runner factory creates the Runnable instances
@@ -77,6 +79,7 @@ func defaultRunnerFactory(
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
+		lc:                  lifecycle.New(),
 		runnerFactory:       defaultRunnerFactory,
 		logger:              slog.Default().WithGroup("httpcluster.Runner"),
 		restartDelay:        defaultRestartDelay,
@@ -99,7 +102,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 	// Create FSM with the configured logger
 	fsmLogger := r.logger.WithGroup("fsm")
-	machine, err := finitestate.New(fsmLogger.Handler())
+	machine, err := finitestate.New(fsmLogger.Handler(), finitestate.TypicalTransitions)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
 	}
@@ -175,10 +178,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to booting state: %w", err)
 	}
 
-	// Set up local run context, share it to make it accessible to shutdown
-	r.mu.Lock()
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+
+	done := r.lc.Started()
+	defer done()
+
+	r.mu.Lock()
 	r.ctx = runCtx
 	r.cancel = runCancel
 	r.mu.Unlock()
@@ -194,6 +200,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
+			return r.shutdown(runCtx)
+
+		case <-r.lc.StopCh():
+			logger.Debug("Stop() called, initiating shutdown")
+			runCancel()
 			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
@@ -212,13 +223,11 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 // Stop signals the cluster to stop all servers and shut down.
+// It blocks until Run() has completed shutdown.
 func (r *Runner) Stop() {
 	logger := r.logger.WithGroup("Stop")
 	logger.Debug("Stopping")
-
-	r.mu.Lock()
-	r.cancel()
-	r.mu.Unlock()
+	r.lc.Stop()
 }
 
 // shutdown performs graceful shutdown of all servers.
