@@ -161,7 +161,7 @@ func TestSetStateError(t *testing.T) {
 		// Get typical transitions to use as base
 		logger := slog.Default().WithGroup("testFSM")
 		// Create valid FSM but force it to a specific state
-		validFSM, err := finitestate.New(logger.Handler(), finitestate.TypicalTransitions)
+		validFSM, err := finitestate.NewTypicalFSM(logger.Handler())
 		require.NoError(t, err)
 
 		// Force it to be in Stopping state

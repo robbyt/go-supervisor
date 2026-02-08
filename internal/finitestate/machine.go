@@ -21,8 +21,8 @@ const (
 	StatusUnknown   = transitions.StatusUnknown
 )
 
-// TypicalTransitions is a set of standard transitions for a finite state machine.
-var TypicalTransitions = transitions.Typical
+// typicalTransitions is a set of standard transitions for a finite state machine.
+var typicalTransitions = transitions.Typical
 
 // Machine wraps go-fsm v2 to provide a simplified API with broadcast support.
 type Machine struct {
@@ -88,4 +88,9 @@ func New(handler slog.Handler, t *transitions.Config) (*Machine, error) {
 	}
 
 	return &Machine{Machine: f}, nil
+}
+
+// NewTypicalFSM creates a new finite state machine with standard transitions.
+func NewTypicalFSM(handler slog.Handler) (*Machine, error) {
+	return New(handler, typicalTransitions)
 }

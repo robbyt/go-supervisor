@@ -76,10 +76,7 @@ func NewRunner[T runnable](
 	}
 
 	// Create FSM after the optional logger has been configured
-	fsm, err := finitestate.New(
-		r.logger.WithGroup("fsm").Handler(),
-		finitestate.TypicalTransitions,
-	)
+	fsm, err := finitestate.NewTypicalFSM(r.logger.WithGroup("fsm").Handler())
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
 	}

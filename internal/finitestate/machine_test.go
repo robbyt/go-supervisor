@@ -16,7 +16,7 @@ func TestNew(t *testing.T) {
 
 	t.Run("creates new machine with correct initial state", func(t *testing.T) {
 		handler := slog.NewTextHandler(os.Stdout, nil)
-		machine, err := New(handler, TypicalTransitions)
+		machine, err := New(handler, typicalTransitions)
 
 		require.NoError(t, err)
 		require.NotNil(t, machine)
@@ -26,7 +26,7 @@ func TestNew(t *testing.T) {
 	t.Run("uses provided handler", func(t *testing.T) {
 		// Create a test handler
 		handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
-		machine, err := New(handler, TypicalTransitions)
+		machine, err := New(handler, typicalTransitions)
 
 		require.NoError(t, err)
 		require.NotNil(t, machine)
@@ -38,7 +38,7 @@ func TestMachineInterface(t *testing.T) {
 
 	setup := func() *Machine {
 		handler := slog.NewTextHandler(os.Stdout, nil)
-		m, err := New(handler, TypicalTransitions)
+		m, err := New(handler, typicalTransitions)
 		require.NoError(t, err)
 		return m
 	}
@@ -183,7 +183,7 @@ func TestTypicalTransitions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("verify TypicalTransitions is not nil", func(t *testing.T) {
-		assert.NotNil(t, TypicalTransitions)
+		assert.NotNil(t, typicalTransitions)
 	})
 
 	t.Run("verify status constants are defined", func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 
 	setup := func() *Machine {
 		handler := slog.NewTextHandler(os.Stdout, nil)
-		m, err := New(handler, TypicalTransitions)
+		m, err := New(handler, typicalTransitions)
 		require.NoError(t, err)
 		return m
 	}
