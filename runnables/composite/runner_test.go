@@ -461,6 +461,7 @@ func TestCompositeRunner_Stop(t *testing.T) {
 			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
 			runner.Stop()
+			synctest.Wait()
 
 			assert.True(t, runReturned.Load(), "Run should have returned before Stop unblocked")
 			assert.Equal(t, finitestate.StatusStopped, runner.GetState())

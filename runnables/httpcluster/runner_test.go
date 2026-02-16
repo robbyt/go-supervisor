@@ -616,13 +616,6 @@ func TestRunnerExecuteActions(t *testing.T) {
 		runner, err := NewRunner()
 		require.NoError(t, err)
 
-		// Setup run context
-		ctx := t.Context()
-
-		runner.mu.Lock()
-		runner.ctx = ctx
-		runner.mu.Unlock()
-
 		mockEntries := &MockEntriesManager{}
 		mockEntries.On("getPendingActions").Return([]string{}, []string{})
 
@@ -685,15 +678,6 @@ func TestRunnerContextManagement(t *testing.T) {
 		require.Eventually(t, func() bool {
 			return runner.IsRunning()
 		}, time.Second, 10*time.Millisecond)
-
-		// Check run context is set
-		runner.mu.RLock()
-		runCtx := runner.ctx
-		runCancel := runner.cancel
-		runner.mu.RUnlock()
-
-		assert.NotNil(t, runCtx)
-		assert.NotNil(t, runCancel)
 
 		cancel()
 	})

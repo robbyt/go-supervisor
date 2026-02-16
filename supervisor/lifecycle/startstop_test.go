@@ -121,6 +121,30 @@ func TestStartStop_DoubleDoneDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestStartStop_Restart(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		lc := New()
+
+		for range 3 {
+			runReturned := atomic.Bool{}
+			go func() {
+				done := lc.Started()
+				defer done()
+				<-lc.StopCh()
+				runReturned.Store(true)
+			}()
+
+			time.Sleep(time.Second)
+			synctest.Wait()
+
+			lc.Stop()
+
+			assert.True(t, runReturned.Load(), "Run should have returned before Stop unblocked")
+		}
+	})
+}
+
 func TestStartStop_StopChClosedAfterStop(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

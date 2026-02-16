@@ -39,10 +39,6 @@ type Runner struct {
 	restartDelay        time.Duration
 	deadlineServerStart time.Duration
 
-	// Set by Run()
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	// Configuration siphon channel
 	configSiphon chan map[string]*httpserver.Config
 
@@ -172,22 +168,17 @@ func (r *Runner) Run(ctx context.Context) error {
 	logger := r.logger.WithGroup("Run")
 	logger.Debug("Starting...")
 
+	done := r.lc.Started()
+	defer done()
+
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
 	// Transition to booting state
 	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
 		r.setStateError()
 		return fmt.Errorf("failed to transition to booting state: %w", err)
 	}
-
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-
-	done := r.lc.Started()
-	defer done()
-
-	r.mu.Lock()
-	r.ctx = runCtx
-	r.cancel = runCancel
-	r.mu.Unlock()
 
 	// Transition to running (no servers initially)
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {

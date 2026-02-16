@@ -59,7 +59,6 @@ type Runner struct {
 
 	// Set during Run()
 	ctx    context.Context
-	cancel context.CancelFunc
 	logger *slog.Logger
 }
 
@@ -125,15 +124,14 @@ func (r *Runner) String() string {
 // Run starts the HTTP server and handles its lifecycle. It transitions through
 // FSM states and returns when the server is stopped or encounters an error.
 func (r *Runner) Run(ctx context.Context) error {
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-
 	done := r.lc.Started()
 	defer done()
 
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
 	r.mutex.Lock()
 	r.ctx = runCtx
-	r.cancel = runCancel
 	r.mutex.Unlock()
 
 	// Transition from New to Booting

@@ -36,8 +36,7 @@ type Runner[T runnable] struct {
 	runnablesMu sync.Mutex
 
 	// will be set by Run()
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
 
 	serverErrors chan error
 	logger       *slog.Logger
@@ -97,15 +96,14 @@ func (r *Runner[T]) String() string {
 // Run starts all child runnables in order (first to last) and monitors for completion or errors.
 // This method blocks until all child runnables are stopped or an error occurs.
 func (r *Runner[T]) Run(ctx context.Context) error {
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-
 	done := r.lc.Started()
 	defer done()
 
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
 	r.runnablesMu.Lock()
 	r.ctx = runCtx
-	r.cancel = runCancel
 	r.runnablesMu.Unlock()
 
 	// Transition from New to Booting
