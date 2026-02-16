@@ -40,8 +40,7 @@ func (s *Machine) GetStateChan(ctx context.Context) <-chan string {
 }
 
 // getStateChanInternal subscribes to state changes via the broadcast manager
-// and sends the current state immediately for compatibility with callers that
-// expect the initial state on the channel.
+// and sends the current state immediately on the returned channel.
 func (s *Machine) getStateChanInternal(ctx context.Context, opts ...broadcast.Option) <-chan string {
 	wrappedCh := make(chan string, 1)
 
@@ -64,8 +63,8 @@ func (s *Machine) getStateChanInternal(ctx context.Context, opts ...broadcast.Op
 	return wrappedCh
 }
 
-// New creates a new finite state machine with the specified logger and transitions.
-func New(handler slog.Handler, t *transitions.Config) (*Machine, error) {
+// newMachine creates a new finite state machine with the specified logger and transitions.
+func newMachine(handler slog.Handler, t *transitions.Config) (*Machine, error) {
 	registry, err := hooks.NewRegistry(
 		hooks.WithLogHandler(handler),
 		hooks.WithTransitions(t),
@@ -104,5 +103,5 @@ func New(handler slog.Handler, t *transitions.Config) (*Machine, error) {
 
 // NewTypicalFSM creates a new finite state machine with standard transitions.
 func NewTypicalFSM(handler slog.Handler) (*Machine, error) {
-	return New(handler, typicalTransitions)
+	return newMachine(handler, typicalTransitions)
 }
