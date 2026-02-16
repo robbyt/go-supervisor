@@ -562,6 +562,94 @@ func TestCompositeRunner_Stop(t *testing.T) {
 			mock1.AssertExpectations(t)
 		})
 	})
+
+	t.Run("context cancel and stop race", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			mock1 := mocks.NewMockRunnable()
+			mock1.On("String").Return("r1")
+			mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).Return(nil)
+			mock1.On("Stop").Once()
+
+			entries := []RunnableEntry[*mocks.Runnable]{
+				{Runnable: mock1},
+			}
+
+			configCallback := func() (*Config[*mocks.Runnable], error) {
+				return NewConfig("test", entries)
+			}
+
+			runner, err := NewRunner(configCallback)
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithCancel(t.Context())
+
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- runner.Run(ctx)
+			}()
+
+			time.Sleep(10 * time.Millisecond)
+			synctest.Wait()
+			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+			// Fire both signals concurrently — Run's select may see either one
+			go cancel()
+			go runner.Stop()
+
+			time.Sleep(10 * time.Millisecond)
+			synctest.Wait()
+
+			assert.Equal(t, finitestate.StatusStopped, runner.GetState())
+			require.NoError(t, <-errCh)
+			mock1.AssertExpectations(t)
+		})
+	})
+
+	t.Run("stop blocks through slow child shutdown", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			mock1 := mocks.NewMockRunnable()
+			mock1.DelayStop = 100 * time.Millisecond
+			mock1.On("String").Return("r1")
+			mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).Return(nil)
+			mock1.On("Stop").Once()
+
+			entries := []RunnableEntry[*mocks.Runnable]{
+				{Runnable: mock1},
+			}
+
+			configCallback := func() (*Config[*mocks.Runnable], error) {
+				return NewConfig("test", entries)
+			}
+
+			runner, err := NewRunner(configCallback)
+			require.NoError(t, err)
+
+			errCh := make(chan error, 1)
+			runReturned := atomic.Bool{}
+			go func() {
+				errCh <- runner.Run(t.Context())
+				runReturned.Store(true)
+			}()
+
+			time.Sleep(10 * time.Millisecond)
+			synctest.Wait()
+			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+			runner.Stop()
+			synctest.Wait()
+
+			assert.True(t, runReturned.Load(), "Run should have returned after slow child Stop completed")
+			assert.Equal(t, finitestate.StatusStopped, runner.GetState())
+			require.NoError(t, <-errCh)
+			mock1.AssertExpectations(t)
+		})
+	})
 }
 
 func TestCompositeRunner_StopCancelsChildContexts(t *testing.T) {
@@ -630,6 +718,63 @@ func TestCompositeRunner_StopCancelsChildContexts(t *testing.T) {
 		mock1.AssertExpectations(t)
 		mock2.AssertExpectations(t)
 	})
+}
+
+func TestCompositeRunner_StopDuringReload(t *testing.T) {
+	t.Parallel()
+
+	mock1 := mocks.NewMockRunnable()
+	mock1.DelayReload = 50 * time.Millisecond
+	mock1.On("String").Return("r1")
+	mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(nil)
+	mock1.On("Stop").Maybe()
+	mock1.On("Reload").Maybe()
+
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: mock1},
+	}
+
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", entries)
+	}
+
+	runner, err := NewRunner(configCallback)
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runner.Run(t.Context())
+	}()
+
+	require.Eventually(t, func() bool {
+		return runner.IsRunning()
+	}, 1*time.Second, 5*time.Millisecond)
+
+	// Start reload in background (holds reloadMu for DelayReload duration)
+	go runner.Reload()
+	require.Eventually(t, func() bool {
+		return runner.GetState() == finitestate.StatusReloading
+	}, 1*time.Second, 1*time.Millisecond)
+
+	// Stop while reload is in progress — must not deadlock
+	stopReturned := atomic.Bool{}
+	go func() {
+		runner.Stop()
+		stopReturned.Store(true)
+	}()
+
+	require.Eventually(t, func() bool {
+		return stopReturned.Load()
+	}, 5*time.Second, 10*time.Millisecond, "Stop must not deadlock when called during reload")
+
+	// Run should also return
+	select {
+	case <-errCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after Stop during reload")
+	}
 }
 
 func TestCompositeRunner_ErrorPathStopsSiblings(t *testing.T) {

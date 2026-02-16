@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -247,6 +248,35 @@ func TestRunnerRun(t *testing.T) {
 		case <-timeoutCtx.Done():
 			t.Fatal("Runner did not stop within timeout")
 		}
+	})
+
+	t.Run("stop before run", func(t *testing.T) {
+		runner, err := NewRunner()
+		require.NoError(t, err)
+
+		stopReturned := atomic.Bool{}
+		go func() {
+			runner.Stop()
+			stopReturned.Store(true)
+		}()
+
+		// Stop should be blocked — Run hasn't started yet
+		require.Never(t, func() bool {
+			return stopReturned.Load()
+		}, 50*time.Millisecond, 5*time.Millisecond, "Stop should block until Run starts and completes")
+
+		runErr := make(chan error, 1)
+		go func() {
+			runErr <- runner.Run(t.Context())
+		}()
+
+		// Both Stop and Run should complete
+		require.Eventually(t, func() bool {
+			return stopReturned.Load()
+		}, 5*time.Second, 10*time.Millisecond, "Stop should unblock after Run completes")
+
+		assert.Equal(t, finitestate.StatusStopped, runner.GetState())
+		require.NoError(t, <-runErr)
 	})
 
 	t.Run("config siphon closed", func(t *testing.T) {
