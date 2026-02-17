@@ -24,7 +24,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		sender.On("GetReloadTrigger").Return(reloadTrigger)
 		sender.On("Run", mock.Anything).Return(nil)
-		sender.On("Reload").Return().Once()
+		sender.On("Reload", mock.Anything).Return().Once()
 		sender.On("Stop").Return()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender))
@@ -41,7 +41,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		reloadTrigger <- struct{}{}
 
 		require.Eventually(t, func() bool {
-			return !sender.IsMethodCallable(t, "Reload")
+			return !sender.IsMethodCallable(t, "Reload", mock.Anything)
 		}, 1*time.Second, 10*time.Millisecond)
 
 		p.Shutdown()
@@ -63,8 +63,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender1.On("Run", mock.Anything).Return(nil)
 		sender2.On("Run", mock.Anything).Return(nil)
 
-		sender1.On("Reload").Return().Times(2)
-		sender2.On("Reload").Return().Times(2)
+		sender1.On("Reload", mock.Anything).Return().Times(2)
+		sender2.On("Reload", mock.Anything).Return().Times(2)
 
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
@@ -84,7 +84,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		reloadTrigger2 <- struct{}{}
 
 		require.Eventually(t, func() bool {
-			return !sender1.IsMethodCallable(t, "Reload") && !sender2.IsMethodCallable(t, "Reload")
+			return !sender1.IsMethodCallable(t, "Reload", mock.Anything) && !sender2.IsMethodCallable(t, "Reload", mock.Anything)
 		}, 1*time.Second, 10*time.Millisecond)
 
 		p.Shutdown()
@@ -134,8 +134,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService1 := mocks.NewMockRunnable()
 		mockService2 := mocks.NewMockRunnable()
 
-		mockService1.On("Reload").Once()
-		mockService2.On("Reload").Once()
+		mockService1.On("Reload", mock.Anything).Once()
+		mockService2.On("Reload", mock.Anything).Once()
 
 		mockService1.On("Run", mock.Anything).Return(nil).Once()
 		mockService2.On("Run", mock.Anything).Return(nil).Once()
@@ -163,8 +163,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		pid0.ReloadAll()
 
 		require.Eventually(t, func() bool {
-			return !mockService1.IsMethodCallable(t, "Reload") &&
-				!mockService2.IsMethodCallable(t, "Reload")
+			return !mockService1.IsMethodCallable(t, "Reload", mock.Anything) &&
+				!mockService2.IsMethodCallable(t, "Reload", mock.Anything)
 		}, 1*time.Second, 10*time.Millisecond)
 
 		// Shutdown and wait for completion
@@ -193,8 +193,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender2.On("GetReloadTrigger").Return(reloadTrigger2)
 		sender1.On("Run", mock.Anything).Return(nil)
 		sender2.On("Run", mock.Anything).Return(nil)
-		sender1.On("Reload").Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
-		sender2.On("Reload").Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
+		sender1.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
+		sender2.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
 
@@ -241,7 +241,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
 		mockService.DelayReload = 500 * time.Millisecond
-		mockService.On("Reload").Return()
+		mockService.On("Reload", mock.Anything).Return()
 
 		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
 		require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
-		mockService.On("Reload").Return()
+		mockService.On("Reload", mock.Anything).Return()
 
 		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
 		require.NoError(t, err)

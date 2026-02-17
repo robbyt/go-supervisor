@@ -87,7 +87,7 @@ func TestRapidReload(t *testing.T) {
 	// Perform rapid reloads
 	for range 10 {
 		// Force config change by updating cfgCallback's closure state
-		server.Reload()
+		server.Reload(t.Context())
 		// Don't wait between reloads to test rapid changes
 	}
 
@@ -185,7 +185,7 @@ func TestReload(t *testing.T) {
 
 		// setup a failure
 		reloadCalled = true
-		server.Reload()
+		server.Reload(t.Context())
 
 		require.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
@@ -256,7 +256,7 @@ func TestReload(t *testing.T) {
 		errorTriggered = true
 
 		// Call Reload to apply the faulty configuration
-		server.Reload()
+		server.Reload(t.Context())
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
 		// Wait for state change to propagate
@@ -312,7 +312,7 @@ func TestReload(t *testing.T) {
 		configBefore := server.getConfig()
 
 		// Call Reload - should fail because transition to Reloading isn't valid from New state
-		server.Reload()
+		server.Reload(t.Context())
 
 		// Verify the state didn't change
 		assert.Equal(t, finitestate.StatusNew, server.GetState(), "State should remain New")
@@ -376,7 +376,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call Reload to apply the new configuration
-		server.Reload()
+		server.Reload(t.Context())
 
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
@@ -417,7 +417,7 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, initialConfig)
 
 		// Call Reload which should reload config
-		server.Reload()
+		server.Reload(t.Context())
 
 		// Verify the config was loaded (this doesn't test nil case, but ensures reload works)
 		cfg := server.getConfig()
@@ -475,7 +475,7 @@ func TestReload(t *testing.T) {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
-		server.Reload()
+		server.Reload(t.Context())
 
 		// Setup state monitoring
 		stateCtx, stateCancel := context.WithCancel(t.Context())

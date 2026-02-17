@@ -181,7 +181,7 @@ func TestMembershipChangesBasic(t *testing.T) {
 
 	// Trigger reload
 	t.Log("Triggering reload to remove worker1 and add worker3")
-	runner.Reload()
+	runner.Reload(t.Context())
 
 	// Use assert.Eventually to check that worker1 was stopped
 	assert.Eventually(t, func() bool {

@@ -1,6 +1,7 @@
 package composite
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -15,7 +16,7 @@ type ReloadableWithConfig interface {
 // Reload updates the configuration and handles runnables appropriately.
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set of runnables is started.
-func (r *Runner[T]) Reload() {
+func (r *Runner[T]) Reload(_ context.Context) {
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
 
@@ -127,7 +128,7 @@ func (r *Runner[T]) reloadSkipRestart(newConfig *Config[T]) {
 			// Fall back to standard Reloadable interface, assume the configCallback
 			// has somehow updated the runnable's internal state
 			logger.Debug("Reloading child runnable")
-			reloadable.Reload()
+			reloadable.Reload(context.TODO())
 		} else {
 			logger.Warn("Child runnable does not implement Reloadable or ReloadableWithConfig")
 		}

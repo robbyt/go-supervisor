@@ -82,7 +82,7 @@ func (p *PIDZero) reloadAllRunnables() int {
 			}
 
 			p.logger.Debug("Reloading", "runnable", r)
-			reloader.Reload()
+			reloader.Reload(p.ctx)
 			reloads++
 
 			if stateable, ok := r.(Stateable); ok {

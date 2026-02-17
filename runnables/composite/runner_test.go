@@ -380,7 +380,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 
 		// Now update the entries and reload
 		useUpdatedEntries.Store(true)
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Wait for reload to complete by checking if the config pointer has changed
 		var updatedCfg *Config[*mocks.Runnable]
@@ -730,7 +730,7 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(nil)
 	mock1.On("Stop").Maybe()
-	mock1.On("Reload").Maybe()
+	mock1.On("Reload", mock.Anything).Maybe()
 
 	entries := []RunnableEntry[*mocks.Runnable]{
 		{Runnable: mock1},
@@ -753,7 +753,7 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 	}, 1*time.Second, 5*time.Millisecond)
 
 	// Start reload in background (holds reloadMu for DelayReload duration)
-	go runner.Reload()
+	go runner.Reload(t.Context())
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
 	}, 1*time.Second, 1*time.Millisecond)
