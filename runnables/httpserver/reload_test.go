@@ -365,9 +365,6 @@ func TestReload(t *testing.T) {
 			WithConfigCallback(newCfgCallback),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() {
-			updatedServer.Stop() // Clean up the updated server too
-		})
 
 		// Replace the original server with our updated one for the test
 		// We'll keep the original server's FSM state

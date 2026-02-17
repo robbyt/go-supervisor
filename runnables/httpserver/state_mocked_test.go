@@ -21,9 +21,6 @@ func TestSetStateError_FullIntegration(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/test", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	// Set up initial conditions with FSM in Stopped state
 	err := server.fsm.SetState(finitestate.StatusStopped)

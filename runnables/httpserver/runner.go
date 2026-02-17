@@ -14,6 +14,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/supervisor"
+	"github.com/robbyt/go-supervisor/supervisor/lifecycle"
 )
 
 // Interface guards verify implementation at compile time
@@ -45,6 +46,7 @@ type fsm interface {
 // interfaces from the supervisor package.
 type Runner struct {
 	fsm            fsm
+	lc             *lifecycle.StartStop
 	mutex          sync.RWMutex
 	name           string
 	config         atomic.Pointer[Config]
@@ -57,7 +59,6 @@ type Runner struct {
 
 	// Set during Run()
 	ctx    context.Context
-	cancel context.CancelFunc
 	logger *slog.Logger
 }
 
@@ -67,6 +68,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	logger := slog.Default().WithGroup("httpserver.Runner")
 
 	r := &Runner{
+		lc:              lifecycle.New(),
 		name:            "",
 		config:          atomic.Pointer[Config]{},
 		serverCloseOnce: sync.Once{},
@@ -86,7 +88,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 
 	// Create FSM with the configured logger
 	fsmLogger := r.logger.WithGroup("fsm")
-	machine, err := finitestate.New(fsmLogger.Handler())
+	machine, err := finitestate.NewTypicalFSM(fsmLogger.Handler())
 	if err != nil {
 		return nil, fmt.Errorf("unable to create fsm: %w", err)
 	}
@@ -122,13 +124,14 @@ func (r *Runner) String() string {
 // Run starts the HTTP server and handles its lifecycle. It transitions through
 // FSM states and returns when the server is stopped or encounters an error.
 func (r *Runner) Run(ctx context.Context) error {
+	done := r.lc.Started()
+	defer done()
+
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	// Store the context and cancel function
 	r.mutex.Lock()
 	r.ctx = runCtx
-	r.cancel = runCancel
 	r.mutex.Unlock()
 
 	// Transition from New to Booting
@@ -156,6 +159,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	select {
 	case <-runCtx.Done():
 		r.logger.Debug("Context canceled")
+	case <-r.lc.StopCh():
+		r.logger.Debug("Stop() called")
+		runCancel()
 	case err := <-r.serverErrors:
 		r.setStateError()
 		return fmt.Errorf("%w: %w", ErrHttpServer, err)
@@ -164,19 +170,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	return r.shutdown(runCtx)
 }
 
-// Stop signals the HTTP server to shut down by canceling its context.
+// Stop signals the HTTP server to shut down and blocks until Run() completes.
 func (r *Runner) Stop() {
 	r.logger.Debug("Stopping HTTP server")
-
-	r.mutex.RLock()
-	cancel := r.cancel
-	r.mutex.RUnlock()
-
-	if cancel == nil {
-		r.logger.Warn("Cancel function is nil, skipping Stop")
-		return
-	}
-	cancel()
+	r.lc.Stop()
 }
 
 // serverReadinessProbe verifies the HTTP server is accepting connections by

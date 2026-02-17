@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,9 +191,6 @@ func TestStopServerWhenNotRunning(t *testing.T) {
 	server, listenPort := createTestServer(t,
 		func(w http.ResponseWriter, r *http.Request) {}, "/", 1*time.Second)
 	t.Logf("Server listening on port %s", listenPort)
-	t.Cleanup(func() {
-		server.Stop()
-	})
 
 	err := server.stopServer(context.Background())
 	require.Error(t, err)
@@ -289,4 +287,79 @@ func TestString(t *testing.T) {
 		// Test string representation with nil config
 		assert.Equal(t, "HTTPServer<>", stub.String())
 	})
+}
+
+func TestServerLifecycle_StopBlocks(t *testing.T) {
+	t.Parallel()
+
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
+	require.NoError(t, err)
+
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(listenPort, Routes{*route}, WithDrainTimeout(1*time.Second))
+	}
+
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	runReturned := atomic.Bool{}
+	go func() {
+		errCh <- server.Run(t.Context())
+		runReturned.Store(true)
+	}()
+
+	waitForState(t, server, finitestate.StatusRunning, 2*time.Second, "Server should enter Running state")
+
+	server.Stop()
+
+	// After blocking Stop returns, Run should complete very shortly
+	require.Eventually(t, func() bool {
+		return runReturned.Load()
+	}, 1*time.Second, 5*time.Millisecond, "Run should have returned after Stop unblocked")
+
+	assert.Equal(t, finitestate.StatusStopped, server.GetState())
+	require.NoError(t, <-errCh)
+}
+
+func TestServerLifecycle_StopBeforeRun(t *testing.T) {
+	t.Parallel()
+
+	listenPort := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("v1", "/", handler)
+	require.NoError(t, err)
+
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(listenPort, Routes{*route}, WithDrainTimeout(1*time.Second))
+	}
+
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	stopReturned := atomic.Bool{}
+	go func() {
+		server.Stop()
+		stopReturned.Store(true)
+	}()
+
+	// Stop should be blocked — Run hasn't started yet
+	require.Never(t, func() bool {
+		return stopReturned.Load()
+	}, 50*time.Millisecond, 5*time.Millisecond, "Stop should block until Run starts and completes")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Run(t.Context())
+	}()
+
+	// Both Stop and Run should complete
+	require.Eventually(t, func() bool {
+		return stopReturned.Load()
+	}, 5*time.Second, 10*time.Millisecond, "Stop should unblock after Run completes")
+
+	assert.Equal(t, finitestate.StatusStopped, server.GetState())
+	require.NoError(t, <-errCh)
 }

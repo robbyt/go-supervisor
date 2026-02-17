@@ -22,26 +22,25 @@ const (
 	StatusUnknown   = transitions.StatusUnknown
 )
 
-// TypicalTransitions is a set of standard transitions for a finite state machine.
-var TypicalTransitions = transitions.Typical
+// typicalTransitions is a set of standard transitions for a finite state machine.
+var typicalTransitions = transitions.Typical
 
-// Machine is a wrapper around go-fsm v2 that provides the v1 API compatibility.
-// It manages both the FSM and broadcast functionality.
+// Machine wraps go-fsm v2 to provide a simplified API with broadcast support.
 type Machine struct {
 	*fsm.Machine
 	broadcastManager *broadcast.Manager
 }
 
 // GetStateChan returns a channel that emits the state whenever it changes.
-// The channel is closed when the provided context is canceled.
-// For v1 API compatibility, the current state is sent immediately to the channel.
-// A 5-second broadcast timeout is used to prevent slow consumers from blocking state updates.
+// The current state is sent immediately. The channel is closed when the
+// provided context is canceled.
+// A 5-second broadcast timeout prevents slow consumers from blocking state updates.
 func (s *Machine) GetStateChan(ctx context.Context) <-chan string {
 	return s.getStateChanInternal(ctx, broadcast.WithTimeout(5*time.Second))
 }
 
-// getStateChanInternal is a helper that creates a channel and sends the current state to it.
-// This maintains v1 API compatibility where GetStateChan immediately sends the current state.
+// getStateChanInternal subscribes to state changes via the broadcast manager
+// and sends the current state immediately on the returned channel.
 func (s *Machine) getStateChanInternal(ctx context.Context, opts ...broadcast.Option) <-chan string {
 	wrappedCh := make(chan string, 1)
 
@@ -64,12 +63,11 @@ func (s *Machine) getStateChanInternal(ctx context.Context, opts ...broadcast.Op
 	return wrappedCh
 }
 
-// New creates a new finite state machine with the specified logger using "standard" state transitions.
-// This function provides compatibility with the v1 API while using v2 under the hood.
-func New(handler slog.Handler) (*Machine, error) {
+// newMachine creates a new finite state machine with the specified logger and transitions.
+func newMachine(handler slog.Handler, t *transitions.Config) (*Machine, error) {
 	registry, err := hooks.NewRegistry(
 		hooks.WithLogHandler(handler),
-		hooks.WithTransitions(TypicalTransitions),
+		hooks.WithTransitions(t),
 	)
 	if err != nil {
 		return nil, err
@@ -89,7 +87,7 @@ func New(handler slog.Handler) (*Machine, error) {
 
 	f, err := fsm.New(
 		StatusNew,
-		TypicalTransitions,
+		t,
 		fsm.WithLogHandler(handler),
 		fsm.WithCallbackRegistry(registry),
 	)
@@ -101,4 +99,9 @@ func New(handler slog.Handler) (*Machine, error) {
 		Machine:          f,
 		broadcastManager: broadcastManager,
 	}, nil
+}
+
+// NewTypicalFSM creates a new finite state machine with standard transitions.
+func NewTypicalFSM(handler slog.Handler) (*Machine, error) {
+	return newMachine(handler, typicalTransitions)
 }
