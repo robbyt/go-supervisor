@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -37,7 +38,9 @@ func (r *Runner) reloadConfig() error {
 
 // Reload refreshes the server configuration and restarts the HTTP server if necessary.
 // This method is safe to call while the server is running and will handle graceful shutdown and restart.
-func (r *Runner) Reload() {
+//
+//nolint:contextcheck // r.ctx will be replaced by the ctx parameter in a follow-up PR
+func (r *Runner) Reload(_ context.Context) {
 	r.logger.Debug("Reloading...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

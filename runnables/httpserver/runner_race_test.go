@@ -80,7 +80,7 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runner.Reload()
+			runner.Reload(t.Context())
 		}()
 	}
 

@@ -37,7 +37,7 @@ type Runnable interface {
 type Reloadable interface {
 	// Reload signals the service to reload its configuration.
 	// Reload is a blocking call that reloads the configuration of the work unit.
-	Reload()
+	Reload(ctx context.Context)
 }
 
 // Stateable represents a service that can report its state.

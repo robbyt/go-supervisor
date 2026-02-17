@@ -538,7 +538,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	t.Parallel()
 	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
-	mockRunnable.On("Reload").Once()
+	mockRunnable.On("Reload", mock.Anything).Once()
 	mockRunnable.On("Stop").Once()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -556,7 +556,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 
 	// Wait for reload to complete before sending shutdown signal
 	require.Eventually(t, func() bool {
-		return !mockRunnable.IsMethodCallable(t, "Reload")
+		return !mockRunnable.IsMethodCallable(t, "Reload", mock.Anything)
 	}, 1*time.Second, 10*time.Millisecond, "Reload was not called after SIGHUP")
 
 	pid0.signalChan <- syscall.SIGINT
@@ -580,8 +580,8 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	mockRunnable1.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Once()
 
-	mockRunnable1.On("Reload").Once()
-	mockRunnable2.On("Reload").Once()
+	mockRunnable1.On("Reload", mock.Anything).Once()
+	mockRunnable2.On("Reload", mock.Anything).Once()
 
 	mockRunnable1.On("Stop").Once()
 	mockRunnable2.On("Stop").Once()
@@ -601,8 +601,8 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 
 	// Wait for reload to complete on both runnables before sending shutdown
 	require.Eventually(t, func() bool {
-		return !mockRunnable1.IsMethodCallable(t, "Reload") &&
-			!mockRunnable2.IsMethodCallable(t, "Reload")
+		return !mockRunnable1.IsMethodCallable(t, "Reload", mock.Anything) &&
+			!mockRunnable2.IsMethodCallable(t, "Reload", mock.Anything)
 	}, 1*time.Second, 10*time.Millisecond, "Reload was not called on both runnables after SIGHUP")
 
 	pid0.signalChan <- syscall.SIGTERM
@@ -720,7 +720,7 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	// Expect Reload not to be called
 	// Stop should be called once during shutdown
 	mockRunnable.On("Stop").Once()
-	mockRunnable.On("Reload").Panic("Reload should not be called")
+	mockRunnable.On("Reload", mock.Anything).Panic("Reload should not be called")
 
 	// Setup for Stateable interface
 	stateChan := make(chan string)

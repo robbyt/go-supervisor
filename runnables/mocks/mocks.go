@@ -89,9 +89,9 @@ func (m *Runnable) Stop() {
 
 // Reload mocks the Reload method of the Reloadable interface.
 // It sleeps for DelayReload duration before recording the call.
-func (m *Runnable) Reload() {
+func (m *Runnable) Reload(ctx context.Context) {
 	time.Sleep(m.DelayReload)
-	m.Called()
+	m.Called(ctx)
 }
 
 // String returns a string representation of the mock service.

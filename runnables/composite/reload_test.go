@@ -73,7 +73,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 	t.Run("reload with reloadable runnables", func(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1")
-		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Reload", mock.Anything).Once()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -81,7 +81,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2")
-		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Reload", mock.Anything).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -123,7 +123,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond)
 		assert.Equal(t, 1, callbackCalls)
 
-		runner.Reload()
+		runner.Reload(t.Context())
 		assert.Equal(t, len(entries), callbackCalls)
 		require.Eventually(t, func() bool {
 			return runner.IsRunning()
@@ -209,7 +209,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		useUpdatedEntries = true
 
 		// Call Reload
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify updated config
 		config := runner.getConfig()
@@ -235,7 +235,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Reload", mock.Anything).Once()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			// Block until context is canceled - this mimics real runnable behavior
 			<-args.Get(0).(context.Context).Done()
@@ -244,7 +244,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Reload", mock.Anything).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			// Block until context is canceled - this mimics real runnable behavior
 			<-args.Get(0).(context.Context).Done()
@@ -323,7 +323,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		useUpdatedEntries = true
 
 		// Call Reload
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify reload completes and runner returns to Running state
 		require.Eventually(t, func() bool {
@@ -363,7 +363,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1")
-		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Reload", mock.Anything).Once()
 		// Make Run properly block until context cancellation
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
@@ -372,7 +372,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2")
-		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Reload", mock.Anything).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Once()
@@ -414,7 +414,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 1, callbackCalls, "Config callback should be called once during startup")
 
 		// Call Reload with the same configuration
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify reload completes and runner stays in Running state
 		require.Eventually(t, func() bool {
@@ -521,7 +521,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		useUpdatedEntries = true
 
 		// Call Reload
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify reload completes and runner returns to Running state
 		require.Eventually(t, func() bool {
@@ -592,7 +592,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		runner.fsm = mockFSM
 
 		// Call Reload - should handle the transition error
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -623,7 +623,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		runner.fsm = mockFSM
 
 		// Call Reload - should handle the callback error
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -656,7 +656,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		runner.fsm = mockFSM
 
 		// Call Reload - should handle the nil config case
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -674,7 +674,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// Setup mock runnable that fails on Reload
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable1").Maybe()
-		mockRunnable.On("Reload").
+		mockRunnable.On("Reload", mock.Anything).
 			Panic("reload failure").
 			Once()
 			// Use Panic() instead of Run() with panic
@@ -713,7 +713,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 					panicMsg = fmt.Sprintf("%v", r)
 				}
 			}()
-			runner.Reload()
+			runner.Reload(t.Context())
 		}()
 
 		// Verify that the panic was propagated (not handled internally)
@@ -801,7 +801,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 					panicMsg = fmt.Sprintf("%v", r)
 				}
 			}()
-			runner.Reload()
+			runner.Reload(t.Context())
 		}()
 
 		// Verify that the panic was propagated (not handled internally)
@@ -826,7 +826,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// Setup mock runnable that fails on Reload using Panic() instead of Run()
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable-panic").Maybe()
-		mockRunnable.On("Reload").Panic("intentional panic in Reload").Once()
+		mockRunnable.On("Reload", mock.Anything).Panic("intentional panic in Reload").Once()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -862,7 +862,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 					panicMsg = fmt.Sprintf("%v", r)
 				}
 			}()
-			runner.Reload()
+			runner.Reload(t.Context())
 		}()
 
 		// The runner does NOT handle panics internally, so we should see one
@@ -996,11 +996,11 @@ func TestReloadConfig(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Reload").Once()
+		mockRunnable1.On("Reload", mock.Anything).Once()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Reload").Once()
+		mockRunnable2.On("Reload", mock.Anything).Once()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -1071,7 +1071,7 @@ func TestReloadConfig(t *testing.T) {
 		// Setup mock that implements standard Reloadable
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable").Maybe()
-		mockRunnable.On("Reload").Once()
+		mockRunnable.On("Reload", mock.Anything).Once()
 
 		// Setup mock that implements ReloadableWithConfig
 		mockReloadable := NewMockReloadableWithConfig()
@@ -1285,7 +1285,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Empty(t, initialConfig.Entries, "Initial config should have empty entries")
 
 		// Now reload to get the config with the runnable
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
@@ -1441,7 +1441,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Stop").Return(nil).Once()
-		mockRunnable1.On("Reload").Maybe()
+		mockRunnable1.On("Reload", mock.Anything).Maybe()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1449,7 +1449,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Stop").Return(nil).Once()
-		mockRunnable2.On("Reload").Maybe()
+		mockRunnable2.On("Reload", mock.Anything).Maybe()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1458,7 +1458,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable3 := mocks.NewMockRunnable()
 		mockRunnable3.On("String").Return("runnable3").Maybe()
 		mockRunnable3.On("Stop").Return(nil).Once()
-		mockRunnable3.On("Reload").Maybe()
+		mockRunnable3.On("Reload", mock.Anything).Maybe()
 		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1466,7 +1466,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable4 := mocks.NewMockRunnable()
 		mockRunnable4.On("String").Return("runnable4").Maybe()
 		mockRunnable4.On("Stop").Return(nil).Once()
-		mockRunnable4.On("Reload").Maybe()
+		mockRunnable4.On("Reload", mock.Anything).Maybe()
 		mockRunnable4.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1521,7 +1521,7 @@ func TestHasMembershipChanged(t *testing.T) {
 
 		// Switch to using entirely new set of runnables
 		useUpdatedEntries = true
-		runner.Reload()
+		runner.Reload(t.Context())
 
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
@@ -1564,7 +1564,7 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 
 	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.On("String").Return("concurrent-reloader").Maybe()
-	mockRunnable.On("Reload").Return()
+	mockRunnable.On("Reload", mock.Anything).Return()
 	mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(context.Canceled).Maybe()
@@ -1596,7 +1596,7 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Go(func() {
-			runner.Reload()
+			runner.Reload(t.Context())
 		})
 	}
 	wg.Wait()
