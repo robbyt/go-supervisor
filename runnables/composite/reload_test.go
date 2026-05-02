@@ -1611,14 +1611,18 @@ func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
 	t.Parallel()
 
 	// Slow-stop child blocks Run inside reloadWithRestart so the caller is
-	// observably parked in the post-send select.
+	// observably parked in the post-send select. slowStopEntered fires the
+	// first time Stop is called, giving the test a deterministic signal that
+	// Run has picked up the reload request.
 	slowStop := make(chan struct{})
+	slowStopEntered := atomic.Bool{}
 	mockRunnable1 := mocks.NewMockRunnable()
 	mockRunnable1.On("String").Return("slow").Maybe()
 	mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(context.Canceled).Maybe()
 	mockRunnable1.On("Stop").Run(func(_ mock.Arguments) {
+		slowStopEntered.Store(true)
 		<-slowStop
 	}).Return().Maybe()
 
@@ -1659,8 +1663,10 @@ func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
 		runner.Reload(reloadCtx)
 	}()
 
-	// Wait long enough for Run to pick up the request and block on slowStop.
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(
+		t, slowStopEntered.Load, 2*time.Second, 10*time.Millisecond,
+		"Run should have picked up the reload and entered slow Stop",
+	)
 
 	reloadCancel()
 	select {
