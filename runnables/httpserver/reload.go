@@ -38,9 +38,7 @@ func (r *Runner) reloadConfig() error {
 
 // Reload refreshes the server configuration and restarts the HTTP server if necessary.
 // This method is safe to call while the server is running and will handle graceful shutdown and restart.
-//
-//nolint:contextcheck // r.ctx will be replaced by the ctx parameter in a follow-up PR
-func (r *Runner) Reload(_ context.Context) {
+func (r *Runner) Reload(ctx context.Context) {
 	r.logger.Debug("Reloading...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -67,13 +65,13 @@ func (r *Runner) Reload(_ context.Context) {
 		return
 	}
 
-	if err := r.stopServer(r.ctx); err != nil {
+	if err := r.stopServer(ctx); err != nil {
 		r.logger.Error("Failed to stop server during reload", "error", err)
 		r.setStateError()
 		return
 	}
 
-	if err := r.boot(); err != nil {
+	if err := r.boot(ctx); err != nil {
 		r.logger.Error("Failed to boot server during reload", "error", err)
 		r.setStateError()
 		return

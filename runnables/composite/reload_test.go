@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1021,7 +1022,7 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
-		runner.reloadSkipRestart(config)
+		runner.reloadSkipRestart(t.Context(), config)
 
 		// Verify reloadable interface methods were called
 		mockRunnable1.AssertExpectations(t)
@@ -1059,8 +1060,7 @@ func TestReloadConfig(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		// Call reloadConfig directly
-		runner.reloadSkipRestart(config)
+		runner.reloadSkipRestart(t.Context(), config)
 
 		// Verify ReloadWithConfig was called with correct configs
 		mockReloadable1.AssertExpectations(t)
@@ -1108,9 +1108,8 @@ func TestReloadConfig(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Call reloadConfig on both runners
-		runner1.reloadSkipRestart(config1)
-		runner2.reloadSkipRestart(config2)
+		runner1.reloadSkipRestart(t.Context(), config1)
+		runner2.reloadSkipRestart(t.Context(), config2)
 
 		// Verify expectations
 		mockRunnable.AssertExpectations(t)
@@ -1179,13 +1178,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.NotNil(t, initialConfigLoaded)
 		assert.Len(t, initialConfigLoaded.Entries, 2)
 
-		// Set runCtx (normally done by Run)
-		runner.runnablesMu.Lock()
-		runner.ctx = t.Context()
-		runner.runnablesMu.Unlock()
-
-		// Call reloadMembershipChanged directly
-		err = runner.reloadWithRestart(newConfig)
+		err = runner.reloadWithRestart(t.Context(), newConfig)
 		require.NoError(t, err)
 
 		// Verify config was updated
@@ -1223,14 +1216,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		newConfig, err := NewConfig("test", newEntries)
 		require.NoError(t, err)
 
-		// Set runCtx (normally done by Run)
-		runner.runnablesMu.Lock()
-		runner.ctx = t.Context()
-		runner.runnablesMu.Unlock()
-
-		// Call reloadMembershipChanged
-		// This should fail because getConfig() returns nil in stopRunnables
-		err = runner.reloadWithRestart(newConfig)
+		err = runner.reloadWithRestart(t.Context(), newConfig)
 
 		// Verify error
 		require.Error(t, err)
@@ -1337,13 +1323,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		// Make sure initial config is loaded
 		runner.currentConfig.Store(initialConfig)
 
-		// Set runCtx (normally done by Run)
-		runner.runnablesMu.Lock()
-		runner.ctx = t.Context()
-		runner.runnablesMu.Unlock()
-
-		// Call reloadMembershipChanged directly - should no longer error with empty entries
-		err = runner.reloadWithRestart(newConfig)
+		err = runner.reloadWithRestart(t.Context(), newConfig)
 		require.NoError(t, err)
 
 		// Verify config was updated
@@ -1494,13 +1474,9 @@ func TestHasMembershipChanged(t *testing.T) {
 			return NewConfig("test2", initialEntries)
 		}
 
-		ctx := context.Background() // Use a clean context instead of t.Context()
+		ctx := context.Background()
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
-
-		runner.runnablesMu.Lock()
-		runner.ctx = ctx
-		runner.runnablesMu.Unlock()
 
 		errCh := make(chan error, 1)
 		go func() {
@@ -1557,6 +1533,150 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable3.AssertExpectations(t)
 		mockRunnable4.AssertExpectations(t)
 	})
+}
+
+// TestCompositeRunner_ReloadAfterStop verifies that calling Reload after Stop
+// returns promptly instead of hanging. dispatchMembershipReload's outer select
+// on lc.DoneCh() short-circuits once Run has exited.
+func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
+	t.Parallel()
+
+	mockRunnable1 := mocks.NewMockRunnable()
+	mockRunnable1.On("String").Return("a").Maybe()
+	mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(context.Canceled).Maybe()
+	mockRunnable1.On("Stop").Return().Maybe()
+
+	mockRunnable2 := mocks.NewMockRunnable()
+	mockRunnable2.On("String").Return("b").Maybe()
+
+	initial := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable1}}
+	swapped := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable2}}
+	useSwapped := atomic.Bool{}
+	cb := func() (*Config[*mocks.Runnable], error) {
+		if useSwapped.Load() {
+			return NewConfig("post-stop", swapped)
+		}
+		return NewConfig("initial", initial)
+	}
+
+	runner, err := NewRunner(cb)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- runner.Run(ctx) }()
+
+	require.Eventually(
+		t, runner.IsRunning, 2*time.Second, 10*time.Millisecond,
+	)
+
+	runner.Stop()
+	require.Eventually(
+		t,
+		func() bool { return runner.GetState() == finitestate.StatusStopped },
+		2*time.Second, 10*time.Millisecond,
+	)
+
+	// Membership-change reload after Stop must not hang. The Reload may
+	// fail at the FSM check or inside dispatchMembershipReload — both are
+	// acceptable; what matters is that it returns promptly.
+	useSwapped.Store(true)
+	reloadDone := make(chan struct{})
+	go func() {
+		defer close(reloadDone)
+		runner.Reload(t.Context())
+	}()
+	select {
+	case <-reloadDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reload after Stop did not return — likely hung in dispatchMembershipReload")
+	}
+
+	cancel()
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after ctx cancel")
+	}
+}
+
+// TestCompositeRunner_ReloadCancelMidFlight verifies that cancelling the
+// caller's context after dispatchMembershipReload has handed the request to
+// Run unblocks the caller via the inner ctx.Done() select case.
+func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
+	t.Parallel()
+
+	// Slow-stop child blocks Run inside reloadWithRestart so the caller is
+	// observably parked in the post-send select.
+	slowStop := make(chan struct{})
+	mockRunnable1 := mocks.NewMockRunnable()
+	mockRunnable1.On("String").Return("slow").Maybe()
+	mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(context.Canceled).Maybe()
+	mockRunnable1.On("Stop").Run(func(_ mock.Arguments) {
+		<-slowStop
+	}).Return().Maybe()
+
+	mockRunnable2 := mocks.NewMockRunnable()
+	mockRunnable2.On("String").Return("fast").Maybe()
+	mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(context.Canceled).Maybe()
+	mockRunnable2.On("Stop").Return().Maybe()
+
+	initial := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable1}}
+	swapped := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable2}}
+	useSwapped := atomic.Bool{}
+	cb := func() (*Config[*mocks.Runnable], error) {
+		if useSwapped.Load() {
+			return NewConfig("swapped", swapped)
+		}
+		return NewConfig("initial", initial)
+	}
+
+	runner, err := NewRunner(cb)
+	require.NoError(t, err)
+
+	runCtx, runCancel := context.WithCancel(t.Context())
+	defer runCancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- runner.Run(runCtx) }()
+
+	require.Eventually(
+		t, runner.IsRunning, 2*time.Second, 10*time.Millisecond,
+	)
+
+	useSwapped.Store(true)
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	reloadDone := make(chan struct{})
+	go func() {
+		defer close(reloadDone)
+		runner.Reload(reloadCtx)
+	}()
+
+	// Wait long enough for Run to pick up the request and block on slowStop.
+	time.Sleep(100 * time.Millisecond)
+
+	reloadCancel()
+	select {
+	case <-reloadDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reload did not return after caller ctx cancel")
+	}
+
+	// Release the slow child so the runner can shut down cleanly.
+	close(slowStop)
+	runCancel()
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after ctx cancel")
+	}
 }
 
 func TestCompositeRunner_ConcurrentReload(t *testing.T) {

@@ -35,11 +35,14 @@ type Runner[T runnable] struct {
 	reloadMu    sync.Mutex
 	runnablesMu sync.Mutex
 
-	// will be set by Run()
-	ctx context.Context
-
+	reloadCh     chan reloadRequest[T]
 	serverErrors chan error
 	logger       *slog.Logger
+}
+
+type reloadRequest[T runnable] struct {
+	newConfig *Config[T]
+	done      chan error
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
@@ -57,6 +60,7 @@ func NewRunner[T runnable](
 		lc:             lifecycle.New(),
 		currentConfig:  atomic.Pointer[Config[T]]{},
 		configCallback: configCallback,
+		reloadCh:       make(chan reloadRequest[T], 1),
 		serverErrors:   make(chan error, 1),
 		logger:         logger,
 	}
@@ -96,15 +100,16 @@ func (r *Runner[T]) String() string {
 // Run starts all child runnables in order (first to last) and monitors for completion or errors.
 // This method blocks until all child runnables are stopped or an error occurs.
 func (r *Runner[T]) Run(ctx context.Context) error {
+	// Defer order matters: drainReloadCh runs LAST so it catches any reload
+	// request that arrived after lc.done() closed DoneCh but before this
+	// function returned. lc.done() runs before drainReloadCh so DoneCh-based
+	// callers see the runner as stopped while we drain stragglers.
+	defer r.drainReloadCh()
 	done := r.lc.Started()
 	defer done()
 
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-
-	r.runnablesMu.Lock()
-	r.ctx = runCtx
-	r.runnablesMu.Unlock()
 
 	// Transition from New to Booting
 	if err := r.fsm.Transition(finitestate.StatusBooting); err != nil {
@@ -123,18 +128,12 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to Running state: %w", err)
 	}
 
-	// Wait for context cancellation, stop signal, or errors
-	select {
-	case <-runCtx.Done():
-		r.logger.Debug("Local context canceled")
-	case <-r.lc.StopCh():
-		r.logger.Debug("Stop() called")
-		runCancel()
-	case err := <-r.serverErrors:
-		r.setStateError()
-		stopErr := r.stopAllRunnables()
-		return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
+	if err := r.waitForEvent(runCtx); err != nil {
+		return err
 	}
+	runCancel()
+
+	r.drainReloadCh()
 
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusRunning, finitestate.StatusStopping); err != nil {
 		// This error is expected if we're already stopping, so only log at debug level
@@ -160,6 +159,41 @@ func (r *Runner[T]) Run(ctx context.Context) error {
 // Stop signals the runner to shut down and blocks until Run() completes.
 func (r *Runner[T]) Stop() {
 	r.lc.Stop()
+}
+
+// waitForEvent blocks until context cancellation, stop signal, or a child error.
+// Membership-change reloads are processed inline via reloadCh so new children
+// boot into ctx's cancellation tree.
+func (r *Runner[T]) waitForEvent(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			r.logger.Debug("Local context canceled")
+			return nil
+		case <-r.lc.StopCh():
+			r.logger.Debug("Stop() called")
+			return nil
+		case err := <-r.serverErrors:
+			r.setStateError()
+			r.drainReloadCh()
+			stopErr := r.stopAllRunnables()
+			return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
+		case req := <-r.reloadCh:
+			req.done <- r.reloadWithRestart(ctx, req.newConfig)
+		}
+	}
+}
+
+// drainReloadCh rejects any pending reload requests queued after Run's select loop exits.
+func (r *Runner[T]) drainReloadCh() {
+	for {
+		select {
+		case req := <-r.reloadCh:
+			req.done <- fmt.Errorf("runner is shutting down")
+		default:
+			return
+		}
+	}
 }
 
 // boot starts all child runnables in the order they're defined.

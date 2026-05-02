@@ -2,6 +2,7 @@ package composite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -16,60 +17,24 @@ type ReloadableWithConfig interface {
 // Reload updates the configuration and handles runnables appropriately.
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set of runnables is started.
-func (r *Runner[T]) Reload(_ context.Context) {
+func (r *Runner[T]) Reload(ctx context.Context) {
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
 
 	logger := r.logger.WithGroup("Reload")
-	logger.Debug("Reloading...")
-	defer func() {
-		logger.Debug("Completed.")
-	}()
 
-	// Transition to Reloading state
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
 		logger.Error("Failed to transition to Reloading", "error", err)
 		r.setStateError()
 		return
 	}
 
-	// Get updated config from the callback function
-	newConfig, err := r.configCallback()
-	if err != nil {
-		logger.Error("Failed to get updated config", "error", err)
-		r.setStateError()
-		return
-	}
-	if newConfig == nil {
-		logger.Error("Config callback returned nil during reload")
+	if err := r.doReload(ctx); err != nil {
+		logger.Error("Reload failed", "error", err)
 		r.setStateError()
 		return
 	}
 
-	// Get the old config to compare
-	oldConfig := r.getConfig()
-	if oldConfig == nil {
-		logger.Warn("Failed to get current config during reload, using empty config")
-		oldConfig = &Config[T]{}
-	}
-
-	// Check if membership has changed by comparing runnable identities
-	if hasMembershipChanged(oldConfig, newConfig) {
-		logger.Debug(
-			"Membership change detected, stopping all existing runnables before updating membership and config",
-		)
-		if err := r.reloadWithRestart(newConfig); err != nil {
-			logger.Error("Failed to reload runnables due to membership change", "error", err)
-			r.setStateError()
-			return
-		}
-		logger.Debug("Reloaded runnables due to membership change")
-	} else {
-		r.reloadSkipRestart(newConfig)
-		logger.Debug("Reloaded runnables without membership change")
-	}
-
-	// Transition back to Running
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 		logger.Error("Failed to transition to Running", "error", err)
 		r.setStateError()
@@ -77,8 +42,55 @@ func (r *Runner[T]) Reload(_ context.Context) {
 	}
 }
 
+// doReload loads the new configuration and routes to the appropriate reload strategy.
+func (r *Runner[T]) doReload(ctx context.Context) error {
+	newConfig, err := r.configCallback()
+	if err != nil {
+		return fmt.Errorf("config callback: %w", err)
+	}
+	if newConfig == nil {
+		return errors.New("config callback returned nil")
+	}
+
+	oldConfig := r.getConfig()
+	if oldConfig == nil {
+		r.logger.Warn("No current config during reload, treating as empty")
+		oldConfig = &Config[T]{}
+	}
+
+	if hasMembershipChanged(oldConfig, newConfig) {
+		return r.dispatchMembershipReload(ctx, newConfig)
+	}
+
+	r.reloadSkipRestart(ctx, newConfig)
+	return nil
+}
+
+// dispatchMembershipReload sends a membership-change reload to Run's event loop
+// so new children boot into runCtx's cancellation tree. Aborts cleanly if the
+// runner has already exited or the caller's context is cancelled, so callers
+// never hang on a request that nobody will receive.
+func (r *Runner[T]) dispatchMembershipReload(ctx context.Context, newConfig *Config[T]) error {
+	req := reloadRequest[T]{newConfig: newConfig, done: make(chan error, 1)}
+	select {
+	case r.reloadCh <- req:
+		select {
+		case err := <-req.done:
+			return err
+		case <-ctx.Done():
+			return fmt.Errorf("reload cancelled: %w", ctx.Err())
+		case <-r.lc.DoneCh():
+			return errors.New("runner stopped while reload pending")
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("reload cancelled: %w", ctx.Err())
+	case <-r.lc.DoneCh():
+		return errors.New("runner stopped before reload")
+	}
+}
+
 // reloadWithRestart handles the case where the membership of runnables has changed.
-func (r *Runner[T]) reloadWithRestart(newConfig *Config[T]) error {
+func (r *Runner[T]) reloadWithRestart(ctx context.Context, newConfig *Config[T]) error {
 	logger := r.logger.WithGroup("reloadWithRestart")
 	logger.Debug("Reloading runnables due to membership change")
 	defer logger.Debug("Completed.")
@@ -97,14 +109,14 @@ func (r *Runner[T]) reloadWithRestart(newConfig *Config[T]) error {
 
 	// Start all runnables from the new config
 	// This acquires the runnables mutex
-	if err := r.boot(r.ctx); err != nil {
+	if err := r.boot(ctx); err != nil {
 		return fmt.Errorf("%w: failed to start new runnables during membership change", err)
 	}
 	return nil
 }
 
 // reloadSkipRestart handles the case where the membership of runnables has not changed.
-func (r *Runner[T]) reloadSkipRestart(newConfig *Config[T]) {
+func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T]) {
 	logger := r.logger.WithGroup("reloadSkipRestart")
 	logger.Debug("Reloading runnables without membership change")
 	defer logger.Debug("Completed.")
@@ -128,7 +140,7 @@ func (r *Runner[T]) reloadSkipRestart(newConfig *Config[T]) {
 			// Fall back to standard Reloadable interface, assume the configCallback
 			// has somehow updated the runnable's internal state
 			logger.Debug("Reloading child runnable")
-			reloadable.Reload(context.TODO())
+			reloadable.Reload(ctx)
 		} else {
 			logger.Warn("Child runnable does not implement Reloadable or ReloadableWithConfig")
 		}

@@ -57,8 +57,6 @@ type Runner struct {
 	serverMutex     sync.RWMutex
 	serverErrors    chan error
 
-	// Set during Run()
-	ctx    context.Context
 	logger *slog.Logger
 }
 
@@ -130,10 +128,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	r.mutex.Lock()
-	r.ctx = runCtx
-	r.mutex.Unlock()
-
 	// Transition from New to Booting
 	err := r.fsm.Transition(finitestate.StatusBooting)
 	if err != nil {
@@ -141,7 +135,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	r.mutex.Lock()
-	err = r.boot()
+	err = r.boot(runCtx)
 	r.mutex.Unlock()
 
 	if err != nil {
@@ -218,18 +212,17 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 	}
 }
 
-func (r *Runner) boot() error {
+func (r *Runner) boot(ctx context.Context) error {
 	originalCfg := r.getConfig()
 	if originalCfg == nil {
 		return ErrRetrieveConfig
 	}
 
-	// Create server config using Runner's context for request handling
 	serverCfg, err := NewConfig(
 		originalCfg.ListenAddr,
 		originalCfg.Routes,
 		WithConfigCopy(originalCfg), // Copy all other settings
-		WithRequestContext(r.ctx),   // Use the Runner's context
+		WithRequestContext(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrCreateConfig, err)
@@ -268,9 +261,8 @@ func (r *Runner) boot() error {
 	}()
 
 	// Verify server is ready to accept connections
-	if err := r.serverReadinessProbe(r.ctx, listenAddr); err != nil {
-		// Clean up partially started server on readiness failure
-		if err := r.stopServer(r.ctx); err != nil {
+	if err := r.serverReadinessProbe(ctx, listenAddr); err != nil {
+		if err := r.stopServer(ctx); err != nil {
 			r.logger.Warn("Error stopping server", "error", err)
 		}
 		return fmt.Errorf("%w: %w", ErrServerBoot, err)
