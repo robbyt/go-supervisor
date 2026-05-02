@@ -121,58 +121,32 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 
 func TestMockRunnable(t *testing.T) {
 	t.Run("Run method", func(t *testing.T) {
-		// Create a mock with a shorter delay for testing
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.DelayRun = 5 * time.Millisecond
 
-		// Set up expectations
 		expectedErr := errors.New("test error")
 		mockRunnable.On("Run", mock.Anything).Return(expectedErr)
 
-		// Call the method
-		start := time.Now()
 		err := mockRunnable.Run(context.Background())
-		elapsed := time.Since(start)
 
-		// Verify behavior
 		assert.Equal(t, expectedErr, err)
-		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
 	t.Run("Stop method", func(t *testing.T) {
-		// Create a mock with a shorter delay for testing
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.DelayStop = 5 * time.Millisecond
-
-		// Set up expectations
 		mockRunnable.On("Stop").Return()
 
-		// Call the method
-		start := time.Now()
 		mockRunnable.Stop()
-		elapsed := time.Since(start)
 
-		// Verify behavior
-		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
 	t.Run("Reload method", func(t *testing.T) {
-		// Create a mock with a shorter delay for testing
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.DelayReload = 5 * time.Millisecond
-
-		// Set up expectations
 		mockRunnable.On("Reload", mock.Anything).Return()
 
-		// Call the method
-		start := time.Now()
 		mockRunnable.Reload(t.Context())
-		elapsed := time.Since(start)
 
-		// Verify behavior
-		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -209,21 +183,12 @@ func TestMockRunnable(t *testing.T) {
 
 func TestMockRunnableWithStateable(t *testing.T) {
 	t.Run("GetState method", func(t *testing.T) {
-		// Create a mock with a shorter delay for testing
 		mockRunnable := mocks.NewMockRunnableWithStateable()
-		mockRunnable.DelayGetState = 5 * time.Millisecond
-
-		// Set up expectations
 		mockRunnable.On("GetState").Return("running")
 
-		// Call the method
-		start := time.Now()
 		state := mockRunnable.GetState()
-		elapsed := time.Since(start)
 
-		// Verify behavior
 		assert.Equal(t, "running", state)
-		assert.GreaterOrEqual(t, elapsed, 5*time.Millisecond)
 		mockRunnable.AssertExpectations(t)
 	})
 
@@ -325,32 +290,23 @@ func TestMockRunnableWithShutdownSender(t *testing.T) {
 
 // TestFactoryMethods tests the constructor functions for all mock types
 func TestFactoryMethods(t *testing.T) {
-	t.Run("NewMockRunnable creates with default delays", func(t *testing.T) {
-		mock := mocks.NewMockRunnable()
-		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
+	t.Run("NewMockRunnable", func(t *testing.T) {
+		m := mocks.NewMockRunnable()
+		assert.NotNil(t, m)
 	})
 
-	t.Run("NewMockRunnableWithStateable creates with default delays", func(t *testing.T) {
-		mock := mocks.NewMockRunnableWithStateable()
-		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayGetState)
+	t.Run("NewMockRunnableWithStateable", func(t *testing.T) {
+		m := mocks.NewMockRunnableWithStateable()
+		assert.NotNil(t, m)
 	})
 
-	t.Run("NewMockRunnableWithReloadSender creates with default delays", func(t *testing.T) {
-		mock := mocks.NewMockRunnableWithReloadSender()
-		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
+	t.Run("NewMockRunnableWithReloadSender", func(t *testing.T) {
+		m := mocks.NewMockRunnableWithReloadSender()
+		assert.NotNil(t, m)
 	})
 
-	t.Run("NewMockRunnableWithShutdownSender creates with default delays", func(t *testing.T) {
-		mock := mocks.NewMockRunnableWithShutdownSender()
-		assert.Equal(t, 1*time.Millisecond, mock.DelayRun)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayStop)
-		assert.Equal(t, 1*time.Millisecond, mock.DelayReload)
+	t.Run("NewMockRunnableWithShutdownSender", func(t *testing.T) {
+		m := mocks.NewMockRunnableWithShutdownSender()
+		assert.NotNil(t, m)
 	})
 }

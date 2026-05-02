@@ -714,12 +714,10 @@ func TestPIDZero_ShutdownIgnoresSIGHUP(t *testing.T) {
 	t.Parallel()
 	// Create a mock runnable
 	mockRunnable := mocks.NewMockRunnable()
-	mockRunnable.DelayStop = 500 * time.Millisecond
-	mockRunnable.DelayRun = 1 * time.Millisecond
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	// Expect Reload not to be called
 	// Stop should be called once during shutdown
-	mockRunnable.On("Stop").Once()
+	mockRunnable.On("Stop").Once().After(500 * time.Millisecond)
 	mockRunnable.On("Reload", mock.Anything).Panic("Reload should not be called")
 
 	// Setup for Stateable interface
@@ -795,12 +793,10 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 	t.Parallel()
 	// Create a mock runnable
 	mockRunnable := mocks.NewMockRunnable()
-	mockRunnable.DelayStop = 500 * time.Millisecond
-	mockRunnable.DelayRun = 1 * time.Millisecond
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	// Expect Reload not to be called
 	// Stop should be called once during shutdown
-	mockRunnable.On("Stop").Once()
+	mockRunnable.On("Stop").Once().After(500 * time.Millisecond)
 
 	// Setup for Stateable interface
 	stateChan := make(chan string)
@@ -981,9 +977,8 @@ func TestPIDZero_Shutdown_NoTimeout(t *testing.T) {
 
 	mockRunnable := mocks.NewMockRunnableWithStateable()
 	mockRunnable.On("String").Return("noTimeoutRunnable").Maybe()
-	mockRunnable.DelayStop = 50 * time.Millisecond // Small delay to test wait
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
-	mockRunnable.On("Stop").Once()
+	mockRunnable.On("Stop").Once().After(50 * time.Millisecond) // Small delay to test wait
 	mockRunnable.On("IsRunning").Return(true)
 
 	// Setup for Stateable interface

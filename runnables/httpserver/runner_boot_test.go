@@ -26,7 +26,7 @@ func TestBootConfigCreateFailure(t *testing.T) {
 	runner, err := NewRunner(WithConfigCallback(callback))
 	require.NoError(t, err)
 
-	err = runner.boot()
+	err = runner.boot(t.Context())
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCreateConfig)
 }

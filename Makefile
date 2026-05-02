@@ -15,6 +15,11 @@ help: Makefile
 test:
 	go test -timeout 3m -race -cover ./...
 
+## test-norace: Run tests WITHOUT race detector and with multiple iterations (mimics CI; catches goroutine ordering races that -race masks)
+.PHONY: test-norace
+test-norace:
+	go test -timeout 3m -count=10 ./...
+
 ## bench: Run performance benchmarks
 .PHONY: bench
 bench:

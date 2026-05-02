@@ -1,7 +1,8 @@
 /*
 Package mocks provides mock implementations of all supervisor interfaces for testing.
 These mocks implement the Runnable, Reloadable, Stateable, and ReloadSender interfaces
-with configurable delays to simulate real service behavior in tests.
+following the canonical testify/mock pattern. Tests that need delayed return values
+should use Call.After(d) per-expectation instead of mock-instance fields.
 
 Example:
 ```go
@@ -23,9 +24,9 @@ import (
 		// Create a mock service
 		mockRunnable := mocks.NewMockRunnable()
 
-		// Set expectations
+		// Set expectations (use .After(d) for delayed returns)
 		mockRunnable.On("Run", mock.Anything).Return(nil)
-		mockRunnable.On("Stop").Once()
+		mockRunnable.On("Stop").Once().After(100*time.Millisecond)
 
 		// For state-based tests
 		stateCh := make(chan string)
@@ -46,51 +47,34 @@ package mocks
 
 import (
 	"context"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 )
 
-const defaultDelay = 1 * time.Millisecond
-
 // Runnable is a mock implementation of the Runnable, Reloadable, and Stateable interfaces
-// using testify/mock. It allows for configurable delays in method responses to simulate
-// service behavior.
+// using testify/mock.
 type Runnable struct {
 	mock.Mock
-	DelayRun    time.Duration // Delay before Run returns
-	DelayStop   time.Duration // Delay before Stop returns
-	DelayReload time.Duration // Delay before Reload returns
 }
 
-// NewMockRunnable creates a new Runnable mock with default delays.
+// NewMockRunnable creates a new Runnable mock.
 func NewMockRunnable() *Runnable {
-	return &Runnable{
-		DelayRun:    defaultDelay,
-		DelayStop:   defaultDelay,
-		DelayReload: defaultDelay,
-	}
+	return &Runnable{}
 }
 
 // Run mocks the Run method of the Runnable interface.
-// It sleeps for DelayRun duration before returning the mocked error result.
 func (m *Runnable) Run(ctx context.Context) error {
-	time.Sleep(m.DelayRun)
 	args := m.Called(ctx)
 	return args.Error(0)
 }
 
 // Stop mocks the Stop method of the Runnable interface.
-// It sleeps for DelayStop duration before recording the call.
 func (m *Runnable) Stop() {
-	time.Sleep(m.DelayStop)
 	m.Called()
 }
 
 // Reload mocks the Reload method of the Reloadable interface.
-// It sleeps for DelayReload duration before recording the call.
 func (m *Runnable) Reload(ctx context.Context) {
-	time.Sleep(m.DelayReload)
 	m.Called(ctx)
 }
 
@@ -106,13 +90,11 @@ func (m *Runnable) String() string {
 // MockRunnableWithStateable extends Runnable to also implement the Stateable interface.
 type MockRunnableWithStateable struct {
 	*Runnable
-	DelayGetState time.Duration // Delay before GetState and GetStateChan return
 }
 
 // GetState mocks the GetState method of the Stateable interface.
 // It returns the current state of the service as configured in test expectations.
 func (m *MockRunnableWithStateable) GetState() string {
-	time.Sleep(m.DelayGetState)
 	args := m.Called()
 	return args.String(0)
 }
@@ -131,11 +113,10 @@ func (m *MockRunnableWithStateable) IsRunning() bool {
 	return args.Bool(0)
 }
 
-// NewMockRunnableWithStateable creates a new MockRunnableWithStateable with default delays.
+// NewMockRunnableWithStateable creates a new MockRunnableWithStateable.
 func NewMockRunnableWithStateable() *MockRunnableWithStateable {
 	return &MockRunnableWithStateable{
-		Runnable:      NewMockRunnable(),
-		DelayGetState: defaultDelay,
+		Runnable: NewMockRunnable(),
 	}
 }
 
@@ -151,7 +132,7 @@ func (m *MockRunnableWithReloadSender) GetReloadTrigger() <-chan struct{} {
 	return args.Get(0).(chan struct{})
 }
 
-// NewMockRunnableWithReloadSender creates a new MockRunnableWithReload with default delays.
+// NewMockRunnableWithReloadSender creates a new MockRunnableWithReload.
 func NewMockRunnableWithReloadSender() *MockRunnableWithReloadSender {
 	return &MockRunnableWithReloadSender{
 		Runnable: NewMockRunnable(),
@@ -170,7 +151,7 @@ func (m *MockRunnableWithShutdownSender) GetShutdownTrigger() <-chan struct{} {
 	return args.Get(0).(chan struct{})
 }
 
-// NewMockRunnableWithShutdown creates a new MockRunnableWithReload with default delays.
+// NewMockRunnableWithShutdown creates a new MockRunnableWithReload.
 func NewMockRunnableWithShutdownSender() *MockRunnableWithShutdownSender {
 	return &MockRunnableWithShutdownSender{
 		Runnable: NewMockRunnable(),

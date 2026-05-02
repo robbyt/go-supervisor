@@ -240,8 +240,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
-		mockService.DelayReload = 500 * time.Millisecond
-		mockService.On("Reload", mock.Anything).Return()
+		mockService.On("Reload", mock.Anything).Return().After(500 * time.Millisecond)
 
 		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
 		require.NoError(t, err)

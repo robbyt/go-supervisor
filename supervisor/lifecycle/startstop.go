@@ -2,6 +2,16 @@ package lifecycle
 
 import "sync"
 
+// closedDoneCh is returned by DoneCh() when Started() has not been called.
+// Pre-Run state is treated the same as post-Run for callers: there is no
+// live Run() goroutine, so callers selecting on DoneCh() should abort
+// rather than send into runner-internal channels with no reader.
+var closedDoneCh = func() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}()
+
 // StartStop manages the Run/Stop synchronization for a Runnable.
 // It ensures Stop() blocks until Run() has completed, handling all
 // orderings: stop-before-run, stop-during-run, stop-after-run,
@@ -79,4 +89,22 @@ func (l *StartStop) StopCh() <-chan struct{} {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.stopCh
+}
+
+// DoneCh returns a channel that is closed when Run() has exited (the done
+// func returned by Started has been called). If Started has not yet been
+// called, DoneCh returns an already-closed channel: callers should treat
+// pre-Run identically to post-Run, since neither state has a live Run()
+// goroutine to receive from runner-internal channels.
+//
+// Use this to avoid sending into a buffered runner channel that no
+// goroutine will drain, e.g. a reload-request channel after Run has
+// finished its select loop.
+func (l *StartStop) DoneCh() <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.doneCh == nil {
+		return closedDoneCh
+	}
+	return l.doneCh
 }

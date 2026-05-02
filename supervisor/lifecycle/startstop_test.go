@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -23,7 +22,6 @@ func TestStartStop_StopBlocksUntilRunCompletes(t *testing.T) {
 			runReturned.Store(true)
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		lc.Stop()
@@ -43,7 +41,6 @@ func TestStartStop_StopBeforeRun(t *testing.T) {
 			stopReturned.Store(true)
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		assert.False(t, stopReturned.Load(), "Stop should block until Run starts and completes")
@@ -51,7 +48,6 @@ func TestStartStop_StopBeforeRun(t *testing.T) {
 		done := lc.Started()
 		done()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		assert.True(t, stopReturned.Load(), "Stop should unblock after Run completes")
@@ -81,7 +77,6 @@ func TestStartStop_MultipleConcurrentStops(t *testing.T) {
 			<-lc.StopCh()
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		var wg sync.WaitGroup
@@ -135,12 +130,81 @@ func TestStartStop_Restart(t *testing.T) {
 				runReturned.Store(true)
 			}()
 
-			time.Sleep(time.Second)
 			synctest.Wait()
 
 			lc.Stop()
 
 			assert.True(t, runReturned.Load(), "Run should have returned before Stop unblocked")
+		}
+	})
+}
+
+func TestStartStop_DoneChClosedBeforeStarted(t *testing.T) {
+	t.Parallel()
+	lc := New()
+
+	select {
+	case <-lc.DoneCh():
+	default:
+		t.Fatal("DoneCh should be closed before Started() is called")
+	}
+}
+
+func TestStartStop_DoneChOpenWhileRunning(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		lc := New()
+
+		done := lc.Started()
+
+		select {
+		case <-lc.DoneCh():
+			t.Fatal("DoneCh should not be closed while Run is in progress")
+		default:
+		}
+
+		done()
+
+		select {
+		case <-lc.DoneCh():
+		default:
+			t.Fatal("DoneCh should be closed after done() is called")
+		}
+	})
+}
+
+func TestStartStop_DoneChAcrossRestart(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		lc := New()
+
+		// First cycle: open then closed.
+		done := lc.Started()
+		select {
+		case <-lc.DoneCh():
+			t.Fatal("DoneCh should be open during first run")
+		default:
+		}
+		done()
+		lc.Stop()
+		select {
+		case <-lc.DoneCh():
+		default:
+			t.Fatal("DoneCh should be closed after first cycle")
+		}
+
+		// Second cycle: a fresh open channel must be returned.
+		done = lc.Started()
+		select {
+		case <-lc.DoneCh():
+			t.Fatal("DoneCh should be a fresh open channel for the second run")
+		default:
+		}
+		done()
+		select {
+		case <-lc.DoneCh():
+		default:
+			t.Fatal("DoneCh should be closed after second cycle done()")
 		}
 	})
 }
@@ -156,7 +220,6 @@ func TestStartStop_StopChClosedAfterStop(t *testing.T) {
 			<-lc.StopCh()
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		lc.Stop()
