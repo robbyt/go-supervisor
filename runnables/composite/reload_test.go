@@ -160,7 +160,15 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		mockRunnable3 := mocks.NewMockRunnable()
 		mockRunnable3.On("String").Return("runnable3").Maybe()
 		mockRunnable3.On("Stop").Maybe()
+		// run3Called signals when the child goroutine has actually entered
+		// Run. boot() returns once the goroutines have started (startWg.Done),
+		// not once they've called subRunnable.Run — without this signal, the
+		// AssertExpectations below races the goroutine in non-race builds
+		// (CI runs without -race; -race incidentally synchronizes enough to
+		// mask the race locally).
+		var run3Called atomic.Bool
 		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			run3Called.Store(true)
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Once()
 
@@ -221,6 +229,12 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		// Verify state cycle completed
 		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+		// Wait for mockRunnable3's goroutine to actually invoke Run before
+		// asserting expectations — see the run3Called comment at the mock
+		// setup for why this is needed.
+		require.Eventually(t, run3Called.Load, 2*time.Second, 10*time.Millisecond,
+			"mockRunnable3.Run should have been entered after membership-change reload")
 
 		runner.Stop()
 		require.Eventually(t, func() bool {
