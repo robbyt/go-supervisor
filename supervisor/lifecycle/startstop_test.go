@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -23,7 +22,6 @@ func TestStartStop_StopBlocksUntilRunCompletes(t *testing.T) {
 			runReturned.Store(true)
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		lc.Stop()
@@ -43,7 +41,6 @@ func TestStartStop_StopBeforeRun(t *testing.T) {
 			stopReturned.Store(true)
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		assert.False(t, stopReturned.Load(), "Stop should block until Run starts and completes")
@@ -51,7 +48,6 @@ func TestStartStop_StopBeforeRun(t *testing.T) {
 		done := lc.Started()
 		done()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		assert.True(t, stopReturned.Load(), "Stop should unblock after Run completes")
@@ -81,7 +77,6 @@ func TestStartStop_MultipleConcurrentStops(t *testing.T) {
 			<-lc.StopCh()
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		var wg sync.WaitGroup
@@ -135,7 +130,6 @@ func TestStartStop_Restart(t *testing.T) {
 				runReturned.Store(true)
 			}()
 
-			time.Sleep(time.Second)
 			synctest.Wait()
 
 			lc.Stop()
@@ -226,7 +220,6 @@ func TestStartStop_StopChClosedAfterStop(t *testing.T) {
 			<-lc.StopCh()
 		}()
 
-		time.Sleep(time.Second)
 		synctest.Wait()
 
 		lc.Stop()

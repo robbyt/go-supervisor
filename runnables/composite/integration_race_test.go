@@ -87,8 +87,6 @@ func testCompositeRaceCondition(t *testing.T) {
 			runErr <- runner.Run(ctx)
 		}()
 
-		// Advance virtual clock past the mock's default 1ms Run delay
-		time.Sleep(10 * time.Millisecond)
 		synctest.Wait()
 
 		assert.True(t, runner.IsRunning(), "Composite should report as running")
@@ -172,8 +170,6 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 			runErr <- runner.Run(ctx)
 		}()
 
-		// Advance virtual clock past the mock's default 1ms Run delay
-		time.Sleep(10 * time.Millisecond)
 		synctest.Wait()
 
 		assert.True(t, runner.IsRunning(), "Should be Running")

@@ -109,7 +109,6 @@ func TestCompositeRunner_Run_AdditionalScenarios(t *testing.T) {
 
 		// Setup mock runnables that completes immediately
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.DelayStop = 0 // No delay on Stop to avoid flakiness
 		mockRunnable.On("String").Return("runnable").Maybe()
 		mockRunnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 			ctx := args.Get(0).(context.Context)

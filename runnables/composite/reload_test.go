@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -143,107 +144,82 @@ func TestCompositeRunner_Reload(t *testing.T) {
 	})
 
 	t.Run("reload with updated runnables", func(t *testing.T) {
-		mockRunnable1 := mocks.NewMockRunnable()
-		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Stop").Maybe()
-		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe()
+		synctest.Test(t, func(t *testing.T) {
+			mockRunnable1 := mocks.NewMockRunnable()
+			mockRunnable1.On("String").Return("runnable1").Maybe()
+			mockRunnable1.On("Stop").Maybe()
+			mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).Return(context.Canceled).Maybe()
 
-		mockRunnable2 := mocks.NewMockRunnable()
-		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Stop").Once() // Will be stopped
-		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe()
+			mockRunnable2 := mocks.NewMockRunnable()
+			mockRunnable2.On("String").Return("runnable2").Maybe()
+			mockRunnable2.On("Stop").Once() // Will be stopped
+			mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).Return(context.Canceled).Maybe()
 
-		mockRunnable3 := mocks.NewMockRunnable()
-		mockRunnable3.On("String").Return("runnable3").Maybe()
-		mockRunnable3.On("Stop").Maybe()
-		// run3Called signals when the child goroutine has actually entered
-		// Run. boot() returns once the goroutines have started (startWg.Done),
-		// not once they've called subRunnable.Run — without this signal, the
-		// AssertExpectations below races the goroutine in non-race builds
-		// (CI runs without -race; -race incidentally synchronizes enough to
-		// mask the race locally).
-		var run3Called atomic.Bool
-		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			run3Called.Store(true)
-			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Once()
+			mockRunnable3 := mocks.NewMockRunnable()
+			mockRunnable3.On("String").Return("runnable3").Maybe()
+			mockRunnable3.On("Stop").Maybe()
+			mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				<-args.Get(0).(context.Context).Done()
+			}).Return(context.Canceled).Once()
 
-		// Create initial entries
-		initialEntries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable2, Config: nil},
-		}
-
-		// Create updated entries for reload
-		updatedEntries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable1, Config: nil},
-			{Runnable: mockRunnable3, Config: nil},
-		}
-
-		// Variable to track which set of entries to return
-		useUpdatedEntries := false
-
-		// Create config callback
-		callbackCalls := 0
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			callbackCalls++
-			if useUpdatedEntries {
-				return NewConfig("test", updatedEntries)
+			initialEntries := []RunnableEntry[*mocks.Runnable]{
+				{Runnable: mockRunnable1, Config: nil},
+				{Runnable: mockRunnable2, Config: nil},
 			}
-			return NewConfig("test", initialEntries)
-		}
 
-		// Create runner and set state to Running
-		ctx := t.Context()
-		runner, err := NewRunner(configCallback)
-		require.NoError(t, err)
-		require.Equal(t, 0, callbackCalls)
+			updatedEntries := []RunnableEntry[*mocks.Runnable]{
+				{Runnable: mockRunnable1, Config: nil},
+				{Runnable: mockRunnable3, Config: nil},
+			}
 
-		runCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		go func() {
-			err := runner.Run(runCtx)
-			assert.NoError(t, err)
-		}()
+			useUpdatedEntries := false
 
-		require.Eventually(t, func() bool {
-			return runner.GetState() == finitestate.StatusRunning
-		}, 1*time.Second, 10*time.Millisecond)
+			callbackCalls := 0
+			configCallback := func() (*Config[*mocks.Runnable], error) {
+				callbackCalls++
+				if useUpdatedEntries {
+					return NewConfig("test", updatedEntries)
+				}
+				return NewConfig("test", initialEntries)
+			}
 
-		// Switch to using updated entries
-		useUpdatedEntries = true
+			runner, err := NewRunner(configCallback)
+			require.NoError(t, err)
+			require.Equal(t, 0, callbackCalls)
 
-		// Call Reload
-		runner.Reload(t.Context())
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- runner.Run(t.Context())
+			}()
 
-		// Verify updated config
-		config := runner.getConfig()
-		require.NotNil(t, config)
-		assert.Len(t, config.Entries, 2)
-		assert.Equal(t, mockRunnable1, config.Entries[0].Runnable)
-		assert.Equal(t, mockRunnable3, config.Entries[1].Runnable)
+			synctest.Wait()
+			require.Equal(t, finitestate.StatusRunning, runner.GetState())
 
-		// Verify state cycle completed
-		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+			useUpdatedEntries = true
+			runner.Reload(t.Context())
+			synctest.Wait()
 
-		// Wait for mockRunnable3's goroutine to actually invoke Run before
-		// asserting expectations — see the run3Called comment at the mock
-		// setup for why this is needed.
-		require.Eventually(t, run3Called.Load, 2*time.Second, 10*time.Millisecond,
-			"mockRunnable3.Run should have been entered after membership-change reload")
+			config := runner.getConfig()
+			require.NotNil(t, config)
+			assert.Len(t, config.Entries, 2)
+			assert.Equal(t, mockRunnable1, config.Entries[0].Runnable)
+			assert.Equal(t, mockRunnable3, config.Entries[1].Runnable)
 
-		runner.Stop()
-		require.Eventually(t, func() bool {
-			return runner.GetState() == finitestate.StatusStopped
-		}, 1*time.Second, 10*time.Millisecond)
+			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
-		mockRunnable1.AssertExpectations(t)
-		mockRunnable2.AssertExpectations(t)
-		mockRunnable3.AssertExpectations(t)
+			runner.Stop()
+			synctest.Wait()
+			assert.Equal(t, finitestate.StatusStopped, runner.GetState())
+
+			mockRunnable1.AssertExpectations(t)
+			mockRunnable2.AssertExpectations(t)
+			mockRunnable3.AssertExpectations(t)
+			require.NoError(t, <-errCh)
+		})
 	})
 
 	t.Run("reload with updated configurations", func(t *testing.T) {
@@ -1146,15 +1122,11 @@ func TestReloadMembershipChanged(t *testing.T) {
 
 		// Setup mock runnables for new config
 		mockRunnable3 := mocks.NewMockRunnable()
-		// Set DelayRun to 0 to avoid timing issues
-		mockRunnable3.DelayRun = 0
 		mockRunnable3.On("String").Return("runnable3").Maybe()
 		// Allow any number of Run calls for resilience
 		mockRunnable3.On("Run", mock.Anything).Return(nil).Maybe()
 
 		mockRunnable4 := mocks.NewMockRunnable()
-		// Set DelayRun to 0 to avoid timing issues
-		mockRunnable4.DelayRun = 0
 		mockRunnable4.On("String").Return("runnable4").Maybe()
 		// Allow any number of Run calls for resilience
 		mockRunnable4.On("Run", mock.Anything).Return(nil).Maybe()
@@ -1616,80 +1588,75 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 // Run unblocks the caller via the inner ctx.Done() select case.
 func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		// Slow-stop child blocks Run inside reloadWithRestart so the caller is
+		// observably parked in the post-send select. synctest.Wait() returns
+		// once the bubble is quiescent — the only path to quiescence after
+		// Reload runs through this <-slowStop park.
+		slowStop := make(chan struct{})
+		mockRunnable1 := mocks.NewMockRunnable()
+		mockRunnable1.On("String").Return("slow").Maybe()
+		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		mockRunnable1.On("Stop").Run(func(_ mock.Arguments) {
+			<-slowStop
+		}).Return().Maybe()
 
-	// Slow-stop child blocks Run inside reloadWithRestart so the caller is
-	// observably parked in the post-send select. slowStopEntered fires the
-	// first time Stop is called, giving the test a deterministic signal that
-	// Run has picked up the reload request.
-	slowStop := make(chan struct{})
-	slowStopEntered := atomic.Bool{}
-	mockRunnable1 := mocks.NewMockRunnable()
-	mockRunnable1.On("String").Return("slow").Maybe()
-	mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		<-args.Get(0).(context.Context).Done()
-	}).Return(context.Canceled).Maybe()
-	mockRunnable1.On("Stop").Run(func(_ mock.Arguments) {
-		slowStopEntered.Store(true)
-		<-slowStop
-	}).Return().Maybe()
+		mockRunnable2 := mocks.NewMockRunnable()
+		mockRunnable2.On("String").Return("fast").Maybe()
+		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		mockRunnable2.On("Stop").Return().Maybe()
 
-	mockRunnable2 := mocks.NewMockRunnable()
-	mockRunnable2.On("String").Return("fast").Maybe()
-	mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		<-args.Get(0).(context.Context).Done()
-	}).Return(context.Canceled).Maybe()
-	mockRunnable2.On("Stop").Return().Maybe()
-
-	initial := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable1}}
-	swapped := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable2}}
-	useSwapped := atomic.Bool{}
-	cb := func() (*Config[*mocks.Runnable], error) {
-		if useSwapped.Load() {
-			return NewConfig("swapped", swapped)
+		initial := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable1}}
+		swapped := []RunnableEntry[*mocks.Runnable]{{Runnable: mockRunnable2}}
+		useSwapped := atomic.Bool{}
+		cb := func() (*Config[*mocks.Runnable], error) {
+			if useSwapped.Load() {
+				return NewConfig("swapped", swapped)
+			}
+			return NewConfig("initial", initial)
 		}
-		return NewConfig("initial", initial)
-	}
 
-	runner, err := NewRunner(cb)
-	require.NoError(t, err)
+		runner, err := NewRunner(cb)
+		require.NoError(t, err)
 
-	runCtx, runCancel := context.WithCancel(t.Context())
-	defer runCancel()
-	runErr := make(chan error, 1)
-	go func() { runErr <- runner.Run(runCtx) }()
+		runCtx, runCancel := context.WithCancel(t.Context())
+		defer runCancel()
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(runCtx) }()
 
-	require.Eventually(
-		t, runner.IsRunning, 2*time.Second, 10*time.Millisecond,
-	)
+		synctest.Wait()
+		require.True(t, runner.IsRunning())
 
-	useSwapped.Store(true)
-	reloadCtx, reloadCancel := context.WithCancel(context.Background())
-	reloadDone := make(chan struct{})
-	go func() {
-		defer close(reloadDone)
-		runner.Reload(reloadCtx)
-	}()
+		useSwapped.Store(true)
+		reloadCtx, reloadCancel := context.WithCancel(context.Background())
+		reloadDone := make(chan struct{})
+		go func() {
+			defer close(reloadDone)
+			runner.Reload(reloadCtx)
+		}()
 
-	require.Eventually(
-		t, slowStopEntered.Load, 2*time.Second, 10*time.Millisecond,
-		"Run should have picked up the reload and entered slow Stop",
-	)
+		synctest.Wait()
 
-	reloadCancel()
-	select {
-	case <-reloadDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Reload did not return after caller ctx cancel")
-	}
+		reloadCancel()
+		select {
+		case <-reloadDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Reload did not return after caller ctx cancel")
+		}
 
-	// Release the slow child so the runner can shut down cleanly.
-	close(slowStop)
-	runCancel()
-	select {
-	case <-runErr:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return after ctx cancel")
-	}
+		// Release the slow child so the runner can shut down cleanly.
+		close(slowStop)
+		runCancel()
+		select {
+		case <-runErr:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Run did not return after ctx cancel")
+		}
+	})
 }
 
 // TestCompositeRunner_AbandonedReloadIsSkipped verifies that a membership-change

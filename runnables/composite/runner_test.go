@@ -456,7 +456,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				runReturned.Store(true)
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
@@ -498,7 +497,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				stopReturned.Store(true)
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 
 			assert.False(t, stopReturned.Load(), "Stop should block until Run starts and completes")
@@ -508,7 +506,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				errCh <- runner.Run(t.Context())
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 
 			assert.True(t, stopReturned.Load(), "Stop should unblock after Run completes")
@@ -522,7 +519,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			mock1 := mocks.NewMockRunnable()
-			mock1.DelayStop = 0
 			mock1.On("String").Return("r1")
 			mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 				<-args.Get(0).(context.Context).Done()
@@ -545,7 +541,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				errCh <- runner.Run(t.Context())
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
@@ -591,7 +586,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				errCh <- runner.Run(ctx)
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
@@ -599,7 +593,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 			go cancel()
 			go runner.Stop()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 
 			assert.Equal(t, finitestate.StatusStopped, runner.GetState())
@@ -612,12 +605,11 @@ func TestCompositeRunner_Stop(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			mock1 := mocks.NewMockRunnable()
-			mock1.DelayStop = 100 * time.Millisecond
 			mock1.On("String").Return("r1")
 			mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 				<-args.Get(0).(context.Context).Done()
 			}).Return(nil)
-			mock1.On("Stop").Once()
+			mock1.On("Stop").Once().After(100 * time.Millisecond)
 
 			entries := []RunnableEntry[*mocks.Runnable]{
 				{Runnable: mock1},
@@ -637,7 +629,6 @@ func TestCompositeRunner_Stop(t *testing.T) {
 				runReturned.Store(true)
 			}()
 
-			time.Sleep(10 * time.Millisecond)
 			synctest.Wait()
 			assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
@@ -690,14 +681,12 @@ func TestCompositeRunner_StopCancelsChildContexts(t *testing.T) {
 			errCh <- runner.Run(t.Context())
 		}()
 
-		time.Sleep(10 * time.Millisecond)
 		synctest.Wait()
 
 		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
 		runner.Stop()
 
-		time.Sleep(10 * time.Millisecond)
 		synctest.Wait()
 
 		select {
@@ -724,13 +713,12 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 	t.Parallel()
 
 	mock1 := mocks.NewMockRunnable()
-	mock1.DelayReload = 50 * time.Millisecond
 	mock1.On("String").Return("r1")
 	mock1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(nil)
 	mock1.On("Stop").Maybe()
-	mock1.On("Reload", mock.Anything).Maybe()
+	mock1.On("Reload", mock.Anything).Maybe().After(50 * time.Millisecond)
 
 	entries := []RunnableEntry[*mocks.Runnable]{
 		{Runnable: mock1},
@@ -752,7 +740,7 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 		return runner.IsRunning()
 	}, 1*time.Second, 5*time.Millisecond)
 
-	// Start reload in background (holds reloadMu for DelayReload duration)
+	// Start reload in background (the mock's Reload .After() keeps reloadMu held)
 	go runner.Reload(t.Context())
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
@@ -878,8 +866,6 @@ func TestCompositeRunner_MultipleChildFailures(t *testing.T) {
 			runErr <- runner.Run(t.Context())
 		}()
 
-		// Advance virtual clock past the mock's default 1ms Run delay
-		time.Sleep(10 * time.Millisecond)
 		synctest.Wait()
 
 		for range 3 {
