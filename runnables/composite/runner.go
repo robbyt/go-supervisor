@@ -35,14 +35,57 @@ type Runner[T runnable] struct {
 	reloadMu    sync.Mutex
 	runnablesMu sync.Mutex
 
-	reloadCh     chan reloadRequest[T]
+	reloadCh     chan *reloadRequest[T]
 	serverErrors chan error
 	logger       *slog.Logger
 }
 
+// reloadRequest carries a membership-change reload from Reload() into Run's
+// event loop so new children boot into runCtx's cancellation tree. The cancel
+// signal lets the caller revoke the request if its own ctx fired before Run
+// picked the request up — without that, RunReload would apply side effects
+// (stop, swap, reboot) that the caller already gave up waiting for.
+//
+// The struct is a pure message — no back-reference to the runner. The
+// consumer hands RunReload the restart function it should call, which keeps
+// reloadRequest unit-testable in isolation and avoids the Runner ↔
+// reloadRequest cycle.
 type reloadRequest[T runnable] struct {
 	newConfig *Config[T]
 	done      chan error
+	cancel    <-chan struct{}
+}
+
+// newReloadRequest builds a reloadRequest with a buffered done channel. cancel
+// is the caller's "I gave up" signal; close it to ask the consumer to skip
+// the work.
+func newReloadRequest[T runnable](
+	newConfig *Config[T], cancel <-chan struct{},
+) *reloadRequest[T] {
+	return &reloadRequest[T]{
+		newConfig: newConfig,
+		done:      make(chan error, 1),
+		cancel:    cancel,
+	}
+}
+
+// RunReload is the consumer-side entry point. It checks whether the caller
+// has abandoned the request and, if not, calls restart with ctx (Run's
+// runCtx) so new children inherit the runner's lifetime rather than the
+// caller's. restart is supplied by the caller (typically
+// Runner.reloadWithRestart) so reloadRequest stays a pure message with no
+// back-reference to the runner.
+func (req *reloadRequest[T]) RunReload(
+	ctx context.Context,
+	restart func(context.Context, *Config[T]) error,
+) {
+	select {
+	case <-req.cancel:
+		req.done <- fmt.Errorf("%w: abandoned by caller", ErrReloadAborted)
+		return
+	default:
+	}
+	req.done <- restart(ctx, req.newConfig)
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
@@ -60,7 +103,7 @@ func NewRunner[T runnable](
 		lc:             lifecycle.New(),
 		currentConfig:  atomic.Pointer[Config[T]]{},
 		configCallback: configCallback,
-		reloadCh:       make(chan reloadRequest[T], 1),
+		reloadCh:       make(chan *reloadRequest[T], 1),
 		serverErrors:   make(chan error, 1),
 		logger:         logger,
 	}
@@ -179,17 +222,19 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 			stopErr := r.stopAllRunnables()
 			return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
 		case req := <-r.reloadCh:
-			req.done <- r.reloadWithRestart(ctx, req.newConfig)
+			req.RunReload(ctx, r.reloadWithRestart)
 		}
 	}
 }
 
-// drainReloadCh rejects any pending reload requests queued after Run's select loop exits.
+// drainReloadCh discards any pending reload requests queued after Run's
+// select loop exits. The caller's inner select observes lc.DoneCh() and
+// returns "runner stopped while reload pending" on its own — drain is just
+// for clearing the buffer so a restarted runner doesn't see stale entries.
 func (r *Runner[T]) drainReloadCh() {
 	for {
 		select {
-		case req := <-r.reloadCh:
-			req.done <- fmt.Errorf("runner is shutting down")
+		case <-r.reloadCh:
 		default:
 			return
 		}

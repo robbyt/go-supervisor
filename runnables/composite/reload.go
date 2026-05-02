@@ -24,21 +24,44 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 	logger := r.logger.WithGroup("Reload")
 
 	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		logger.Error("Failed to transition to Reloading", "error", err)
-		r.setStateError()
+		// Common reason: runner is in Stopping/Stopped/Booting/Error — not a
+		// failure of the reload itself, so don't move the FSM to Error.
+		logger.Debug("Cannot reload — runner not in Running state",
+			"current", r.fsm.GetState(), "error", err)
 		return
 	}
 
-	if err := r.doReload(ctx); err != nil {
+	err := r.doReload(ctx)
+	switch {
+	case err == nil:
+		if transErr := r.fsm.Transition(finitestate.StatusRunning); transErr != nil {
+			logger.Error("Failed to transition to Running", "error", transErr)
+			r.setStateError()
+		}
+	case errors.Is(err, ErrReloadAborted):
+		// Normal control flow — caller cancelled or runner is shutting down.
+		logger.Debug("Reload aborted (not an error)", "reason", err)
+		// Atomic best-effort return to Running. If we're no longer in
+		// Reloading, Run has moved the FSM (Stopping/Stopped/Error) — that's
+		// fine, Run owns the state. If we're still in Reloading and the
+		// transition fails, that's an FSM-library-level inconsistency worth
+		// flagging as Error so it's visible.
+		if transErr := r.fsm.TransitionIfCurrentState(
+			finitestate.StatusReloading, finitestate.StatusRunning,
+		); transErr != nil {
+			current := r.fsm.GetState()
+			if current == finitestate.StatusReloading {
+				logger.Error("FSM stuck in Reloading after abort",
+					"error", transErr)
+				r.setStateError()
+			} else {
+				logger.Debug("FSM moved out of Reloading by Run during abort",
+					"current", current, "error", transErr)
+			}
+		}
+	default:
 		logger.Error("Reload failed", "error", err)
 		r.setStateError()
-		return
-	}
-
-	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-		logger.Error("Failed to transition to Running", "error", err)
-		r.setStateError()
-		return
 	}
 }
 
@@ -71,21 +94,40 @@ func (r *Runner[T]) doReload(ctx context.Context) error {
 // runner has already exited or the caller's context is cancelled, so callers
 // never hang on a request that nobody will receive.
 func (r *Runner[T]) dispatchMembershipReload(ctx context.Context, newConfig *Config[T]) error {
-	req := reloadRequest[T]{newConfig: newConfig, done: make(chan error, 1)}
+	cancel := make(chan struct{})
+	req := newReloadRequest(newConfig, cancel)
 	select {
 	case r.reloadCh <- req:
 		select {
 		case err := <-req.done:
 			return err
 		case <-ctx.Done():
-			return fmt.Errorf("reload cancelled: %w", ctx.Err())
+			close(cancel)
+			// Recheck non-blocking: the consumer may have written req.done
+			// concurrently with ctx firing. If so, that result is the truth
+			// and we should return it instead of the cancellation error.
+			select {
+			case err := <-req.done:
+				return err
+			default:
+			}
+			return fmt.Errorf("%w: %w", ErrReloadAborted, ctx.Err())
 		case <-r.lc.DoneCh():
-			return errors.New("runner stopped while reload pending")
+			// Same-class race as the ctx.Done() branch above: if req.done
+			// became ready in the same select tick as DoneCh(), the consumer
+			// already wrote a real result — return that, don't claim the
+			// reload was aborted.
+			select {
+			case err := <-req.done:
+				return err
+			default:
+			}
+			return fmt.Errorf("%w: runner stopped while reload pending", ErrReloadAborted)
 		}
 	case <-ctx.Done():
-		return fmt.Errorf("reload cancelled: %w", ctx.Err())
+		return fmt.Errorf("%w: %w", ErrReloadAborted, ctx.Err())
 	case <-r.lc.DoneCh():
-		return errors.New("runner stopped before reload")
+		return fmt.Errorf("%w: runner stopped before reload", ErrReloadAborted)
 	}
 }
 
