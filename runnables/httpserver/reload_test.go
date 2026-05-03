@@ -1,18 +1,59 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
 	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func createReloadTestConfig(
+	t *testing.T,
+	addr string,
+	path string,
+	drainTimeout time.Duration,
+) *Config {
+	t.Helper()
+
+	route, err := NewRouteFromHandlerFunc("test", path, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	require.NoError(t, err)
+
+	cfg, err := NewConfig(addr, Routes{*route}, WithDrainTimeout(drainTimeout))
+	require.NoError(t, err)
+	return cfg
+}
 
 // TestRapidReload tests the behavior of the server under rapid consecutive reloads
 func TestRapidReload(t *testing.T) {
@@ -93,7 +134,7 @@ func TestRapidReload(t *testing.T) {
 
 	// Wait for the server to stabilize - could be Running or Error state
 	var finalState string
-	require.Eventually(t, func() bool {
+	assert.Eventually(t, func() bool {
 		finalState = server.GetState()
 		return finalState == finitestate.StatusRunning || finalState == finitestate.StatusError
 	}, 2*time.Second, 10*time.Millisecond)
@@ -109,7 +150,7 @@ func TestRapidReload(t *testing.T) {
 
 	// Only verify HTTP response if server is in Running state
 	if finalState == finitestate.StatusRunning {
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			resp, err := http.Get(fmt.Sprintf("http://localhost%s/", initialPort))
 			if err != nil {
 				t.Logf("HTTP request error: %v", err)
@@ -120,6 +161,404 @@ func TestRapidReload(t *testing.T) {
 			return ok
 		}, 2*time.Second, 100*time.Millisecond, "Server should eventually respond to HTTP requests")
 	}
+}
+
+func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		callbackCalls := 0
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			callbackCalls++
+			return cfg, nil
+		}))
+		require.NoError(t, err)
+		require.Equal(t, 1, callbackCalls, "NewRunner should load the initial config")
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		runner.Reload(t.Context())
+
+		require.Equal(t, 2, callbackCalls, "Reload should check whether the config changed")
+		select {
+		case req := <-runner.reloadCh:
+			close(req.done)
+			t.Fatal("unchanged reload should not dispatch to the Run event loop")
+		default:
+		}
+		assert.Same(t, cfg, runner.getConfig())
+	})
+}
+
+func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		done := runner.lc.Started()
+		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		useUpdated = true
+		reloadDone := make(chan struct{})
+		go func() {
+			runner.Reload(t.Context())
+			close(reloadDone)
+		}()
+
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+			t.Fatal("Reload should wait for the event loop to finish an accepted reload")
+		default:
+		}
+
+		select {
+		case req := <-runner.reloadCh:
+			assert.Same(t, updatedCfg, req.cfg)
+			close(req.done)
+		default:
+			t.Fatal("changed reload should dispatch to the Run event loop")
+		}
+
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+		default:
+			t.Fatal("Reload should return once the accepted request is completed")
+		}
+		assert.Same(t, initialCfg, runner.getConfig(),
+			"Reload should not mutate config until the event loop executes the restart")
+	})
+}
+
+func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+	var callbackCalls atomic.Int32
+	var reloadCallbackCalls atomic.Int32
+	callbackEntered := make(chan struct{})
+	releaseCallback := make(chan struct{})
+
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if callbackCalls.Add(1) == 1 {
+			return initialCfg, nil
+		}
+
+		if reloadCallbackCalls.Add(1) == 1 {
+			close(callbackEntered)
+		}
+		<-releaseCallback
+		return updatedCfg, nil
+	}))
+	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+	firstReloadDone := make(chan struct{})
+	go func() {
+		runner.Reload(t.Context())
+		close(firstReloadDone)
+	}()
+
+	assert.Eventually(t, func() bool {
+		select {
+		case <-callbackEntered:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), reloadCallbackCalls.Load())
+
+	runner.Reload(t.Context())
+	assert.Equal(t, int32(1), reloadCallbackCalls.Load(),
+		"second reload should not run configCallback while FSM is Reloading")
+
+	close(releaseCallback)
+	assert.Eventually(t, func() bool {
+		select {
+		case <-firstReloadDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, finitestate.StatusRunning, runner.GetState())
+}
+
+func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		useUpdated = true
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		runner.Reload(ctx)
+
+		select {
+		case req := <-runner.reloadCh:
+			close(req.done)
+			t.Fatal("pre-canceled caller context should prevent reload dispatch")
+		default:
+		}
+		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		useUpdated = true
+		runner.Reload(t.Context())
+
+		select {
+		case req := <-runner.reloadCh:
+			close(req.done)
+			t.Fatal("reload should not dispatch when no Run loop is active")
+		default:
+		}
+		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		done := runner.lc.Started()
+		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		blockingReq := &reloadReq{cfg: initialCfg, done: make(chan struct{})}
+		runner.reloadCh <- blockingReq
+
+		useUpdated = true
+		ctx, cancel := context.WithCancel(t.Context())
+		reloadDone := make(chan struct{})
+		go func() {
+			runner.Reload(ctx)
+			close(reloadDone)
+		}()
+
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+			t.Fatal("Reload should wait while reloadCh is full")
+		default:
+		}
+
+		cancel()
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+		default:
+			t.Fatal("Reload should return when caller context is canceled before dispatch")
+		}
+
+		select {
+		case req := <-runner.reloadCh:
+			assert.Same(t, blockingReq, req)
+		default:
+			t.Fatal("existing buffered reload request should remain queued")
+		}
+		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	callbackErr := assert.AnError
+	failReload := false
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if failReload {
+			return nil, callbackErr
+		}
+		return initialCfg, nil
+	}))
+	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+	failReload = true
+	runner.Reload(t.Context())
+
+	assert.Equal(t, finitestate.StatusError, runner.GetState())
+}
+
+func TestReloadNilConfigSetsError(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	returnNil := false
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if returnNil {
+			return nil, nil
+		}
+		return initialCfg, nil
+	}))
+	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+	returnNil = true
+	runner.Reload(t.Context())
+
+	assert.Equal(t, finitestate.StatusError, runner.GetState())
+}
+
+func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		done := runner.lc.Started()
+		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		useUpdated = true
+		reloadDone := make(chan struct{})
+		go func() {
+			runner.Reload(t.Context())
+			close(reloadDone)
+		}()
+
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+			t.Fatal("Reload should be waiting on the accepted request")
+		default:
+		}
+
+		runner.drainReloadCh()
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+		default:
+			t.Fatal("drainReloadCh should close pending request done channels")
+		}
+	})
+}
+
+func TestExecuteReloadStopsExistingServerWithMock(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	runner, err := NewRunner(WithConfig(initialCfg))
+	require.NoError(t, err)
+
+	oldServer := &MockHttpServer{}
+	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
+	runner.server = oldServer
+
+	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
+	err = runner.executeReload(t.Context(), updatedCfg)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrServerBoot)
+	oldServer.AssertExpectations(t)
+	assert.Same(t, updatedCfg, runner.getConfig())
+}
+
+func TestExecuteReloadLogsFailureInsteadOfCompletion(t *testing.T) {
+	t.Parallel()
+
+	var logBuffer lockedBuffer
+	logHandler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	runner, err := NewRunner(
+		WithConfig(initialCfg),
+		WithLogHandler(logHandler),
+	)
+	require.NoError(t, err)
+
+	oldServer := &MockHttpServer{}
+	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
+	runner.server = oldServer
+
+	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
+	err = runner.executeReload(t.Context(), updatedCfg)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrServerBoot)
+	oldServer.AssertExpectations(t)
+
+	logs := logBuffer.String()
+	assert.NotContains(t, logs, `"msg":"Completed."`)
+	assert.Contains(t, logs, `"msg":"Reload failed"`)
+	assert.Contains(t,
+		logs, "failed to boot server during reload",
+		"failure log should include the returned error: %s", logs,
+	)
 }
 
 // TestReload tests the Reload method with various configurations
@@ -178,7 +617,7 @@ func TestReload(t *testing.T) {
 			done <- err
 		}()
 
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond, "Server should transition to StatusRunning state after boot")
 		require.Equal(t, finitestate.StatusRunning, server.GetState(), "Server should be running")
@@ -187,7 +626,7 @@ func TestReload(t *testing.T) {
 		reloadCalled = true
 		server.Reload(t.Context())
 
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
 		}, 2*time.Second, 10*time.Millisecond, "Server should transition to Error state after failed boot")
 
@@ -248,7 +687,7 @@ func TestReload(t *testing.T) {
 		}()
 
 		// Wait for the server to start
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
@@ -260,7 +699,7 @@ func TestReload(t *testing.T) {
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
 		// Wait for state change to propagate
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
 		}, 2*time.Second, 10*time.Millisecond)
 
@@ -379,7 +818,7 @@ func TestReload(t *testing.T) {
 		server.Reload(t.Context())
 
 		// Wait for reload to complete
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
@@ -471,7 +910,7 @@ func TestReload(t *testing.T) {
 		})
 
 		// Wait for the server to start
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
@@ -482,7 +921,7 @@ func TestReload(t *testing.T) {
 		defer stateCancel()
 		stateChan := server.GetStateChan(stateCtx)
 
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			select {
 			case state := <-stateChan:
 				return finitestate.StatusReloading == state || finitestate.StatusRunning == state
@@ -492,7 +931,7 @@ func TestReload(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond)
 
 		// Simply wait for the server to reach Running state after reload
-		require.Eventually(t, func() bool {
+		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond, "Server should reach Running state after reload")
 
