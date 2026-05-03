@@ -217,7 +217,19 @@ func (p *PIDZero) Run() error {
 	}
 
 	// Start each service in sequence
-	for _, r := range p.runnables {
+	for i, r := range p.runnables {
+		// From iter 1 onwards, honor cancellation before spawning so a
+		// mid-startup cancel (parent ctx, ShutdownSender firing, SIGTERM
+		// during boot) closes the gap between iterations. The first
+		// iteration always spawns: if ctx is pre-cancelled, the runnable
+		// observes it via runCtx and exits, then Shutdown reaps via
+		// reverse-order Stop.
+		if i > 0 && p.ctx.Err() != nil {
+			p.logger.Debug("Context canceled before spawning next runnable", "runnable", r)
+			p.Shutdown()
+			return nil
+		}
+
 		p.wg.Go(func() {
 			err := p.startRunnable(r)
 			if err != nil {
@@ -230,12 +242,28 @@ func (p *PIDZero) Run() error {
 		if stateable, ok := r.(Stateable); ok {
 			err := p.blockUntilRunnableReady(stateable)
 			if err != nil {
+				// Ctx-cancellation is a clean shutdown trigger, not a
+				// runnable failure — match reap's nil return.
+				if p.ctx.Err() != nil {
+					p.logger.Debug("Context canceled while waiting for runnable", "runnable", r)
+					p.Shutdown()
+					return nil
+				}
 				p.logger.Error("Failed to start runnable", "runnable", r, "error", err)
 				p.Shutdown()
-				return err // exit Run loop
+				return err
 			}
 		} else {
 			p.logger.Debug("Runnable does not implement Stateable, continuing", "runnable", r)
+		}
+
+		// Honor cancellation between iterations so a mid-startup cancel
+		// (e.g. ShutdownSender firing, parent ctx) doesn't keep spawning
+		// later runnables against an already-cancelled ctx.
+		if p.ctx.Err() != nil {
+			p.logger.Debug("Context canceled during startup")
+			p.Shutdown()
+			return nil
 		}
 	}
 
@@ -272,10 +300,18 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 		case err := <-p.errorChan:
 			return err
 		case <-startupCtx.Done():
+			// startupCtx derives from p.ctx, so when p.ctx is cancelled
+			// both Done() channels fire and select picks randomly. Prefer
+			// the cancellation error over a misleading "timeout" wrap so
+			// callers see the true cause.
+			if p.ctx.Err() != nil {
+				logger.Debug("Context canceled while waiting for runnable to start")
+				return p.ctx.Err()
+			}
 			return fmt.Errorf("timeout waiting for runnable to start: %w", startupCtx.Err())
 		case <-p.ctx.Done():
-			logger.Debug("Context canceled, stopping runnables")
-			return nil
+			logger.Debug("Context canceled while waiting for runnable to start")
+			return p.ctx.Err()
 		case <-ticker.C:
 			// continue waiting, adding an exponential backoff
 			if r.IsRunning() {

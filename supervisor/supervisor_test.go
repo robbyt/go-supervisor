@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -248,17 +249,46 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Cancel the context right away
+		// Cancel the context right away. blockUntilRunnableReady must surface
+		// this as ctx.Err() so the Run loop bails instead of advancing to
+		// the next runnable.
 		cancel()
 
-		// Use Eventually to verify the correct result
-		result := assert.Eventually(t, func() bool {
-			err := sv.blockUntilRunnableReady(mockRunnable)
-			return err == nil // Should return nil when parent context is canceled
-		}, 200*time.Millisecond, 10*time.Millisecond, "Should return nil when context is canceled")
-
-		assert.True(t, result, "blockUntilRunnableReady should return nil when context is canceled")
+		err = sv.blockUntilRunnableReady(mockRunnable)
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotContains(t, err.Error(), "timeout",
+			"ctx-cancel must not be wrapped as a timeout error")
 		mockRunnable.AssertExpectations(t)
+	})
+
+	// startupCtx is derived from p.ctx, so when p.ctx is cancelled both
+	// startupCtx.Done() and p.ctx.Done() are immediately ready and select
+	// picks randomly. Repeat enough that without the precedence fix at
+	// least one iteration takes the startupCtx branch and returns a
+	// misleading "timeout" wrap.
+	t.Run("cancel beats timeout when both fire", func(t *testing.T) {
+		const iterations = 20
+		for i := range iterations {
+			mockRunnable := mocks.NewMockRunnableWithStateable()
+			mockRunnable.On("String").Return("racy-runnable").Maybe()
+			mockRunnable.On("IsRunning").Return(false).Maybe()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			sv, err := New(
+				WithContext(ctx),
+				WithRunnables(mockRunnable),
+				WithStartupTimeout(time.Second),
+				WithStartupInitial(time.Millisecond),
+			)
+			require.NoError(t, err)
+
+			cancel()
+
+			err = sv.blockUntilRunnableReady(mockRunnable)
+			require.ErrorIsf(t, err, context.Canceled, "iteration %d", i)
+			require.NotContainsf(t, err.Error(), "timeout",
+				"iteration %d: cancellation must take precedence over the startupCtx timeout wrap", i)
+		}
 	})
 
 	t.Run("error from runnable", func(t *testing.T) {
@@ -831,6 +861,128 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 
 	// Ensure Stop was called only once
 	mockRunnable.AssertNumberOfCalls(t, "Stop", 1)
+}
+
+// TestPIDZero_Run_StartupCancelStopsLoop verifies that Run's startup loop bails
+// when p.ctx is cancelled mid-startup, instead of advancing to spawn later
+// runnables against an already-cancelled ctx.
+//
+// Regression: pre-fix, blockUntilRunnableReady returned nil on <-p.ctx.Done(),
+// so the Run loop interpreted ctx-cancellation as "ready, proceed to next
+// runnable" and kept spawning. With the fix, blockUntilRunnableReady returns
+// p.ctx.Err() and the loop honors it.
+//
+// Cannot use synctest: pidZero.Run() calls signal.Notify, which is incompatible
+// with synctest. Synchronization is via a sync.Once-guarded channel send from
+// A's IsRunning callback — deterministic without timing assumptions.
+func TestPIDZero_Run_StartupCancelStopsLoop(t *testing.T) {
+	t.Parallel()
+
+	// A: Stateable, IsRunning always returns false so blockUntilRunnableReady
+	// stays in its polling loop. The first IsRunning call signals reachedCh,
+	// which the test uses to know Run has entered blockUntilRunnableReady.
+	reachedCh := make(chan struct{}, 1)
+	var signalOnce sync.Once
+	a := mocks.NewMockRunnableWithStateable()
+	a.On("String").Return("a").Maybe()
+	a.On("GetState").Return("not-running").Maybe()
+	aStateChan := make(chan string)
+	a.On("GetStateChan", mock.Anything).Return(aStateChan).Maybe()
+	a.On("IsRunning").Return(false).Run(func(args mock.Arguments) {
+		signalOnce.Do(func() { reachedCh <- struct{}{} })
+	})
+	a.On("Run", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		<-ctx.Done()
+	})
+	a.On("Stop").Once()
+
+	// B: must NEVER have Run called. Registered .Maybe() so a regression
+	// flips bRunCalled and the assertion at the end catches it (rather
+	// than panicking inside B's goroutine via testify's missing-expectation
+	// behavior).
+	var bRunCalled atomic.Bool
+	b := mocks.NewMockRunnable()
+	b.On("String").Return("b").Maybe()
+	b.On("Run", mock.Anything).Return(nil).Maybe().Run(func(args mock.Arguments) {
+		bRunCalled.Store(true)
+	})
+	b.On("Stop").Maybe()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	pidZero := newTestPIDZero(t,
+		WithContext(ctx),
+		WithRunnables(a, b),
+		WithStartupTimeout(2*time.Second),
+		WithStartupInitial(10*time.Millisecond),
+		WithShutdownTimeout(time.Second),
+	)
+
+	execDone := startPIDZeroRun(t, pidZero)
+
+	// Wait until Run is inside blockUntilRunnableReady for A, then cancel.
+	eventuallyClosed(t, reachedCh, "Run did not reach blockUntilRunnableReady for A")
+	cancel()
+
+	requirePIDZeroRunDone(t, execDone, 2*time.Second)
+
+	require.False(t, bRunCalled.Load(),
+		"B's Run must not be called after parent ctx cancelled mid-startup")
+	require.Error(t, pidZero.ctx.Err(),
+		"pidZero.ctx must be cancelled after the parent ctx is cancelled")
+}
+
+// TestPIDZero_Run_PreCancelledCtxStopsAtFirst verifies the top-of-iteration
+// ctx check (i > 0): when Run is invoked with an already-cancelled p.ctx,
+// the first runnable still spawns (preserving the long-standing contract
+// that Run gives every registered runnable at least an attempt) but no
+// later runnable is spawned. Without the iter>0 check, the supervisor
+// could keep spawning subsequent runnables against an already-cancelled
+// ctx between iterations.
+func TestPIDZero_Run_PreCancelledCtxStopsAtFirst(t *testing.T) {
+	t.Parallel()
+
+	var bRunCalled atomic.Bool
+	var cRunCalled atomic.Bool
+
+	a := mocks.NewMockRunnable()
+	a.On("String").Return("a").Maybe()
+	a.On("Run", mock.Anything).Return(nil).Maybe()
+	a.On("Stop").Maybe()
+
+	b := mocks.NewMockRunnable()
+	b.On("String").Return("b").Maybe()
+	b.On("Run", mock.Anything).Return(nil).Maybe().Run(func(args mock.Arguments) {
+		bRunCalled.Store(true)
+	})
+	b.On("Stop").Maybe()
+
+	c := mocks.NewMockRunnable()
+	c.On("String").Return("c").Maybe()
+	c.On("Run", mock.Anything).Return(nil).Maybe().Run(func(args mock.Arguments) {
+		cRunCalled.Store(true)
+	})
+	c.On("Stop").Maybe()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel before Run is even called
+
+	pidZero := newTestPIDZero(t,
+		WithContext(ctx),
+		WithRunnables(a, b, c),
+		WithStartupTimeout(time.Second),
+		WithShutdownTimeout(time.Second),
+	)
+
+	execDone := startPIDZeroRun(t, pidZero)
+	requirePIDZeroRunDone(t, execDone, 2*time.Second)
+
+	require.False(t, bRunCalled.Load(),
+		"B's Run must not be called when parent ctx is pre-cancelled (iter > 0)")
+	require.False(t, cRunCalled.Load(),
+		"C's Run must not be called when parent ctx is pre-cancelled (iter > 0)")
 }
 
 // TestPIDZero_Reap_UnhandledSignal tests the default case in signal handling.
