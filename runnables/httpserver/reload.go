@@ -38,6 +38,16 @@ func (r *Runner) Reload(ctx context.Context) {
 		return
 	}
 
+	select {
+	case <-ctx.Done():
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		return
+	case <-r.lc.DoneCh():
+		logger.Debug("Runner stopped before reload dispatch")
+		return
+	default:
+	}
+
 	req := &reloadReq{cfg: newCfg, done: make(chan struct{})}
 	select {
 	case r.reloadCh <- req:

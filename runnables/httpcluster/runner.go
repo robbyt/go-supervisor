@@ -259,18 +259,18 @@ func (r *Runner) processConfigUpdate(
 	logger := r.logger.WithGroup("processConfigUpdate")
 	logger.Debug("Processing config update", "count", len(newConfigs))
 
-	// Check if we're in a state where we can process updates
-	if !r.IsRunning() {
-		logger.Warn("Ignoring config update - cluster not running", "state", r.fsm.GetState())
-		return nil
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Transition to reloading state
-	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		return fmt.Errorf("failed to transition to reloading state: %w", err)
+	// Check and transition while holding the update lock. This prevents a
+	// TOCTOU race where the cluster is Running before the lock, but Stop()
+	// moves it to Stopped before this update enters Reloading.
+	if err := r.fsm.TransitionIfCurrentState(
+		finitestate.StatusRunning,
+		finitestate.StatusReloading,
+	); err != nil {
+		logger.Warn("Ignoring config update - cluster not running", "state", r.fsm.GetState())
+		return nil
 	}
 
 	// Phase 1: Create new entries with pending actions
