@@ -1753,6 +1753,12 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	t.Parallel()
 
 	releaseReload := make(chan struct{})
+	// Always release on test exit, even on assertion failure: if the test
+	// fails before the happy-path close(releaseReload) below, the in-flight
+	// reload (and its mocked child.Reload) would otherwise block forever,
+	// leaking a goroutine and obscuring the real failure.
+	releaseOnce := sync.OnceFunc(func() { close(releaseReload) })
+	t.Cleanup(releaseOnce)
 
 	mockChild := mocks.NewMockRunnable()
 	mockChild.On("String").Return("slow-reloader").Maybe()
@@ -1819,7 +1825,7 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	assert.Equal(t, finitestate.StatusReloading, runner.GetState())
 
 	// Release the in-flight reload so the runner returns to Running.
-	close(releaseReload)
+	releaseOnce()
 	first.Wait()
 	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond,
 		"runner should return to Running after the in-flight reload completes")
