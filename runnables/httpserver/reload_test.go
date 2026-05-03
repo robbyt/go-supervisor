@@ -254,6 +254,131 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 	})
 }
 
+func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		useUpdated = true
+		runner.Reload(t.Context())
+
+		select {
+		case req := <-runner.reloadCh:
+			close(req.done)
+			t.Fatal("reload should not dispatch when no Run loop is active")
+		default:
+		}
+		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+
+		done := runner.lc.Started()
+		defer done()
+
+		blockingReq := &reloadReq{cfg: initialCfg, done: make(chan struct{})}
+		runner.reloadCh <- blockingReq
+
+		useUpdated = true
+		ctx, cancel := context.WithCancel(t.Context())
+		reloadDone := make(chan struct{})
+		go func() {
+			runner.Reload(ctx)
+			close(reloadDone)
+		}()
+
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+			t.Fatal("Reload should wait while reloadCh is full")
+		default:
+		}
+
+		cancel()
+		synctest.Wait()
+
+		select {
+		case <-reloadDone:
+		default:
+			t.Fatal("Reload should return when caller context is canceled before dispatch")
+		}
+
+		select {
+		case req := <-runner.reloadCh:
+			assert.Same(t, blockingReq, req)
+		default:
+			t.Fatal("existing buffered reload request should remain queued")
+		}
+		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	callbackErr := assert.AnError
+	failReload := false
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if failReload {
+			return nil, callbackErr
+		}
+		return initialCfg, nil
+	}))
+	require.NoError(t, err)
+
+	failReload = true
+	runner.Reload(t.Context())
+
+	assert.Equal(t, finitestate.StatusError, runner.GetState())
+}
+
+func TestReloadNilConfigSetsError(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	returnNil := false
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if returnNil {
+			return nil, nil
+		}
+		return initialCfg, nil
+	}))
+	require.NoError(t, err)
+
+	returnNil = true
+	runner.Reload(t.Context())
+
+	assert.Equal(t, finitestate.StatusError, runner.GetState())
+}
+
 func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
 	t.Parallel()
 

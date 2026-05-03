@@ -363,3 +363,111 @@ func TestServerLifecycle_StopBeforeRun(t *testing.T) {
 	assert.Equal(t, finitestate.StatusStopped, server.GetState())
 	require.NoError(t, <-errCh)
 }
+
+func TestRunReturnsInitialTransitionError(t *testing.T) {
+	t.Parallel()
+
+	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(cfg))
+	require.NoError(t, err)
+
+	stateMachine := NewMockStateMachine()
+	stateMachine.On("Transition", finitestate.StatusBooting).Return(assert.AnError).Once()
+	server.fsm = stateMachine
+
+	err = server.Run(t.Context())
+
+	require.ErrorIs(t, err, assert.AnError)
+	stateMachine.AssertExpectations(t)
+}
+
+func TestWaitForEventReturnsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(cfg))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, server.waitForEvent(ctx))
+}
+
+func TestWaitForEventReturnsServerError(t *testing.T) {
+	t.Parallel()
+
+	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(cfg))
+	require.NoError(t, err)
+
+	server.serverErrors <- assert.AnError
+
+	err = server.waitForEvent(t.Context())
+
+	require.ErrorIs(t, err, ErrHttpServer)
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Equal(t, finitestate.StatusError, server.GetState())
+}
+
+func TestServerReadinessProbeReturnsServerError(t *testing.T) {
+	t.Parallel()
+
+	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(cfg))
+	require.NoError(t, err)
+
+	server.serverErrors <- assert.AnError
+
+	err = server.serverReadinessProbe(t.Context(), "127.0.0.1:1")
+
+	require.ErrorIs(t, err, assert.AnError)
+}
+
+func TestHandleReloadSkipsWhenReloadingTransitionFails(t *testing.T) {
+	t.Parallel()
+
+	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(cfg))
+	require.NoError(t, err)
+
+	stateMachine := NewMockStateMachine()
+	stateMachine.On("Transition", finitestate.StatusReloading).Return(assert.AnError).Once()
+	stateMachine.On("GetState").Return(finitestate.StatusStopped).Once()
+	server.fsm = stateMachine
+
+	req := &reloadReq{cfg: cfg, done: make(chan struct{})}
+	server.handleReload(t.Context(), req)
+
+	select {
+	case <-req.done:
+	default:
+		t.Fatal("handleReload should close req.done when it skips the reload")
+	}
+	stateMachine.AssertExpectations(t)
+}
+
+func TestHandleReloadSetsErrorWhenExecuteReloadFails(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(initialCfg))
+	require.NoError(t, err)
+
+	stateMachine := NewMockStateMachine()
+	stateMachine.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+	stateMachine.On("TransitionBool", finitestate.StatusError).Return(true).Once()
+	server.fsm = stateMachine
+
+	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
+	req := &reloadReq{cfg: updatedCfg, done: make(chan struct{})}
+	server.handleReload(t.Context(), req)
+
+	select {
+	case <-req.done:
+	default:
+		t.Fatal("handleReload should close req.done when executeReload fails")
+	}
+	stateMachine.AssertExpectations(t)
+	assert.Same(t, updatedCfg, server.getConfig())
+}
