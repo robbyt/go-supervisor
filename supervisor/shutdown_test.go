@@ -15,31 +15,48 @@ import (
 func TestPIDZero_Shutdown(t *testing.T) {
 	t.Parallel()
 
-	// Cannot use synctest: the listener goroutine calls Shutdown() which calls
-	// wg.Wait() on the same WaitGroup that includes startShutdownManager,
-	// creating a circular dependency that synctest's "all goroutines must
-	// complete" requirement turns into a deadlock.
-	t.Run("shutdown sender trigger calls shutdown", func(t *testing.T) {
-		supervisorCtx, supervisorCancel := context.WithCancel(context.Background())
-		defer supervisorCancel()
+	t.Run("shutdown sender trigger completes without deadlock", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 
-		mockService := mocks.NewMockRunnableWithShutdownSender()
-		shutdownChan := make(chan struct{}, 1)
-		stopCalled := make(chan struct{})
+			mockService := mocks.NewMockRunnableWithShutdownSender()
+			shutdownChan := make(chan struct{}, 1)
 
-		mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
-		mockService.On("String").Return("mockShutdownService")
-		mockService.On("Stop").Return().Once().Run(func(args mock.Arguments) {
-			close(stopCalled)
+			mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
+			mockService.On("String").Return("mockShutdownService")
+			mockService.On("Stop").Return().Once()
+
+			pidZero := newTestPIDZero(t, WithContext(ctx), WithRunnables(mockService))
+			pidZero.wg.Go(pidZero.startShutdownManager)
+
+			shutdownChan <- struct{}{}
+			synctest.Wait()
+
+			// With the fix, the listener cancels the supervisor ctx
+			// instead of running Shutdown itself, so it returns
+			// promptly and shutdownWg drains. The test's Shutdown call
+			// below picks up shutdownOnce and runs the body
+			// uncontested. Without the fix, the listener was stuck
+			// inside Shutdown's p.wg.Wait while startShutdownManager
+			// waited on the listener via shutdownWg.Wait — circular
+			// wait — and a second Shutdown call would block on
+			// shutdownOnce indefinitely.
+			shutdownDone := make(chan struct{})
+			go func() {
+				pidZero.Shutdown()
+				close(shutdownDone)
+			}()
+			synctest.Wait()
+
+			select {
+			case <-shutdownDone:
+			default:
+				t.Fatal("Shutdown blocked: circular wait between listener and startShutdownManager")
+			}
+
+			mockService.AssertExpectations(t)
 		})
-
-		pidZero := newTestPIDZero(t, WithContext(supervisorCtx), WithRunnables(mockService))
-		pidZero.wg.Go(pidZero.startShutdownManager)
-
-		shutdownChan <- struct{}{}
-		eventuallyClosed(t, stopCalled, "Stop() was not called, Shutdown() likely not invoked")
-
-		mockService.AssertExpectations(t)
 	})
 
 	t.Run("shutdown manager exits on context cancel", func(t *testing.T) {
