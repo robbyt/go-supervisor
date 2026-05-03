@@ -12,266 +12,405 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPIDZero_StartShutdownManager_TriggersShutdown verifies that receiving a signal
-// on a ShutdownSender's trigger channel calls the supervisor's Shutdown method.
-// Cannot use synctest: the listener goroutine calls Shutdown() which calls wg.Wait()
-// on the same WaitGroup that includes startShutdownManager, creating a circular dependency
-// that synctest's "all goroutines must complete" requirement turns into a deadlock.
-func TestPIDZero_StartShutdownManager_TriggersShutdown(t *testing.T) {
+func TestPIDZero_Shutdown(t *testing.T) {
 	t.Parallel()
 
-	supervisorCtx, supervisorCancel := context.WithCancel(context.Background())
-	defer supervisorCancel()
-
-	mockService := mocks.NewMockRunnableWithShutdownSender()
-	shutdownChan := make(chan struct{}, 1)
-	stopCalled := make(chan struct{})
-
-	mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
-	mockService.On("String").Return("mockShutdownService")
-	mockService.On("Stop").Return().Once().Run(func(args mock.Arguments) {
-		close(stopCalled)
-	})
-
-	pidZero, err := New(WithContext(supervisorCtx), WithRunnables(mockService))
-	require.NoError(t, err)
-
-	pidZero.wg.Go(pidZero.startShutdownManager)
-
-	shutdownChan <- struct{}{}
-
-	select {
-	case <-stopCalled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stop() was not called, Shutdown() likely not invoked")
-	}
-
-	mockService.AssertExpectations(t)
-}
-
-// TestPIDZero_StartShutdownManager_ContextCancel verifies that the manager
-// cleans up its listener goroutines when the main context is cancelled.
-func TestPIDZero_StartShutdownManager_ContextCancel(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
+	// Cannot use synctest: the listener goroutine calls Shutdown() which calls
+	// wg.Wait() on the same WaitGroup that includes startShutdownManager,
+	// creating a circular dependency that synctest's "all goroutines must
+	// complete" requirement turns into a deadlock.
+	t.Run("shutdown sender trigger calls shutdown", func(t *testing.T) {
+		supervisorCtx, supervisorCancel := context.WithCancel(context.Background())
+		defer supervisorCancel()
 
 		mockService := mocks.NewMockRunnableWithShutdownSender()
-		shutdownChan := make(chan struct{})
+		shutdownChan := make(chan struct{}, 1)
+		stopCalled := make(chan struct{})
 
 		mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
+		mockService.On("String").Return("mockShutdownService")
+		mockService.On("Stop").Return().Once().Run(func(args mock.Arguments) {
+			close(stopCalled)
+		})
 
-		pidZero, err := New(WithContext(ctx), WithRunnables(mockService))
-		require.NoError(t, err)
-
+		pidZero := newTestPIDZero(t, WithContext(supervisorCtx), WithRunnables(mockService))
 		pidZero.wg.Go(pidZero.startShutdownManager)
 
-		cancel()
-		synctest.Wait()
+		shutdownChan <- struct{}{}
+		eventuallyClosed(t, stopCalled, "Stop() was not called, Shutdown() likely not invoked")
 
 		mockService.AssertExpectations(t)
 	})
-}
 
-// TestPIDZero_StartShutdownManager_NoSenders verifies that the manager
-// starts and stops cleanly even if no runnables implement ShutdownSender.
-func TestPIDZero_StartShutdownManager_NoSenders(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
+	t.Run("shutdown manager exits on context cancel", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 
-		nonSenderRunnable := mocks.NewMockRunnable()
+			mockService := mocks.NewMockRunnableWithShutdownSender()
+			shutdownChan := make(chan struct{})
 
-		pidZero, err := New(WithContext(ctx), WithRunnables(nonSenderRunnable))
-		require.NoError(t, err)
+			mockService.On("GetShutdownTrigger").Return(shutdownChan).Once()
 
-		pidZero.wg.Go(pidZero.startShutdownManager)
+			pidZero := newTestPIDZero(t, WithContext(ctx), WithRunnables(mockService))
+			pidZero.wg.Go(pidZero.startShutdownManager)
 
-		cancel()
-		synctest.Wait()
+			cancel()
+			synctest.Wait()
 
-		nonSenderRunnable.AssertExpectations(t)
-	})
-}
-
-// TestPIDZero_Shutdown_WithTimeoutNotExceeded verifies that shutdown completes
-// successfully when runnables finish within the configured timeout.
-// Cannot use synctest: calls pidZero.Run() which uses signal.Notify.
-func TestPIDZero_Shutdown_WithTimeoutNotExceeded(t *testing.T) {
-	t.Parallel()
-
-	stopCalled := make(chan struct{})
-
-	runnable := mocks.NewMockRunnable()
-	runStarted := make(chan struct{})
-
-	runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-		close(runStarted)
-		<-stopCalled
+			mockService.AssertExpectations(t)
+		})
 	})
 
-	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
-		close(stopCalled)
+	t.Run("shutdown manager handles no senders", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			nonSenderRunnable := mocks.NewMockRunnable()
+
+			pidZero := newTestPIDZero(t, WithContext(ctx), WithRunnables(nonSenderRunnable))
+			pidZero.wg.Go(pidZero.startShutdownManager)
+
+			cancel()
+			synctest.Wait()
+
+			nonSenderRunnable.AssertExpectations(t)
+		})
 	})
 
-	pidZero, err := New(
-		WithRunnables(runnable),
-		WithShutdownTimeout(2*time.Second),
-	)
-	require.NoError(t, err)
+	// Cannot use synctest: this calls pidZero.Run(), which uses signal.Notify.
+	t.Run("shutdown completes before timeout", func(t *testing.T) {
+		stopCalled := make(chan struct{})
 
-	execDone := make(chan error, 1)
-	go func() {
-		execDone <- pidZero.Run()
-	}()
+		runnable := mocks.NewMockRunnable()
+		runStarted := make(chan struct{})
 
-	select {
-	case <-runStarted:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not start in time")
-	}
+		runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			close(runStarted)
+			<-stopCalled
+		})
 
-	shutdownStart := time.Now()
-	pidZero.Shutdown()
-	shutdownDuration := time.Since(shutdownStart)
+		runnable.On("Stop").Once().Run(func(args mock.Arguments) {
+			close(stopCalled)
+		})
 
-	assert.Less(t, shutdownDuration, 1*time.Second,
-		"Shutdown took too long: %v", shutdownDuration)
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(2*time.Second),
+		)
 
-	select {
-	case err := <-execDone:
-		require.NoError(t, err)
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Run did not complete after shutdown")
-	}
+		execDone := startPIDZeroRun(t, pidZero)
+		eventuallyClosed(t, runStarted, "Run did not start in time")
 
-	runnable.AssertExpectations(t)
-}
-
-// TestPIDZero_Shutdown_WithTimeoutExceeded verifies that shutdown still completes
-// but logs a warning when the timeout is exceeded by goroutines that don't stop timely.
-// Cannot use synctest: calls pidZero.Run() which uses signal.Notify.
-func TestPIDZero_Shutdown_WithTimeoutExceeded(t *testing.T) {
-	t.Parallel()
-
-	stopCalled := make(chan struct{})
-	shutdownComplete := make(chan struct{})
-
-	runnable := mocks.NewMockRunnable()
-
-	runStarted := make(chan struct{})
-	runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-		close(runStarted)
-		select {
-		case <-stopCalled:
-		case <-shutdownComplete:
-		}
-	})
-
-	runnable.On("Stop").Once().Run(func(args mock.Arguments) {
-		time.Sleep(50 * time.Millisecond)
-	})
-
-	pidZero, err := New(
-		WithRunnables(runnable),
-		WithShutdownTimeout(200*time.Millisecond),
-	)
-	require.NoError(t, err)
-
-	execDone := make(chan error, 1)
-	go func() {
-		execDone <- pidZero.Run()
-	}()
-
-	select {
-	case <-runStarted:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not start in time")
-	}
-
-	shutdownStart := time.Now()
-	shutdownDone := make(chan struct{})
-	go func() {
+		shutdownStart := time.Now()
 		pidZero.Shutdown()
-		close(shutdownDone)
-	}()
+		shutdownDuration := time.Since(shutdownStart)
 
-	select {
-	case <-shutdownDone:
+		assert.Less(t, shutdownDuration, time.Second,
+			"Shutdown took too long: %v", shutdownDuration)
+		requirePIDZeroRunDone(t, execDone, 200*time.Millisecond)
+
+		runnable.AssertExpectations(t)
+	})
+
+	// Cannot use synctest: this calls pidZero.Run(), which uses signal.Notify.
+	t.Run("shutdown times out waiting for goroutines", func(t *testing.T) {
+		stopCalled := make(chan struct{})
+		shutdownComplete := make(chan struct{})
+
+		runnable := mocks.NewMockRunnable()
+
+		runStarted := make(chan struct{})
+		runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			close(runStarted)
+			select {
+			case <-stopCalled:
+			case <-shutdownComplete:
+			}
+		})
+
+		runnable.On("Stop").Once().Run(func(args mock.Arguments) {
+			time.Sleep(50 * time.Millisecond)
+		})
+
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(200*time.Millisecond),
+		)
+
+		_ = startPIDZeroRun(t, pidZero)
+		eventuallyClosed(t, runStarted, "Run did not start in time")
+
+		shutdownStart := time.Now()
+		shutdownDone := make(chan struct{})
+		go func() {
+			pidZero.Shutdown()
+			close(shutdownDone)
+		}()
+
+		eventuallyClosed(t, shutdownDone, "Shutdown did not complete despite timeout")
 		shutdownDuration := time.Since(shutdownStart)
 
 		assert.GreaterOrEqual(t, shutdownDuration, 200*time.Millisecond,
 			"Shutdown returned too quickly: %v", shutdownDuration)
 		assert.Less(t, shutdownDuration, 500*time.Millisecond,
 			"Shutdown took too long: %v", shutdownDuration)
-	case <-time.After(1 * time.Second):
-		t.Fatal("Shutdown did not complete despite timeout")
-	}
 
-	close(shutdownComplete)
-	runnable.AssertExpectations(t)
-}
-
-// TestPIDZero_Shutdown_HungStopBoundedByDeadline verifies that a runnable
-// whose Stop() never returns does NOT wedge the supervisor's Shutdown()
-// indefinitely. The total shutdown timeout bounds Stop() calls; on expiry,
-// the goroutine is abandoned and shutdown proceeds.
-//
-// Regression: prior to the total-deadline fix, Shutdown() called Stop()
-// synchronously and the timeout only bounded the post-Stop wg.Wait(). A
-// single hung Stop() blocked shutdown forever before the timeout engaged.
-func TestPIDZero_Shutdown_HungStopBoundedByDeadline(t *testing.T) {
-	t.Parallel()
-
-	hangForever := make(chan struct{}) // never closed by the test path
-	t.Cleanup(func() {
-		// Release the orphaned Stop goroutine so the test's runnable
-		// goroutines can exit cleanly when the test framework tears down.
-		close(hangForever)
+		close(shutdownComplete)
+		runnable.AssertExpectations(t)
 	})
 
-	runnable := mocks.NewMockRunnable()
-	runStarted := make(chan struct{})
-	runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-		close(runStarted)
-		<-hangForever
-	})
-	runnable.On("Stop").Run(func(args mock.Arguments) {
-		<-hangForever
-	})
+	t.Run("hung stop is bounded by deadline", func(t *testing.T) {
+		hangForever := make(chan struct{})
+		t.Cleanup(func() {
+			close(hangForever)
+		})
 
-	pidZero, err := New(
-		WithRunnables(runnable),
-		WithShutdownTimeout(150*time.Millisecond),
-	)
-	require.NoError(t, err)
+		runnable := mocks.NewMockRunnable()
+		runStarted := make(chan struct{})
+		runnable.On("Run", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			close(runStarted)
+			<-hangForever
+		})
+		runnable.On("Stop").Run(func(args mock.Arguments) {
+			<-hangForever
+		})
 
-	execDone := make(chan error, 1)
-	go func() { execDone <- pidZero.Run() }()
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(150*time.Millisecond),
+		)
 
-	select {
-	case <-runStarted:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not start in time")
-	}
+		_ = startPIDZeroRun(t, pidZero)
+		eventuallyClosed(t, runStarted, "Run did not start in time")
 
-	shutdownStart := time.Now()
-	shutdownDone := make(chan struct{})
-	go func() {
-		pidZero.Shutdown()
-		close(shutdownDone)
-	}()
+		shutdownStart := time.Now()
+		shutdownDone := make(chan struct{})
+		go func() {
+			pidZero.Shutdown()
+			close(shutdownDone)
+		}()
 
-	select {
-	case <-shutdownDone:
+		eventuallyClosed(t, shutdownDone, "Shutdown blocked despite timeout; total-deadline fix not active")
 		elapsed := time.Since(shutdownStart)
+
 		assert.GreaterOrEqual(t, elapsed, 150*time.Millisecond,
 			"Shutdown returned too quickly: %v", elapsed)
-		assert.Less(t, elapsed, 1*time.Second,
+		assert.Less(t, elapsed, time.Second,
 			"Shutdown should return near the deadline despite hung Stop(); got %v", elapsed)
-	case <-time.After(3 * time.Second):
-		t.Fatal("Shutdown blocked despite timeout — total-deadline fix not active")
+	})
+
+	t.Run("abandoned runnable can return error after shutdown", func(t *testing.T) {
+		releaseRun := make(chan struct{})
+		releaseStop := make(chan struct{})
+		t.Cleanup(func() {
+			close(releaseStop)
+		})
+
+		runnable := mocks.NewMockRunnable()
+		runStarted := make(chan struct{})
+		runnable.On("Run", mock.Anything).Return(assert.AnError).Run(func(args mock.Arguments) {
+			close(runStarted)
+			<-releaseRun
+		})
+		runnable.On("Stop").Run(func(args mock.Arguments) {
+			<-releaseStop
+		})
+
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(50*time.Millisecond),
+		)
+
+		execDone := startPIDZeroRun(t, pidZero)
+		eventuallyClosed(t, runStarted, "Run did not start in time")
+
+		shutdownDone := make(chan struct{})
+		go func() {
+			pidZero.Shutdown()
+			close(shutdownDone)
+		}()
+
+		eventuallyClosed(t, shutdownDone, "Shutdown did not complete after abandoning Stop()")
+
+		close(releaseRun)
+
+		assert.Eventually(t, func() bool {
+			return len(pidZero.errorChan) == 1
+		}, time.Second, 10*time.Millisecond)
+
+		select {
+		case err := <-execDone:
+			require.NoError(t, err)
+		default:
+		}
+
+		runnable.AssertExpectations(t)
+	})
+
+	t.Run("abandoned stop does not cache post state", func(t *testing.T) {
+		releaseStop := make(chan struct{})
+		t.Cleanup(func() {
+			close(releaseStop)
+		})
+
+		runnable := mocks.NewMockRunnableWithStateable()
+		runnable.On("String").Return("stateable-runnable").Maybe()
+		runnable.On("GetState").Return("running").Once()
+		runnable.On("Stop").Run(func(args mock.Arguments) {
+			<-releaseStop
+		})
+
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(50*time.Millisecond),
+		)
+		pidZero.stateMap.Store(runnable, "cached-running")
+
+		shutdownDone := make(chan struct{})
+		go func() {
+			pidZero.Shutdown()
+			close(shutdownDone)
+		}()
+
+		eventuallyClosed(t, shutdownDone, "Shutdown did not complete after abandoning Stop()")
+
+		cachedState, ok := pidZero.stateMap.Load(runnable)
+		require.True(t, ok)
+		assert.Equal(t, "cached-running", cachedState)
+		runnable.AssertExpectations(t)
+	})
+
+	t.Run("completed stop caches post state", func(t *testing.T) {
+		runnable := mocks.NewMockRunnableWithStateable()
+		runnable.On("String").Return("stateable-runnable").Maybe()
+		runnable.On("GetState").Return("running").Once()
+		runnable.On("GetState").Return("stopped").Once()
+		runnable.On("Stop").Once()
+
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(time.Second),
+		)
+		pidZero.stateMap.Store(runnable, "cached-running")
+
+		pidZero.Shutdown()
+
+		cachedState, ok := pidZero.stateMap.Load(runnable)
+		require.True(t, ok)
+		assert.Equal(t, "stopped", cachedState)
+		runnable.AssertExpectations(t)
+	})
+
+	t.Run("stop runnable bounded completes before deadline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			runnable := mocks.NewMockRunnable()
+			runnable.On("Stop").Once()
+
+			pidZero := newTestPIDZero(t, WithRunnables(runnable))
+
+			stopped := pidZero.stopRunnableBounded(
+				runnable,
+				time.Now().Add(time.Second),
+				time.Now(),
+			)
+
+			assert.True(t, stopped)
+			runnable.AssertExpectations(t)
+		})
+	})
+
+	t.Run("stop runnable bounded deadline expires", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			releaseStop := make(chan struct{})
+
+			runnable := mocks.NewMockRunnable()
+			runnable.On("Stop").Run(func(args mock.Arguments) {
+				<-releaseStop
+			})
+
+			pidZero := newTestPIDZero(t,
+				WithRunnables(runnable),
+				WithShutdownTimeout(time.Second),
+			)
+
+			stopped := pidZero.stopRunnableBounded(
+				runnable,
+				time.Now().Add(time.Second),
+				time.Now(),
+			)
+			assert.False(t, stopped)
+
+			close(releaseStop)
+			synctest.Wait()
+			runnable.AssertExpectations(t)
+		})
+	})
+
+	t.Run("stop runnable bounded deadline already expired", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			releaseStop := make(chan struct{})
+
+			runnable := mocks.NewMockRunnable()
+			runnable.On("Stop").Run(func(args mock.Arguments) {
+				<-releaseStop
+			})
+
+			pidZero := newTestPIDZero(t, WithRunnables(runnable))
+
+			stopped := pidZero.stopRunnableBounded(
+				runnable,
+				time.Now().Add(-time.Nanosecond),
+				time.Now(),
+			)
+			assert.False(t, stopped)
+
+			close(releaseStop)
+			synctest.Wait()
+			runnable.AssertExpectations(t)
+		})
+	})
+}
+
+func newTestPIDZero(t *testing.T, opts ...Option) *PIDZero {
+	t.Helper()
+
+	pidZero, err := New(opts...)
+	require.NoError(t, err)
+	return pidZero
+}
+
+func startPIDZeroRun(t *testing.T, pidZero *PIDZero) <-chan error {
+	t.Helper()
+
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- pidZero.Run()
+	}()
+	return execDone
+}
+
+func eventuallyClosed(t *testing.T, ch <-chan struct{}, message string) {
+	t.Helper()
+
+	assert.Eventually(t, func() bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond, message)
+}
+
+func requirePIDZeroRunDone(t *testing.T, execDone <-chan error, timeout time.Duration) {
+	t.Helper()
+
+	select {
+	case err := <-execDone:
+		require.NoError(t, err)
+	case <-time.After(timeout):
+		t.Fatal("Run did not complete after shutdown")
 	}
 }

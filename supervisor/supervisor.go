@@ -293,8 +293,9 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 // wall-clock budget for the entire shutdown, shared between per-runnable
 // Stop() calls and the final wait for goroutines. If a runnable's Stop()
 // blocks past the remaining budget, its goroutine is abandoned (logged
-// warning) and shutdown continues — the orphaned goroutine will be reaped
-// when the process exits. A timeout of 0 disables the deadline.
+// warning) and shutdown continues. Abandoned runnable goroutines may keep
+// running after Shutdown returns and will be reaped when the process exits.
+// A timeout of 0 disables the deadline.
 //
 // The supervisor's context is cancelled before the Stop loop begins so that
 // runnables which watch their runCtx for cancellation can begin teardown
@@ -330,13 +331,13 @@ func (p *PIDZero) Shutdown() {
 			p.logger.Debug("Stopping", "runnable", r)
 			stopped := p.stopRunnableBounded(r, deadline, shutdownStart)
 
-			if stateable, ok := r.(Stateable); ok {
-				finalState := stateable.GetState()
-				p.stateMap.Store(r, finalState)
-				p.logger.Debug("Post-shutdown state",
-					"runnable", r, "state", finalState)
-			}
 			if stopped {
+				if stateable, ok := r.(Stateable); ok {
+					finalState := stateable.GetState()
+					p.stateMap.Store(r, finalState)
+					p.logger.Debug("Post-shutdown state",
+						"runnable", r, "state", finalState)
+				}
 				p.logger.Debug("Runnable stopped",
 					"runnable", r, "duration", time.Since(runnableStart))
 			}
@@ -345,7 +346,6 @@ func (p *PIDZero) Shutdown() {
 		p.logger.Debug("Waiting for runnables to complete...")
 		p.waitForGoroutines(deadline, shutdownStart)
 
-		close(p.errorChan) // close the error channel, since no runnables can send errors
 		p.logger.Debug("Shutdown complete", "duration", time.Since(shutdownStart))
 	})
 }
