@@ -102,7 +102,7 @@ func TestRapidReload(t *testing.T) {
 	})
 
 	// Wait for server to start
-	assert.Eventually(t, func() bool {
+	require.Eventually(t, func() bool {
 		return server.GetState() == finitestate.StatusRunning
 	}, 2*time.Second, 10*time.Millisecond)
 
