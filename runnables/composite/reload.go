@@ -17,15 +17,23 @@ type ReloadableWithConfig interface {
 // Reload updates the configuration and handles runnables appropriately.
 // If membership changes (different set of runnables), all existing runnables are stopped
 // and the new set of runnables is started.
+//
+// Concurrent callers are admitted via the FSM, not a mutex: the atomic
+// Running→Reloading transition is the single-flight gate. A second caller that
+// arrives while a reload is already in flight observes Reloading, fails the
+// transition, and returns without queueing — matching httpserver's pattern. If
+// every caller must produce an effect, callers should serialize themselves.
 func (r *Runner[T]) Reload(ctx context.Context) {
-	r.reloadMu.Lock()
-	defer r.reloadMu.Unlock()
-
 	logger := r.logger.WithGroup("Reload")
 
-	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		// Common reason: runner is in Stopping/Stopped/Booting/Error — not a
-		// failure of the reload itself, so don't move the FSM to Error.
+	if err := r.fsm.TransitionIfCurrentState(
+		finitestate.StatusRunning,
+		finitestate.StatusReloading,
+	); err != nil {
+		// Either another reload is already in flight (FSM in Reloading) or the
+		// runner is in Stopping/Stopped/Booting/Error. Either way, drop this
+		// request — there is no failure of *this* reload to surface, so don't
+		// move the FSM to Error.
 		logger.Debug("Cannot reload — runner not in Running state",
 			"current", r.fsm.GetState(), "error", err)
 		return

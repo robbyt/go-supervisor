@@ -558,7 +558,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// the Error state — it's "wrong state for reload" control flow,
 		// not a runner failure.
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
 			Return(errors.New("transition error")).
 			Once()
 		mockFSM.On("GetState").Return(finitestate.StatusStopped).Maybe()
@@ -588,7 +589,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("config callback error during reload", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -619,7 +622,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("config callback returns nil config", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -651,7 +656,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("reloadable runnable fails", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		// Do NOT expect SetState(StatusError) since the panic will interrupt execution
 		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
 
@@ -706,7 +713,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 			"Panic message should contain the original panic reason")
 
 		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
+		mockFSM.AssertCalled(t, "TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading)
 
 		// Verify our mock expectations
 		mockRunnable.AssertExpectations(t)
@@ -715,7 +723,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("reload with ReloadableWithConfig that panics", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		// No SetState error expectation since we won't reach that code due to panic
 		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
 
@@ -794,7 +804,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 			"Panic message should contain the original panic reason")
 
 		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
+		mockFSM.AssertCalled(t, "TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading)
 
 		// We shouldn't have reached the error state since panic interrupted execution
 		mockReloadable.AssertExpectations(t)
@@ -803,7 +814,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("reloadable runnable fails with Panic", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		// We don't expect SetState to be called since panic will interrupt execution
 		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
 
@@ -855,7 +868,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 			"Panic message should contain the original panic reason")
 
 		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
+		mockFSM.AssertCalled(t, "TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading)
 	})
 }
 
@@ -1983,6 +1997,105 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after ctx cancel")
 	}
+}
+
+// TestCompositeRunner_ConcurrentReload_DropsOnBusy verifies the FSM
+// admission gate's drop-on-busy semantics: while one Reload is in flight (the
+// FSM is in Reloading), concurrent Reload callers fail the
+// TransitionIfCurrentState gate, return immediately without queueing, and do
+// NOT trigger a second pass through the child's Reload.
+//
+// This is the contract that replaced the prior reloadMu-based queueing: a
+// reload pulls the latest config; if a reload is already in flight, the new
+// caller's request is redundant and is dropped.
+func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
+	t.Parallel()
+
+	releaseReload := make(chan struct{})
+
+	mockChild := mocks.NewMockRunnable()
+	mockChild.On("String").Return("slow-reloader").Maybe()
+	mockChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+		<-args.Get(0).(context.Context).Done()
+	}).Return(context.Canceled).Maybe()
+	mockChild.On("Stop").Return().Maybe()
+	// Reload blocks on releaseReload, holding the parent FSM in Reloading.
+	// .Once() asserts that exactly one Reload reaches the child — concurrent
+	// callers must be dropped at the FSM admission gate.
+	mockChild.On("Reload", mock.Anything).Run(func(_ mock.Arguments) {
+		<-releaseReload
+	}).Return().Once()
+
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: mockChild, Config: nil},
+	}
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", entries)
+	}
+
+	runner, err := NewRunner(configCallback)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- runner.Run(ctx) }()
+	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond)
+
+	// First reload: blocks inside child.Reload, parent FSM held in Reloading.
+	var first sync.WaitGroup
+	first.Go(func() {
+		runner.Reload(t.Context())
+	})
+	require.Eventually(t, func() bool {
+		return runner.GetState() == finitestate.StatusReloading
+	}, 2*time.Second, 5*time.Millisecond, "first reload must enter Reloading")
+
+	// Spawn N concurrent reloads — each must hit the FSM gate, fail, and
+	// return immediately. They MUST NOT queue and MUST NOT call child.Reload.
+	const concurrent = 10
+	var others sync.WaitGroup
+	for range concurrent {
+		others.Go(func() {
+			runner.Reload(t.Context())
+		})
+	}
+	// All N must return promptly (they bail at admission). If they queue on a
+	// hypothetical mutex, they'd block until releaseReload closes.
+	done := make(chan struct{})
+	go func() {
+		others.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Reload callers did not return promptly — they appear to be queueing instead of dropping")
+	}
+
+	// FSM still pinned in Reloading by the in-flight first call.
+	assert.Equal(t, finitestate.StatusReloading, runner.GetState())
+
+	// Release the in-flight reload so the runner returns to Running.
+	close(releaseReload)
+	first.Wait()
+	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond,
+		"runner should return to Running after the in-flight reload completes")
+
+	// .Once() on Reload asserts exactly one call reached the child.
+	mockChild.AssertExpectations(t)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-runErr:
+			assert.NoError(t, err)
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
 }
 
 func TestCompositeRunner_ConcurrentReload(t *testing.T) {
