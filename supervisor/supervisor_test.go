@@ -931,7 +931,7 @@ func TestPIDZero_Run_StartupCancelStopsLoop(t *testing.T) {
 	require.False(t, bRunCalled.Load(),
 		"B's Run must not be called after parent ctx cancelled mid-startup")
 	require.Error(t, pidZero.ctx.Err(),
-		"pidZero.ctx must be cancelled (proves Shutdown was reached)")
+		"pidZero.ctx must be cancelled after the parent ctx is cancelled")
 }
 
 // TestPIDZero_Run_PreCancelledCtxStopsAtFirst verifies the top-of-iteration
