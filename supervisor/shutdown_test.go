@@ -59,6 +59,39 @@ func TestPIDZero_Shutdown(t *testing.T) {
 		})
 	})
 
+	// Cannot use synctest: this calls pidZero.Run(), which uses signal.Notify.
+	// Exercises the production dispatch path (listener cancels p.ctx → reap
+	// picks up <-p.ctx.Done() → Shutdown). The other synctest test above
+	// drives startShutdownManager + Shutdown directly and would still pass if
+	// the listener's p.cancel() somehow stopped reaching reap.
+	t.Run("shutdown sender trigger drives Run loop to clean exit", func(t *testing.T) {
+		runnable := mocks.NewMockRunnableWithShutdownSender()
+		shutdownChan := make(chan struct{}, 1)
+		runStarted := make(chan struct{})
+
+		runnable.On("GetShutdownTrigger").Return(shutdownChan).Once()
+		runnable.On("String").Return("shutdownSenderRunnable").Maybe()
+		runnable.On("Run", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			close(runStarted)
+			<-ctx.Done()
+		})
+		runnable.On("Stop").Once()
+
+		pidZero := newTestPIDZero(t,
+			WithRunnables(runnable),
+			WithShutdownTimeout(time.Second),
+		)
+
+		execDone := startPIDZeroRun(t, pidZero)
+		eventuallyClosed(t, runStarted, "Run did not start in time")
+
+		shutdownChan <- struct{}{}
+
+		requirePIDZeroRunDone(t, execDone, time.Second)
+		runnable.AssertExpectations(t)
+	})
+
 	t.Run("shutdown manager exits on context cancel", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
