@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -17,6 +19,23 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 func createReloadTestConfig(
 	t *testing.T,
@@ -156,6 +175,7 @@ func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
 		}))
 		require.NoError(t, err)
 		require.Equal(t, 1, callbackCalls, "NewRunner should load the initial config")
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 		runner.Reload(t.Context())
 
@@ -188,6 +208,7 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 
 		done := runner.lc.Started()
 		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 		useUpdated = true
 		reloadDone := make(chan struct{})
@@ -222,6 +243,63 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		assert.Same(t, initialCfg, runner.getConfig(),
 			"Reload should not mutate config until the event loop executes the restart")
 	})
+}
+
+func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+	var callbackCalls atomic.Int32
+	var reloadCallbackCalls atomic.Int32
+	callbackEntered := make(chan struct{})
+	releaseCallback := make(chan struct{})
+
+	runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+		if callbackCalls.Add(1) == 1 {
+			return initialCfg, nil
+		}
+
+		if reloadCallbackCalls.Add(1) == 1 {
+			close(callbackEntered)
+		}
+		<-releaseCallback
+		return updatedCfg, nil
+	}))
+	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+	firstReloadDone := make(chan struct{})
+	go func() {
+		runner.Reload(t.Context())
+		close(firstReloadDone)
+	}()
+
+	assert.Eventually(t, func() bool {
+		select {
+		case <-callbackEntered:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), reloadCallbackCalls.Load())
+
+	runner.Reload(t.Context())
+	assert.Equal(t, int32(1), reloadCallbackCalls.Load(),
+		"second reload should not run configCallback while FSM is Reloading")
+
+	close(releaseCallback)
+	assert.Eventually(t, func() bool {
+		select {
+		case <-firstReloadDone:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 }
 
 func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
@@ -303,6 +381,7 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 
 		done := runner.lc.Started()
 		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 		blockingReq := &reloadReq{cfg: initialCfg, done: make(chan struct{})}
 		runner.reloadCh <- blockingReq
@@ -355,6 +434,7 @@ func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
 		return initialCfg, nil
 	}))
 	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	failReload = true
 	runner.Reload(t.Context())
@@ -374,6 +454,7 @@ func TestReloadNilConfigSetsError(t *testing.T) {
 		return initialCfg, nil
 	}))
 	require.NoError(t, err)
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	returnNil = true
 	runner.Reload(t.Context())
@@ -399,6 +480,7 @@ func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
 
 		done := runner.lc.Started()
 		defer done()
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 		useUpdated = true
 		reloadDone := make(chan struct{})
@@ -449,7 +531,7 @@ func TestExecuteReloadStopsExistingServerWithMock(t *testing.T) {
 func TestExecuteReloadLogsFailureInsteadOfCompletion(t *testing.T) {
 	t.Parallel()
 
-	var logBuffer bytes.Buffer
+	var logBuffer lockedBuffer
 	logHandler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})
 
 	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)

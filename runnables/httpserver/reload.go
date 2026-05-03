@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+
+	"github.com/robbyt/go-supervisor/internal/finitestate"
 )
 
 // Reload refreshes the server configuration and restarts the HTTP server if
@@ -21,12 +23,8 @@ func (r *Runner) Reload(ctx context.Context) {
 	logger := r.logger.WithGroup("Reload")
 
 	// Fast-path: if the caller's ctx is already cancelled, bail before
-	// taking reloadMu or invoking configCallback. Honors the
-	// "admission-only" contract documented above. lc.DoneCh() is NOT
-	// checked here on purpose — the post-callback canDispatchReload below
-	// handles the runner-stopped case, and existing behavior is to still
-	// surface a callback failure as FSM=Error even on a not-yet-running
-	// runner.
+	// invoking configCallback. Honors the "admission-only" contract
+	// documented above.
 	select {
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
@@ -34,8 +32,14 @@ func (r *Runner) Reload(ctx context.Context) {
 	default:
 	}
 
-	r.reloadMu.Lock()
-	defer r.reloadMu.Unlock()
+	if err := r.fsm.TransitionIfCurrentState(
+		finitestate.StatusRunning,
+		finitestate.StatusReloading,
+	); err != nil {
+		logger.Debug("Skipping reload - not in Running",
+			"current", r.fsm.GetState(), "error", err)
+		return
+	}
 
 	newCfg, err := r.configCallback()
 	if err != nil {
@@ -50,10 +54,18 @@ func (r *Runner) Reload(ctx context.Context) {
 	}
 	if old := r.getConfig(); old != nil && newCfg.Equal(old) {
 		logger.Debug("Config unchanged, skipping reload")
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition from Reloading to Running", "error", err)
+			r.setStateError()
+		}
 		return
 	}
 
 	if !r.canDispatchReload(ctx, logger) {
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition from Reloading to Running", "error", err)
+			r.setStateError()
+		}
 		return
 	}
 
@@ -61,18 +73,23 @@ func (r *Runner) Reload(ctx context.Context) {
 	select {
 	case r.reloadCh <- req:
 		// Accepted. Wait for Run to finish the restart (or for the runner to
-		// stop, in which case drainReloadCh closes req.done). Caller's ctx is
-		// intentionally ignored here: returning while Run is still restarting
-		// would let the caller observe FSM=Reloading after Reload returned.
-		select {
-		case <-req.done:
-		case <-r.lc.DoneCh():
-			logger.Debug("Runner stopped during reload")
-		}
+		// stop, in which case drainReloadCh closes req.done). Caller's ctx
+		// is intentionally ignored here: returning while Run is still
+		// restarting would let the caller observe FSM=Reloading after Reload
+		// returned.
+		<-req.done
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition from Reloading to Running", "error", err)
+			r.setStateError()
+		}
 	case <-r.lc.DoneCh():
 		logger.Debug("Runner stopped before reload dispatch")
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition from Reloading to Running", "error", err)
+			r.setStateError()
+		}
 	}
 }
 

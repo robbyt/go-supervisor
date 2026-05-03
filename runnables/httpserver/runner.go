@@ -53,7 +53,6 @@ type Runner struct {
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
 
-	reloadMu sync.Mutex
 	reloadCh chan *reloadReq
 
 	server          HttpServer
@@ -183,9 +182,7 @@ func (r *Runner) Run(ctx context.Context) error {
 // waitForEvent blocks until context cancellation, stop signal, or a server
 // error. Reload requests are processed inline so executeReload runs with
 // ctx (= Run's runCtx), giving the new server's BaseContext a lifetime tied
-// to the runner rather than the caller of Reload(). This loop owns the
-// Running ↔ Reloading FSM transitions for accepted reloads; Reload itself
-// only handles config-load errors before dispatch.
+// to the runner rather than the caller of Reload().
 func (r *Runner) waitForEvent(ctx context.Context) error {
 	for {
 		select {
@@ -204,21 +201,11 @@ func (r *Runner) waitForEvent(ctx context.Context) error {
 	}
 }
 
-// handleReload runs an accepted reload request. It owns the FSM transitions
-// (Running → Reloading → Running/Error) and always closes req.done so a
-// caller blocked in Reload unblocks regardless of outcome. Uses
-// TransitionIfCurrentState on success so a concurrent Stop that already
-// moved the FSM out of Reloading is not clobbered.
+// handleReload runs an accepted reload request. Reload has already moved the
+// FSM from Running to Reloading, so this only completes the restart and then
+// returns the FSM to Running (or Error on failure).
 func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
 	defer close(req.done)
-
-	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		// Common reason: we're no longer in Running (concurrent Stop).
-		// Skip the work and let the shutdown sequence own the terminal state.
-		r.logger.Debug("Skipping reload — not in Running",
-			"current", r.fsm.GetState(), "error", err)
-		return
-	}
 
 	if err := r.executeReload(ctx, req.cfg); err != nil {
 		r.logger.Error("Reload failed", "error", err)
@@ -226,11 +213,9 @@ func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
 		return
 	}
 
-	if err := r.fsm.TransitionIfCurrentState(
-		finitestate.StatusReloading, finitestate.StatusRunning,
-	); err != nil {
-		r.logger.Debug("FSM moved out of Reloading concurrently",
-			"current", r.fsm.GetState(), "error", err)
+	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+		r.logger.Error("Failed to transition from Reloading to Running", "error", err)
+		r.setStateError()
 	}
 }
 

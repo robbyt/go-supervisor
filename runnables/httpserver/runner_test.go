@@ -424,7 +424,7 @@ func TestServerReadinessProbeReturnsServerError(t *testing.T) {
 	require.ErrorIs(t, err, assert.AnError)
 }
 
-func TestHandleReloadSkipsWhenReloadingTransitionFails(t *testing.T) {
+func TestReloadSkipsWhenAdmissionFails(t *testing.T) {
 	t.Parallel()
 
 	cfg := createReloadTestConfig(t, ":0", "/", time.Second)
@@ -432,18 +432,15 @@ func TestHandleReloadSkipsWhenReloadingTransitionFails(t *testing.T) {
 	require.NoError(t, err)
 
 	stateMachine := NewMockStateMachine()
-	stateMachine.On("Transition", finitestate.StatusReloading).Return(assert.AnError).Once()
+	stateMachine.On("TransitionIfCurrentState",
+		finitestate.StatusRunning,
+		finitestate.StatusReloading,
+	).Return(assert.AnError).Once()
 	stateMachine.On("GetState").Return(finitestate.StatusStopped).Once()
 	server.fsm = stateMachine
 
-	req := &reloadReq{cfg: cfg, done: make(chan struct{})}
-	server.handleReload(t.Context(), req)
+	server.Reload(t.Context())
 
-	select {
-	case <-req.done:
-	default:
-		t.Fatal("handleReload should close req.done when it skips the reload")
-	}
 	stateMachine.AssertExpectations(t)
 }
 
@@ -455,7 +452,6 @@ func TestHandleReloadSetsErrorWhenExecuteReloadFails(t *testing.T) {
 	require.NoError(t, err)
 
 	stateMachine := NewMockStateMachine()
-	stateMachine.On("Transition", finitestate.StatusReloading).Return(nil).Once()
 	stateMachine.On("TransitionBool", finitestate.StatusError).Return(true).Once()
 	server.fsm = stateMachine
 
@@ -468,6 +464,45 @@ func TestHandleReloadSetsErrorWhenExecuteReloadFails(t *testing.T) {
 	default:
 		t.Fatal("handleReload should close req.done when executeReload fails")
 	}
+	stateMachine.AssertExpectations(t)
+	assert.Same(t, updatedCfg, server.getConfig())
+}
+
+func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(initialCfg))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, server.stopServer(t.Context()))
+	})
+
+	oldServer := &MockHttpServer{}
+	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
+	server.server = oldServer
+
+	stateMachine := NewMockStateMachine()
+	stateMachine.On("Transition", finitestate.StatusRunning).Return(assert.AnError).Once()
+	stateMachine.On("TransitionBool", finitestate.StatusError).Return(true).Once()
+	server.fsm = stateMachine
+
+	updatedCfg := createReloadTestConfig(
+		t,
+		fmt.Sprintf(":%d", networking.GetRandomPort(t)),
+		"/",
+		2*time.Second,
+	)
+	req := &reloadReq{cfg: updatedCfg, done: make(chan struct{})}
+	server.handleReload(t.Context(), req)
+
+	select {
+	case <-req.done:
+	default:
+		t.Fatal("handleReload should close req.done when final state transition fails")
+	}
+
+	oldServer.AssertExpectations(t)
 	stateMachine.AssertExpectations(t)
 	assert.Same(t, updatedCfg, server.getConfig())
 }
