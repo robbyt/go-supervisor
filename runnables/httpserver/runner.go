@@ -37,7 +37,7 @@ type fsm interface {
 	GetState() string
 	GetStateChan(ctx context.Context) <-chan string
 	Transition(state string) error
-	TransitionIfCurrentState(state string, targetState string) error
+	TransitionIfCurrentState(state, targetState string) error
 	SetState(state string) error
 	TransitionBool(state string) bool
 }
