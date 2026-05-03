@@ -73,7 +73,7 @@ func TestReloadContextTreeIsRunCtx(t *testing.T) {
 		require.NoError(t, <-errChan)
 	})
 
-	assert.Eventually(t, func() bool {
+	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusRunning
 	}, 2*time.Second, 10*time.Millisecond)
 
@@ -174,7 +174,7 @@ func TestContextValuePropagation(t *testing.T) {
 	}()
 
 	// Wait for the server to start
-	assert.Eventually(t, func() bool {
+	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusRunning
 	}, 2*time.Second, 10*time.Millisecond, "Server should reach Running state")
 

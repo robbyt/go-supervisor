@@ -18,10 +18,24 @@ import (
 // complete (or for the runner to stop) so the caller never observes the FSM
 // in Reloading after Reload returns.
 func (r *Runner) Reload(ctx context.Context) {
+	logger := r.logger.WithGroup("Reload")
+
+	// Fast-path: if the caller's ctx is already cancelled, bail before
+	// taking reloadMu or invoking configCallback. Honors the
+	// "admission-only" contract documented above. lc.DoneCh() is NOT
+	// checked here on purpose — the post-callback canDispatchReload below
+	// handles the runner-stopped case, and existing behavior is to still
+	// surface a callback failure as FSM=Error even on a not-yet-running
+	// runner.
+	select {
+	case <-ctx.Done():
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		return
+	default:
+	}
+
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
-
-	logger := r.logger.WithGroup("Reload")
 
 	newCfg, err := r.configCallback()
 	if err != nil {
