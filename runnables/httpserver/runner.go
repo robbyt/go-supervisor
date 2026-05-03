@@ -37,6 +37,7 @@ type fsm interface {
 	GetState() string
 	GetStateChan(ctx context.Context) <-chan string
 	Transition(state string) error
+	TransitionIfCurrentState(state string, targetState string) error
 	SetState(state string) error
 	TransitionBool(state string) bool
 }
@@ -52,12 +53,25 @@ type Runner struct {
 	config         atomic.Pointer[Config]
 	configCallback ConfigCallback
 
+	reloadMu sync.Mutex
+	reloadCh chan *reloadReq
+
 	server          HttpServer
 	serverCloseOnce sync.Once
 	serverMutex     sync.RWMutex
 	serverErrors    chan error
 
 	logger *slog.Logger
+}
+
+// reloadReq carries an accepted reload from Reload(ctx) into Run's event loop
+// so executeReload runs with runCtx (matching the runner's lifetime) rather
+// than the caller's ctx. done is closed by Run after executeReload finishes
+// (success or failure) — including from drainReloadCh on Run exit, so a caller
+// blocked on done always unblocks.
+type reloadReq struct {
+	cfg  *Config
+	done chan struct{}
 }
 
 // NewRunner creates a new HTTP server runner instance with the provided options.
@@ -71,6 +85,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 		config:          atomic.Pointer[Config]{},
 		serverCloseOnce: sync.Once{},
 		serverErrors:    make(chan error, 1),
+		reloadCh:        make(chan *reloadReq, 1),
 		logger:          logger,
 	}
 
@@ -122,6 +137,11 @@ func (r *Runner) String() string {
 // Run starts the HTTP server and handles its lifecycle. It transitions through
 // FSM states and returns when the server is stopped or encounters an error.
 func (r *Runner) Run(ctx context.Context) error {
+	// Defer order matters: drainReloadCh runs LAST so it catches any reload
+	// request that arrived after lc.done() closed DoneCh but before this
+	// function returned. lc.done() runs before drainReloadCh so DoneCh-based
+	// callers see the runner as stopped while we drain stragglers.
+	defer r.drainReloadCh()
 	done := r.lc.Started()
 	defer done()
 
@@ -150,18 +170,84 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	select {
-	case <-runCtx.Done():
-		r.logger.Debug("Context canceled")
-	case <-r.lc.StopCh():
-		r.logger.Debug("Stop() called")
-		runCancel()
-	case err := <-r.serverErrors:
-		r.setStateError()
-		return fmt.Errorf("%w: %w", ErrHttpServer, err)
+	if err := r.waitForEvent(runCtx); err != nil {
+		return err
 	}
+	runCancel()
+
+	r.drainReloadCh()
 
 	return r.shutdown(runCtx)
+}
+
+// waitForEvent blocks until context cancellation, stop signal, or a server
+// error. Reload requests are processed inline so executeReload runs with
+// ctx (= Run's runCtx), giving the new server's BaseContext a lifetime tied
+// to the runner rather than the caller of Reload(). This loop owns the
+// Running ↔ Reloading FSM transitions for accepted reloads; Reload itself
+// only handles config-load errors before dispatch.
+func (r *Runner) waitForEvent(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			r.logger.Debug("Local context canceled")
+			return nil
+		case <-r.lc.StopCh():
+			r.logger.Debug("Stop() called")
+			return nil
+		case err := <-r.serverErrors:
+			r.setStateError()
+			return fmt.Errorf("%w: %w", ErrHttpServer, err)
+		case req := <-r.reloadCh:
+			r.handleReload(ctx, req)
+		}
+	}
+}
+
+// handleReload runs an accepted reload request. It owns the FSM transitions
+// (Running → Reloading → Running/Error) and always closes req.done so a
+// caller blocked in Reload unblocks regardless of outcome. Uses
+// TransitionIfCurrentState on success so a concurrent Stop that already
+// moved the FSM out of Reloading is not clobbered.
+func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
+	defer close(req.done)
+
+	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
+		// Common reason: we're no longer in Running (concurrent Stop).
+		// Skip the work and let the shutdown sequence own the terminal state.
+		r.logger.Debug("Skipping reload — not in Running",
+			"current", r.fsm.GetState(), "error", err)
+		return
+	}
+
+	if err := r.executeReload(ctx, req.cfg); err != nil {
+		r.logger.Error("Reload failed", "error", err)
+		r.setStateError()
+		return
+	}
+
+	if err := r.fsm.TransitionIfCurrentState(
+		finitestate.StatusReloading, finitestate.StatusRunning,
+	); err != nil {
+		r.logger.Debug("FSM moved out of Reloading concurrently",
+			"current", r.fsm.GetState(), "error", err)
+	}
+}
+
+// drainReloadCh closes req.done for any reload request still buffered in
+// reloadCh after Run's select loop exits. Without this, a Reload caller
+// blocked on req.done would only unblock via lc.DoneCh() in its outer
+// select — closing done makes the protocol explicit and unblocks the
+// caller's done-only branch deterministically.
+func (r *Runner) drainReloadCh() {
+	for {
+		select {
+		case req := <-r.reloadCh:
+			close(req.done)
+		default:
+			return
+		}
+	}
 }
 
 // Stop signals the HTTP server to shut down and blocks until Run() completes.

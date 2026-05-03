@@ -4,84 +4,77 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/robbyt/go-supervisor/internal/finitestate"
 )
 
-// reloadConfig reloads the configuration using the config callback
-func (r *Runner) reloadConfig() error {
-	newConfig, err := r.configCallback()
+// Reload refreshes the server configuration and restarts the HTTP server if
+// the config changed. The replacement server boots inside Run's event loop so
+// its BaseContext (used for per-request contexts) is tied to runCtx rather
+// than the caller's ctx — without this, cancelling ctx after Reload returned
+// would cancel in-flight requests on the new server.
+//
+// The caller's ctx is admission-only: it cancels the request before it has
+// been accepted by Run's loop. Once accepted, Reload waits for the restart to
+// complete (or for the runner to stop) so the caller never observes the FSM
+// in Reloading after Reload returns.
+func (r *Runner) Reload(ctx context.Context) {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+
+	logger := r.logger.WithGroup("Reload")
+
+	newCfg, err := r.configCallback()
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrConfigCallback, err)
+		logger.Error("config callback failed", "error", err)
+		r.setStateError()
+		return
+	}
+	if newCfg == nil {
+		logger.Error("config callback returned nil")
+		r.setStateError()
+		return
+	}
+	if old := r.getConfig(); old != nil && newCfg.Equal(old) {
+		logger.Debug("Config unchanged, skipping reload")
+		return
 	}
 
-	if newConfig == nil {
-		return ErrConfigCallbackNil
+	req := &reloadReq{cfg: newCfg, done: make(chan struct{})}
+	select {
+	case r.reloadCh <- req:
+		// Accepted. Wait for Run to finish the restart (or for the runner to
+		// stop, in which case drainReloadCh closes req.done). Caller's ctx is
+		// intentionally ignored here: returning while Run is still restarting
+		// would let the caller observe FSM=Reloading after Reload returned.
+		select {
+		case <-req.done:
+		case <-r.lc.DoneCh():
+			logger.Debug("Runner stopped during reload")
+		}
+	case <-ctx.Done():
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+	case <-r.lc.DoneCh():
+		logger.Debug("Runner stopped before reload dispatch")
 	}
-
-	oldConfig := r.getConfig()
-	if oldConfig == nil {
-		r.setConfig(newConfig)
-		r.logger.Debug("Config loaded", "newConfig", newConfig)
-		return nil
-	}
-
-	if newConfig.Equal(oldConfig) {
-		// Config unchanged, skip reload and return early
-		return ErrOldConfig
-	}
-
-	r.setConfig(newConfig)
-	r.logger.Debug("Config reloaded", "newConfig", newConfig)
-	return nil
 }
 
-// Reload refreshes the server configuration and restarts the HTTP server if necessary.
-// This method is safe to call while the server is running and will handle graceful shutdown and restart.
-func (r *Runner) Reload(ctx context.Context) {
-	r.logger.Debug("Reloading...")
+// executeReload performs the actual restart sequence with ctx (= Run's runCtx).
+// Called only from Run's event loop via handleReload.
+func (r *Runner) executeReload(ctx context.Context, newCfg *Config) error {
+	logger := r.logger.WithGroup("executeReload")
+	logger.Debug("Reloading server with new config")
+	defer logger.Debug("Completed.")
+
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	if err := r.fsm.Transition(finitestate.StatusReloading); err != nil {
-		r.logger.Error("Failed to transition to Reloading", "error", err)
-		return
+	if err := r.stopServer(ctx); err != nil && !errors.Is(err, ErrServerNotRunning) {
+		return fmt.Errorf("failed to stop server during reload: %w", err)
 	}
 
-	err := r.reloadConfig()
-	switch {
-	case err == nil:
-		r.logger.Debug("Config reloaded")
-	case errors.Is(err, ErrOldConfig):
-		r.logger.Debug("Config unchanged, skipping reload")
-		if stateErr := r.fsm.Transition(finitestate.StatusRunning); stateErr != nil {
-			r.logger.Error("Failed to transition to Running", "error", stateErr)
-			r.setStateError()
-		}
-		return
-	default:
-		r.logger.Error("Failed to reload configuration", "error", err)
-		r.setStateError()
-		return
-	}
-
-	if err := r.stopServer(ctx); err != nil {
-		r.logger.Error("Failed to stop server during reload", "error", err)
-		r.setStateError()
-		return
-	}
+	r.setConfig(newCfg)
 
 	if err := r.boot(ctx); err != nil {
-		r.logger.Error("Failed to boot server during reload", "error", err)
-		r.setStateError()
-		return
+		return fmt.Errorf("failed to boot server during reload: %w", err)
 	}
-
-	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-		r.logger.Error("Failed to transition to Running", "error", err)
-		r.setStateError()
-		return
-	}
-
-	r.logger.Debug("Completed.")
+	return nil
 }
