@@ -241,7 +241,9 @@ func (r *Runner) shutdown(ctx context.Context) error {
 	// Empty map means all servers should be removed
 	desiredEntries := newEntries(stopConfigs)
 	pendingEntries := r.currentEntries.buildPendingEntries(desiredEntries)
-	updatedEntries := r.executeActions(ctx, pendingEntries)
+	// Shutdown ignores the start-failure flag: nothing to start during shutdown,
+	// and the cluster is already moving to Stopped.
+	updatedEntries, _ := r.executeActions(ctx, pendingEntries)
 	r.currentEntries = updatedEntries.commit()
 
 	if err := r.fsm.Transition(finitestate.StatusStopped); err != nil {
@@ -284,10 +286,18 @@ func (r *Runner) processConfigUpdate(
 		"toStop", len(toStop))
 
 	// Phase 2: Execute all pending actions
-	updatedEntries := r.executeActions(ctx, pendingEntries)
+	updatedEntries, hadFailure := r.executeActions(ctx, pendingEntries)
 
 	// Commit: Finalize the entries state
 	r.currentEntries = updatedEntries.commit()
+
+	// If any server failed to start, mark the cluster degraded so consumers
+	// watching GetStateChan see the failure. Don't fall through to a back-to-
+	// Running transition; that's the historical silent-success path.
+	if hadFailure {
+		r.setStateError()
+		return fmt.Errorf("one or more servers failed to start during config update")
+	}
 
 	// Transition back to running state using conditional transition
 	if err := r.fsm.TransitionIfCurrentState(finitestate.StatusReloading, finitestate.StatusRunning); err != nil {
@@ -299,7 +309,9 @@ func (r *Runner) processConfigUpdate(
 }
 
 // executeActions orchestrates server lifecycle changes by stopping and starting servers.
-func (r *Runner) executeActions(ctx context.Context, pending entriesManager) entriesManager {
+// The bool return is true if any server failed to start; callers use it to decide
+// whether to surface the failure (e.g., transition the cluster FSM to Error).
+func (r *Runner) executeActions(ctx context.Context, pending entriesManager) (entriesManager, bool) {
 	logger := r.logger.WithGroup("executeActions")
 	current := pending
 	toStart, toStop := pending.getPendingActions()
@@ -315,7 +327,7 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 			select {
 			case <-ctx.Done():
 				logger.Debug("Context cancelled during port release wait")
-				return current
+				return current, false
 			case <-time.After(r.restartDelay):
 				// Continue after delay
 			}
@@ -323,11 +335,12 @@ func (r *Runner) executeActions(ctx context.Context, pending entriesManager) ent
 	}
 
 	// Phase 2: Start servers that need to be started
+	var startFailed bool
 	if len(toStart) > 0 {
-		current = r.startServers(ctx, current, toStart)
+		current, startFailed = r.startServers(ctx, current, toStart)
 	}
 
-	return current
+	return current, startFailed
 }
 
 // stopServers handles stopping servers and clearing their runtime state.
@@ -377,14 +390,17 @@ func (r *Runner) stopServers(
 }
 
 // startServers handles starting new servers and waiting for them to be ready.
+// The bool return is true if any server failed to be created or to reach Running
+// within the deadline. Failed entries are removed from the returned collection.
 func (r *Runner) startServers(
 	ctx context.Context,
 	current entriesManager,
 	toStart []string,
-) entriesManager {
+) (entriesManager, bool) {
 	logger := r.logger.WithGroup("startServers")
 	logger.Debug("Processing server starts", "count", len(toStart))
 
+	var hadFailure bool
 	for _, id := range toStart {
 		entry := current.get(id)
 		logger := logger.With("id", id)
@@ -400,6 +416,7 @@ func (r *Runner) startServers(
 		runner, serverCtx, serverCancel, err := r.createAndStartServer(ctx, entry)
 		if err != nil {
 			logger.Error("Failed to create server", "error", err)
+			hadFailure = true
 			// Remove entry since server failed to create
 			current = current.removeEntry(id)
 			continue
@@ -412,12 +429,24 @@ func (r *Runner) startServers(
 
 		// Wait for server to be ready
 		if !r.waitForIsRunning(ctx, r.deadlineServerStart, runner) {
+			// Distinguish parent-ctx cancellation (the cluster is being told
+			// to stop — not a server failure) from a real readiness failure
+			// (timeout elapsed or server reached Error/Stopped). Only the
+			// latter should trip the cluster into StatusError.
+			if ctx.Err() != nil {
+				logger.Debug("Server start aborted by context cancellation")
+				serverCancel()
+				runner.Stop()
+				current = current.removeEntry(id)
+				continue
+			}
 			logger.Error("Server failed to become ready",
 				"timeout", r.deadlineServerStart,
 				"state", runner.GetState())
 			// Cancel the server context to clean up
 			serverCancel()
 			runner.Stop()
+			hadFailure = true
 			// Remove entry since server failed to start
 			current = current.removeEntry(id)
 			continue
@@ -426,7 +455,7 @@ func (r *Runner) startServers(
 		logger.Debug("Server instance started")
 	}
 
-	return current
+	return current, hadFailure
 }
 
 // createAndStartServer creates a new HTTP server runner and starts it in a goroutine.
@@ -445,17 +474,39 @@ func (r *Runner) createAndStartServer(
 	}
 
 	// Start that Runnable implementation in a goroutine
-	go func(id string, runner httpServerRunner, c context.Context) {
+	go func(id string, runner httpServerRunner, c context.Context, cancel context.CancelFunc) {
+		// Always release this server's ctx when the goroutine exits — the
+		// crash path didn't otherwise call cancel(), so per-server ctx
+		// resources would have stayed referenced until the cluster runCtx
+		// was cancelled (process-lifetime). Idempotent if a stop path
+		// already cancelled.
+		defer cancel()
 		logger := r.logger.WithGroup("cluster").With("id", id)
 		logger.Debug("Starting server instance")
-		if err := runner.Run(c); err != nil {
-			if c.Err() == nil {
-				// Context not cancelled, this is an actual error
-				logger.Error("Server instance failed", "error", err)
-			}
+		err := runner.Run(c)
+		if err != nil && c.Err() == nil {
+			// Context not cancelled, this is an actual error: mark the
+			// cluster degraded so consumers watching GetStateChan see it,
+			// and drop the dead entry from currentEntries.
+			logger.Error("Server instance failed", "error", err)
+			r.setStateError()
+			r.removeEntryIfMatches(id, runner)
 		}
 		logger.Debug("Instance stopped")
-	}(entry.id, runner, serverCtx)
+	}(entry.id, runner, serverCtx, serverCancel)
 
 	return runner, serverCtx, serverCancel, nil
+}
+
+// removeEntryIfMatches drops the entry stored under id only if it still points
+// at the given runner. Called from the per-server crash handler to avoid
+// racing a concurrent restart that has already committed a different runner
+// under the same id — without this guard, an old goroutine's late error path
+// would delete the new healthy server from currentEntries.
+func (r *Runner) removeEntryIfMatches(id string, runner httpServerRunner) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur := r.currentEntries.get(id); cur != nil && cur.runner == runner {
+		r.currentEntries = r.currentEntries.removeEntry(id)
+	}
 }
