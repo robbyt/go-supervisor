@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
 // Reload refreshes the server configuration and restarts the HTTP server if
@@ -38,14 +39,8 @@ func (r *Runner) Reload(ctx context.Context) {
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+	if !r.canDispatchReload(ctx, logger) {
 		return
-	case <-r.lc.DoneCh():
-		logger.Debug("Runner stopped before reload dispatch")
-		return
-	default:
 	}
 
 	req := &reloadReq{cfg: newCfg, done: make(chan struct{})}
@@ -67,24 +62,41 @@ func (r *Runner) Reload(ctx context.Context) {
 	}
 }
 
+func (r *Runner) canDispatchReload(ctx context.Context, logger *slog.Logger) bool {
+	select {
+	case <-ctx.Done():
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		return false
+	case <-r.lc.DoneCh():
+		logger.Debug("Runner stopped before reload dispatch")
+		return false
+	default:
+		return true
+	}
+}
+
 // executeReload performs the actual restart sequence with ctx (= Run's runCtx).
 // Called only from Run's event loop via handleReload.
 func (r *Runner) executeReload(ctx context.Context, newCfg *Config) error {
 	logger := r.logger.WithGroup("executeReload")
 	logger.Debug("Reloading server with new config")
-	defer logger.Debug("Completed.")
 
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	if err := r.stopServer(ctx); err != nil && !errors.Is(err, ErrServerNotRunning) {
-		return fmt.Errorf("failed to stop server during reload: %w", err)
+		reloadErr := fmt.Errorf("failed to stop server during reload: %w", err)
+		logger.Debug("Reload failed", "error", reloadErr)
+		return reloadErr
 	}
 
 	r.setConfig(newCfg)
 
 	if err := r.boot(ctx); err != nil {
-		return fmt.Errorf("failed to boot server during reload: %w", err)
+		reloadErr := fmt.Errorf("failed to boot server during reload: %w", err)
+		logger.Debug("Reload failed", "error", reloadErr)
+		return reloadErr
 	}
+	logger.Debug("Reload completed")
 	return nil
 }

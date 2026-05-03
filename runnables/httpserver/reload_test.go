@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"testing"
 	"testing/synctest"
@@ -442,6 +444,39 @@ func TestExecuteReloadStopsExistingServerWithMock(t *testing.T) {
 	require.ErrorIs(t, err, ErrServerBoot)
 	oldServer.AssertExpectations(t)
 	assert.Same(t, updatedCfg, runner.getConfig())
+}
+
+func TestExecuteReloadLogsFailureInsteadOfCompletion(t *testing.T) {
+	t.Parallel()
+
+	var logBuffer bytes.Buffer
+	logHandler := slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	runner, err := NewRunner(
+		WithConfig(initialCfg),
+		WithLogHandler(logHandler),
+	)
+	require.NoError(t, err)
+
+	oldServer := &MockHttpServer{}
+	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
+	runner.server = oldServer
+
+	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
+	err = runner.executeReload(t.Context(), updatedCfg)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrServerBoot)
+	oldServer.AssertExpectations(t)
+
+	logs := logBuffer.String()
+	assert.NotContains(t, logs, `"msg":"Completed."`)
+	assert.Contains(t, logs, `"msg":"Reload failed"`)
+	assert.Contains(t,
+		logs, "failed to boot server during reload",
+		"failure log should include the returned error: %s", logs,
+	)
 }
 
 // TestReload tests the Reload method with various configurations
