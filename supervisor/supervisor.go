@@ -328,7 +328,7 @@ func (p *PIDZero) Shutdown() {
 
 			runnableStart := time.Now()
 			p.logger.Debug("Stopping", "runnable", r)
-			p.stopRunnableBounded(r, deadline, shutdownStart)
+			stopped := p.stopRunnableBounded(r, deadline, shutdownStart)
 
 			if stateable, ok := r.(Stateable); ok {
 				finalState := stateable.GetState()
@@ -336,8 +336,10 @@ func (p *PIDZero) Shutdown() {
 				p.logger.Debug("Post-shutdown state",
 					"runnable", r, "state", finalState)
 			}
-			p.logger.Debug("Runnable stopped",
-				"runnable", r, "duration", time.Since(runnableStart))
+			if stopped {
+				p.logger.Debug("Runnable stopped",
+					"runnable", r, "duration", time.Since(runnableStart))
+			}
 		}
 
 		p.logger.Debug("Waiting for runnables to complete...")
@@ -349,10 +351,9 @@ func (p *PIDZero) Shutdown() {
 }
 
 // stopRunnableBounded calls r.Stop() in a goroutine and waits up to the
-// remaining budget. If the deadline expires first, the goroutine is left
-// running (orphaned) and the function returns so shutdown can proceed. A
-// zero deadline means no deadline.
-func (p *PIDZero) stopRunnableBounded(r Runnable, deadline, shutdownStart time.Time) {
+// remaining budget. Returns true if Stop() completed before the deadline,
+// false if the goroutine was abandoned. A zero deadline means no deadline.
+func (p *PIDZero) stopRunnableBounded(r Runnable, deadline, shutdownStart time.Time) bool {
 	stopDone := make(chan struct{})
 	go func() {
 		r.Stop()
@@ -361,25 +362,27 @@ func (p *PIDZero) stopRunnableBounded(r Runnable, deadline, shutdownStart time.T
 
 	if deadline.IsZero() {
 		<-stopDone
-		return
+		return true
 	}
 
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		p.logger.Warn("Shutdown deadline already exceeded; abandoning Stop()",
 			"runnable", r, "elapsed", time.Since(shutdownStart))
-		return
+		return false
 	}
 
 	timer := time.NewTimer(remaining)
 	defer timer.Stop()
 	select {
 	case <-stopDone:
+		return true
 	case <-timer.C:
 		p.logger.Warn("Stop() exceeded shutdown deadline; abandoning goroutine",
 			"runnable", r,
 			"elapsed", time.Since(shutdownStart),
 			"timeout", p.shutdownTimeout)
+		return false
 	}
 }
 
