@@ -13,21 +13,23 @@ func (p *PIDZero) startShutdownManager() {
 	for _, r := range p.runnables {
 		if sdSender, ok := r.(ShutdownSender); ok {
 			shutdownWg.Add(1)
-			// Pass both Runnable 'r' and ShutdownSender 's' for clarity
 			go func(r Runnable, s ShutdownSender) {
 				defer shutdownWg.Done()
 				triggerChan := s.GetShutdownTrigger()
-				for {
-					select {
-					case <-p.ctx.Done():
-						return
-					case <-triggerChan:
-						p.logger.Info("Shutdown requested by runnable", "runnable", r)
-						p.Shutdown() // Trigger supervisor shutdown
-						return       // Exit this goroutine after triggering shutdown
-					}
+				select {
+				case <-p.ctx.Done():
+				case <-triggerChan:
+					p.logger.Info("Shutdown requested by runnable", "runnable", r)
+					// Dispatch via ctx cancellation; reap's existing
+					// <-p.ctx.Done() handler invokes Shutdown. The
+					// listener stays a notifier — it doesn't run
+					// Shutdown itself, which is what previously created
+					// a circular wait (listener inside Shutdown's
+					// p.wg.Wait while startShutdownManager waited on
+					// the listener via shutdownWg.Wait).
+					p.cancel()
 				}
-			}(r, sdSender) // Pass both variables
+			}(r, sdSender)
 		}
 	}
 
