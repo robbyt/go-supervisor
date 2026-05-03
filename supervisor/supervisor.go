@@ -230,12 +230,28 @@ func (p *PIDZero) Run() error {
 		if stateable, ok := r.(Stateable); ok {
 			err := p.blockUntilRunnableReady(stateable)
 			if err != nil {
+				// Ctx-cancellation is a clean shutdown trigger, not a
+				// runnable failure — match reap's nil return.
+				if p.ctx.Err() != nil {
+					p.logger.Debug("Context canceled while waiting for runnable", "runnable", r)
+					p.Shutdown()
+					return nil
+				}
 				p.logger.Error("Failed to start runnable", "runnable", r, "error", err)
 				p.Shutdown()
-				return err // exit Run loop
+				return err
 			}
 		} else {
 			p.logger.Debug("Runnable does not implement Stateable, continuing", "runnable", r)
+		}
+
+		// Honor cancellation between iterations so a mid-startup cancel
+		// (e.g. ShutdownSender firing, parent ctx) doesn't keep spawning
+		// later runnables against an already-cancelled ctx.
+		if p.ctx.Err() != nil {
+			p.logger.Debug("Context canceled during startup")
+			p.Shutdown()
+			return nil
 		}
 	}
 
@@ -274,8 +290,8 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 		case <-startupCtx.Done():
 			return fmt.Errorf("timeout waiting for runnable to start: %w", startupCtx.Err())
 		case <-p.ctx.Done():
-			logger.Debug("Context canceled, stopping runnables")
-			return nil
+			logger.Debug("Context canceled while waiting for runnable to start")
+			return p.ctx.Err()
 		case <-ticker.C:
 			// continue waiting, adding an exponential backoff
 			if r.IsRunning() {
