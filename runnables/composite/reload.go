@@ -2,7 +2,6 @@ package composite
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -14,17 +13,36 @@ type ReloadableWithConfig interface {
 	ReloadWithConfig(config any)
 }
 
-// Reload updates the configuration and handles runnables appropriately.
-// If membership changes (different set of runnables), all existing runnables are stopped
-// and the new set of runnables is started.
+// Reload updates the configuration and handles runnables appropriately. If
+// membership changes (different set of runnables), all existing runnables are
+// stopped and the new set is started.
 //
-// Concurrent callers are admitted via the FSM, not a mutex: the atomic
-// Running→Reloading transition is the single-flight gate. A second caller that
-// arrives while a reload is already in flight observes Reloading, fails the
-// transition, and returns without queueing — matching httpserver's pattern. If
-// every caller must produce an effect, callers should serialize themselves.
+// Concurrent callers are admitted via the FSM: the atomic Running→Reloading
+// transition is the single-flight gate. A second caller arriving while a
+// reload is already in flight observes Reloading, fails the transition, and
+// returns without queueing.
+//
+// Once admitted, the work is dispatched to Run's event loop, which owns the
+// FSM transition back to Running (or to Error on failure). This keeps Run as
+// the single FSM mutator during reload, eliminating the Run-vs-Reload race
+// where Run's shutdown sequence could otherwise observe FSM=Reloading. The
+// caller's ctx is admission-only: it cancels the request before it has been
+// accepted by Run's loop. Once accepted, Reload waits for the work to finish
+// — caller's ctx is intentionally ignored at that point so the caller never
+// observes FSM=Reloading after Reload returns.
 func (r *Runner[T]) Reload(ctx context.Context) {
 	logger := r.logger.WithGroup("Reload")
+
+	// Fast-path: if the caller's ctx is already cancelled, bail before
+	// touching the FSM or invoking configCallback. Without this, the select
+	// in dispatchReload can race ctx.Done() against the reloadCh send and
+	// dispatch a request the caller has already abandoned.
+	select {
+	case <-ctx.Done():
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		return
+	default:
+	}
 
 	if err := r.fsm.TransitionIfCurrentState(
 		finitestate.StatusRunning,
@@ -39,103 +57,57 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 		return
 	}
 
-	err := r.doReload(ctx)
-	switch {
-	case err == nil:
-		if transErr := r.fsm.Transition(finitestate.StatusRunning); transErr != nil {
-			logger.Error("Failed to transition to Running", "error", transErr)
-			r.setStateError()
-		}
-	case errors.Is(err, ErrReloadAborted):
-		// Normal control flow — caller cancelled or runner is shutting down.
-		logger.Debug("Reload aborted (not an error)", "reason", err)
-		// Atomic best-effort return to Running. If we're no longer in
-		// Reloading, Run has moved the FSM (Stopping/Stopped/Error) — that's
-		// fine, Run owns the state. If we're still in Reloading and the
-		// transition fails, that's an FSM-library-level inconsistency worth
-		// flagging as Error so it's visible.
+	// Best-effort FSM cleanup: covers the outer-abort cases (Run never picked
+	// up the request) where we hold Reloading but no apply ever ran. Run's
+	// handleReload owns the transition for any request it dispatched, so this
+	// is a no-op in the success path.
+	defer func() {
 		if transErr := r.fsm.TransitionIfCurrentState(
 			finitestate.StatusReloading, finitestate.StatusRunning,
 		); transErr != nil {
 			current := r.fsm.GetState()
 			if current == finitestate.StatusReloading {
-				logger.Error("FSM stuck in Reloading after abort",
-					"error", transErr)
+				logger.Error("FSM stuck in Reloading after dispatch", "error", transErr)
 				r.setStateError()
 			} else {
-				logger.Debug("FSM moved out of Reloading by Run during abort",
-					"current", current, "error", transErr)
+				logger.Debug("FSM moved out of Reloading during reload",
+					"current", current)
 			}
 		}
-	default:
-		logger.Error("Reload failed", "error", err)
-		r.setStateError()
-	}
-}
+	}()
 
-// doReload loads the new configuration and routes to the appropriate reload strategy.
-func (r *Runner[T]) doReload(ctx context.Context) error {
 	newConfig, err := r.configCallback()
 	if err != nil {
-		return fmt.Errorf("config callback: %w", err)
+		logger.Error("config callback failed", "error", err)
+		r.setStateError()
+		return
 	}
 	if newConfig == nil {
-		return errors.New("config callback returned nil")
+		logger.Error("config callback returned nil")
+		r.setStateError()
+		return
 	}
 
-	oldConfig := r.getConfig()
-	if oldConfig == nil {
-		r.logger.Warn("No current config during reload, treating as empty")
-		oldConfig = &Config[T]{}
-	}
-
-	if hasMembershipChanged(oldConfig, newConfig) {
-		return r.dispatchMembershipReload(ctx, newConfig)
-	}
-
-	r.reloadSkipRestart(ctx, newConfig)
-	return nil
+	r.dispatchReload(ctx, newConfig)
 }
 
-// dispatchMembershipReload sends a membership-change reload to Run's event loop
-// so new children boot into runCtx's cancellation tree. Aborts cleanly if the
-// runner has already exited or the caller's context is cancelled, so callers
-// never hang on a request that nobody will receive.
-func (r *Runner[T]) dispatchMembershipReload(ctx context.Context, newConfig *Config[T]) error {
-	cancel := make(chan struct{})
-	req := newReloadRequest(newConfig, cancel)
+// dispatchReload sends an accepted reload to Run's event loop and waits for
+// completion. Aborts cleanly if the runner has already exited or the caller's
+// ctx fires before Run picks the request up — once dispatched, the work runs
+// to completion and the caller waits unconditionally on done (mirrors
+// httpserver's pattern).
+func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
+	logger := r.logger.WithGroup("dispatchReload")
+	req := &reloadReq[T]{cfg: newConfig, done: make(chan struct{})}
 	select {
 	case r.reloadCh <- req:
-		select {
-		case err := <-req.done:
-			return err
-		case <-ctx.Done():
-			close(cancel)
-			// Recheck non-blocking: the consumer may have written req.done
-			// concurrently with ctx firing. If so, that result is the truth
-			// and we should return it instead of the cancellation error.
-			select {
-			case err := <-req.done:
-				return err
-			default:
-			}
-			return fmt.Errorf("%w: %w", ErrReloadAborted, ctx.Err())
-		case <-r.lc.DoneCh():
-			// Same-class race as the ctx.Done() branch above: if req.done
-			// became ready in the same select tick as DoneCh(), the consumer
-			// already wrote a real result — return that, don't claim the
-			// reload was aborted.
-			select {
-			case err := <-req.done:
-				return err
-			default:
-			}
-			return fmt.Errorf("%w: runner stopped while reload pending", ErrReloadAborted)
-		}
+		// Accepted. Wait for Run to finish (or for drainReloadCh to close
+		// done if Run exits before processing).
+		<-req.done
 	case <-ctx.Done():
-		return fmt.Errorf("%w: %w", ErrReloadAborted, ctx.Err())
+		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
 	case <-r.lc.DoneCh():
-		return fmt.Errorf("%w: runner stopped before reload", ErrReloadAborted)
+		logger.Debug("Runner stopped before reload dispatch")
 	}
 }
 
@@ -165,8 +137,12 @@ func (r *Runner[T]) reloadWithRestart(ctx context.Context, newConfig *Config[T])
 	return nil
 }
 
-// reloadSkipRestart handles the case where the membership of runnables has not changed.
-func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T]) {
+// reloadSkipRestart handles the case where the membership of runnables has not
+// changed. Called from Run's event loop (handleReload) so the inline child
+// reloads execute on Run's goroutine, single-threaded with Run's lifecycle
+// transitions. Returns nil today — the signature returns error so it can be
+// dispatched alongside reloadWithRestart through the same handleReload path.
+func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T]) error {
 	logger := r.logger.WithGroup("reloadSkipRestart")
 	logger.Debug("Reloading runnables without membership change")
 	defer logger.Debug("Completed.")
@@ -195,6 +171,7 @@ func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T])
 			logger.Warn("Child runnable does not implement Reloadable or ReloadableWithConfig")
 		}
 	}
+	return nil
 }
 
 // hasMembershipChanged checks if the set of runnables has changed between configurations
