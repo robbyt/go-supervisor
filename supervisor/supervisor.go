@@ -32,9 +32,11 @@ const (
 	DefaultStartupTimeout = 2 * time.Minute       // Default per-Runnable max timeout for startup
 	DefaultStartupInitial = 50 * time.Millisecond // Initial wait time for startup
 
-	// DefaultShutdownTimeout is the TOTAL timeout for waiting on all supervisor goroutines
-	// (including external runnables) to complete during shutdown, *after* Stop() has been called
-	// on all of the runnables.
+	// DefaultShutdownTimeout is the TOTAL wall-clock budget for graceful
+	// shutdown, shared between per-runnable Stop() calls and the final wait
+	// for goroutine completion. If a runnable's Stop() blocks past the
+	// remaining budget, its goroutine is abandoned (logged) and shutdown
+	// continues. A timeout of 0 disables the deadline.
 	DefaultShutdownTimeout = 2 * time.Minute
 )
 
@@ -122,9 +124,12 @@ func WithStartupInitial(initial time.Duration) Option {
 	}
 }
 
-// WithShutdownTimeout sets the timeout for graceful shutdown of all runnables.
-// If the timeout is reached before all runnables have completed their shutdown,
-// the supervisor will log a warning but continue with the shutdown process.
+// WithShutdownTimeout sets the TOTAL wall-clock timeout for graceful shutdown.
+// The budget bounds both per-runnable Stop() calls and the final wait for
+// goroutines to complete. If a runnable's Stop() blocks past the remaining
+// budget, its goroutine is abandoned (logged warning) and shutdown
+// continues to the next runnable. A timeout of 0 disables the deadline
+// (waits indefinitely).
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return func(p *PIDZero) {
 		if timeout > 0 {
@@ -283,74 +288,136 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 	}
 }
 
-// Shutdown stops all runnables in reverse initialization order and attempts
-// to wait for their goroutines to complete. Each runnable's Stop method will
-// always be called regardless of timeouts. However, if shutdownTimeout is
-// configured and exceeded, this function will return before all goroutines
-// complete, potentially causing unclean termination if the program exits
-// immediately afterward.
+// Shutdown stops all runnables in reverse initialization order and waits for
+// their goroutines to complete. The configured shutdown timeout is the TOTAL
+// wall-clock budget for the entire shutdown, shared between per-runnable
+// Stop() calls and the final wait for goroutines. If a runnable's Stop()
+// blocks past the remaining budget, its goroutine is abandoned (logged
+// warning) and shutdown continues. Abandoned runnable goroutines may keep
+// running after Shutdown returns and will be reaped when the process exits.
+// A timeout of 0 disables the deadline.
+//
+// The supervisor's context is cancelled before the Stop loop begins so that
+// runnables which watch their runCtx for cancellation can begin teardown
+// immediately, rather than waiting for the serial Stop() loop to reach them.
 func (p *PIDZero) Shutdown() {
 	p.shutdownOnce.Do(func() {
 		shutdownStart := time.Now()
 		p.logger.Info("Graceful shutdown has been initiated...")
 		signal.Stop(p.signalChan) // stop listening for new signals
 
-		// Stop each runnable in reverse order
+		// Cancel first so runnables watching runCtx can start teardown
+		// before potentially-blocking Stop() calls reach them.
+		p.cancel()
+
+		// Compute the wall-clock deadline for the entire shutdown. Zero
+		// means no deadline (wait indefinitely).
+		var deadline time.Time
+		if p.shutdownTimeout > 0 {
+			deadline = shutdownStart.Add(p.shutdownTimeout)
+		}
+
+		// Stop each runnable in reverse order. Each Stop() runs in its own
+		// goroutine so we can bound it by the remaining budget.
 		for i := len(p.runnables) - 1; i >= 0; i-- {
 			r := p.runnables[i]
 
-			// Log the state before stopping if available
 			if stateable, ok := r.(Stateable); ok {
-				currentState := stateable.GetState()
-				p.logger.Debug("Pre-shutdown state", "runnable", r, "state", currentState)
+				p.logger.Debug("Pre-shutdown state",
+					"runnable", r, "state", stateable.GetState())
 			}
 
 			runnableStart := time.Now()
 			p.logger.Debug("Stopping", "runnable", r)
-			r.Stop()
-			stopDuration := time.Since(runnableStart)
+			stopped := p.stopRunnableBounded(r, deadline, shutdownStart)
 
-			// Log the state after stopping if available
-			if stateable, ok := r.(Stateable); ok {
-				finalState := stateable.GetState()
-				p.stateMap.Store(r, finalState)
-				p.logger.Debug("Post-shutdown state", "runnable", r, "state", finalState)
+			if stopped {
+				if stateable, ok := r.(Stateable); ok {
+					finalState := stateable.GetState()
+					p.stateMap.Store(r, finalState)
+					p.logger.Debug("Post-shutdown state",
+						"runnable", r, "state", finalState)
+				}
+				p.logger.Debug("Runnable stopped",
+					"runnable", r, "duration", time.Since(runnableStart))
 			}
-
-			p.logger.Debug("Runnable stopped", "runnable", r, "duration", stopDuration)
 		}
 
 		p.logger.Debug("Waiting for runnables to complete...")
-		p.cancel() // cancel the context for any remaining goroutines
+		p.waitForGoroutines(deadline, shutdownStart)
 
-		// Set up a timeout for wait if configured
-		if p.shutdownTimeout > 0 {
-			// Create a channel to signal when wg.Wait() completes
-			done := make(chan struct{})
-			go func() {
-				p.wg.Wait()
-				close(done)
-			}()
-
-			// Wait for either completion or timeout
-			select {
-			case <-done:
-				p.logger.Debug("All goroutines completed")
-			case <-time.After(p.shutdownTimeout):
-				p.logger.Warn("Shutdown timeout exceeded waiting for goroutines",
-					"timeout", p.shutdownTimeout,
-					"elapsed", time.Since(shutdownStart))
-			}
-		} else {
-			// No timeout configured, wait indefinitely
-			p.wg.Wait()
-		}
-
-		close(p.errorChan) // close the error channel, since no runnables can send errors
-
-		totalShutdownTime := time.Since(shutdownStart)
-		p.logger.Debug("Shutdown complete", "duration", totalShutdownTime)
+		p.logger.Debug("Shutdown complete", "duration", time.Since(shutdownStart))
 	})
+}
+
+// stopRunnableBounded calls r.Stop() in a goroutine and waits up to the
+// remaining budget. Returns true if Stop() completed before the deadline,
+// false if the goroutine was abandoned. A zero deadline means no deadline.
+func (p *PIDZero) stopRunnableBounded(r Runnable, deadline, shutdownStart time.Time) bool {
+	stopDone := make(chan struct{})
+	go func() {
+		r.Stop()
+		close(stopDone)
+	}()
+
+	if deadline.IsZero() {
+		<-stopDone
+		return true
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		p.logger.Warn("Shutdown deadline already exceeded; abandoning Stop()",
+			"runnable", r, "elapsed", time.Since(shutdownStart))
+		return false
+	}
+
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-stopDone:
+		return true
+	case <-timer.C:
+		p.logger.Warn("Stop() exceeded shutdown deadline; abandoning goroutine",
+			"runnable", r,
+			"elapsed", time.Since(shutdownStart),
+			"timeout", p.shutdownTimeout)
+		return false
+	}
+}
+
+// waitForGoroutines waits for all runnable goroutines to complete, bounded
+// by the remaining budget. A zero deadline waits indefinitely.
+func (p *PIDZero) waitForGoroutines(deadline, shutdownStart time.Time) {
+	if deadline.IsZero() {
+		p.wg.Wait()
+		return
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		p.logger.Warn("Shutdown timeout exceeded; not waiting for goroutines",
+			"timeout", p.shutdownTimeout,
+			"elapsed", time.Since(shutdownStart))
+		return
+	}
+
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
+
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-done:
+		p.logger.Debug("All goroutines completed")
+	case <-timer.C:
+		p.logger.Warn("Shutdown timeout exceeded waiting for goroutines",
+			"timeout", p.shutdownTimeout,
+			"elapsed", time.Since(shutdownStart))
+	}
 }
 
 // SendSignal injects a signal into the supervisor's signal handling loop.
