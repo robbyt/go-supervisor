@@ -235,6 +235,10 @@ func (r *Runner) drainReloadCh() {
 	for {
 		select {
 		case req := <-r.reloadCh:
+			// Surface the abandonment via req.err so Reload's <-req.done
+			// branch returns a non-nil error per T3.1. Without this, an
+			// accepted-then-drained reload silently looks like success.
+			req.err = errors.New("runner stopped before reload was handled")
 			close(req.done)
 		default:
 			return

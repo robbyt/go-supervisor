@@ -101,8 +101,12 @@ func (p *PIDZero) reloadAllRunnables() int {
 				if !errors.Is(err, context.Canceled) {
 					p.logger.Error("Reload failed", "runnable", r, "error", err)
 				}
+			} else {
+				// Only count successful reloads so the
+				// "runnablesReloaded=N" log doesn't over-report when
+				// children fail.
+				reloads++
 			}
-			reloads++
 
 			if stateable, ok := r.(Stateable); ok {
 				postState := stateable.GetState()
