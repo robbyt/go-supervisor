@@ -122,19 +122,19 @@ func TestPIDZero_OptionEdgeCases(t *testing.T) {
 	mockRunnable.On("GetState").Return("running").Maybe()
 	mockRunnable.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
 
-	t.Run("zero timeout values are ignored", func(t *testing.T) {
+	t.Run("zero timeout values", func(t *testing.T) {
 		pid0, err := New(
 			WithRunnables(mockRunnable),
-			WithStartupTimeout(0),  // Should be ignored
-			WithStartupInitial(0),  // Should be ignored
-			WithShutdownTimeout(0), // 0 is valid for infinite wait
+			WithStartupTimeout(0),  // Ignored — startup needs a deadline
+			WithStartupInitial(0),  // Ignored — initial wait must be > 0
+			WithShutdownTimeout(0), // Accepted — disables the shutdown deadline
 		)
 		require.NoError(t, err)
 
-		// Should use default values when 0 is passed (ignored)
 		assert.Equal(t, DefaultStartupTimeout, pid0.startupTimeout)
 		assert.Equal(t, DefaultStartupInitial, pid0.startupInitial)
-		assert.Equal(t, DefaultShutdownTimeout, pid0.shutdownTimeout) // 0 is ignored, uses default
+		assert.Equal(t, time.Duration(0), pid0.shutdownTimeout,
+			"WithShutdownTimeout(0) should disable the deadline (Shutdown waits indefinitely)")
 	})
 
 	t.Run("nil context is ignored", func(t *testing.T) {

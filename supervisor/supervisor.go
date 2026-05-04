@@ -133,10 +133,11 @@ func WithStartupInitial(initial time.Duration) Option {
 // goroutines to complete. If a runnable's Stop() blocks past the remaining
 // budget, its goroutine is abandoned (logged warning) and shutdown
 // continues to the next runnable. A timeout of 0 disables the deadline
-// (waits indefinitely).
+// (waits indefinitely); negative values are ignored and leave the current
+// setting in place.
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return func(p *PIDZero) {
-		if timeout > 0 {
+		if timeout >= 0 {
 			p.shutdownTimeout = timeout
 		}
 	}

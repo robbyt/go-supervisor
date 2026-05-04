@@ -28,7 +28,8 @@ type Runnable interface {
 	// Run starts the service with the given context and returns an error if it fails.
 	// Run is a blocking call that runs the work unit until it is stopped.
 	// Cleanup errors that occur during shutdown should be returned from Run so
-	// the supervisor can surface them via its error channel.
+	// the supervisor's own Run() returns the error and the failure becomes
+	// observable to the supervisor's caller.
 	Run(ctx context.Context) error
 	// Stop signals the service to stop. Stop is a blocking call that returns
 	// once the service has finished its teardown. By contract Stop returns no
