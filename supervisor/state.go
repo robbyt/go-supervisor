@@ -51,8 +51,16 @@ func (p *PIDZero) GetStateMap() StateMap {
 
 	// Use the stateMap as the source of truth for consistent state reporting
 	p.stateMap.Range(func(key, value any) bool {
-		r := key.(Runnable)
-		state := value.(string)
+		r, ok := key.(Runnable)
+		if !ok {
+			p.logger.Warn("stateMap key is not a Runnable; skipping", "key", key)
+			return true
+		}
+		state, ok := value.(string)
+		if !ok {
+			p.logger.Warn("stateMap value is not a string; skipping", "runnable", r, "value", value)
+			return true
+		}
 		stateMap[r.String()] = state
 		return true
 	})
@@ -129,7 +137,11 @@ func (p *PIDZero) broadcastState() {
 	}
 
 	p.stateSubscribers.Range(func(key, value any) bool {
-		ch := key.(chan StateMap)
+		ch, ok := key.(chan StateMap)
+		if !ok {
+			p.logger.Warn("stateSubscribers key is not a chan StateMap; skipping", "key", key)
+			return true
+		}
 		select {
 		case ch <- stateMap:
 			p.logger.Debug("Sent state update to subscriber")
