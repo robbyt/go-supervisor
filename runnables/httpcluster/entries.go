@@ -78,6 +78,8 @@ func (e *entries) removeEntry(id string) entriesManager {
 
 // getPendingActions returns lists of server IDs grouped by their pending action.
 func (e *entries) getPendingActions() (toStart, toStop []string) {
+	toStart = make([]string, 0, len(e.servers))
+	toStop = make([]string, 0, len(e.servers))
 	for id, entry := range e.servers {
 		switch entry.action {
 		case actionStart:

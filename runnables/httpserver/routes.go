@@ -127,7 +127,7 @@ func (r Routes) String() string {
 		return "Routes<>"
 	}
 
-	var routes []string
+	routes := make([]string, 0, len(r))
 	for _, route := range r {
 		routes = append(routes, fmt.Sprintf("Name: %s, Path: %s", route.name, route.Path))
 	}
