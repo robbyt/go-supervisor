@@ -206,11 +206,28 @@ func (r *Runner) waitForEvent(ctx context.Context) error {
 
 // handleReload runs an accepted reload request. Reload has already moved the
 // FSM from Running to Reloading, so this only completes the restart and then
-// returns the FSM to Running (or Error on failure). Returns the reload
+// returns the FSM to Running (or Error on real failure). Returns the reload
 // outcome so the caller (Run's event loop) owns the channel-protocol step
-// (req.err = err; close(req.done)).
+// (req.result <- err).
+//
+// Cancellation (context.Canceled / DeadlineExceeded) is treated as control
+// flow, not failure: the runner is shutting down or the caller asked to
+// abort. We try to transition back to Running so Run's subsequent
+// Stopping/Stopped sequence stays valid; if that transition fails the
+// runner is already terminal and we accept whatever state it's in. The
+// cancellation error still propagates to the caller.
 func (r *Runner) handleReload(ctx context.Context, cfg *Config) error {
 	if err := r.executeReload(ctx, cfg); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Debug("Reload aborted by ctx cancellation", "error", err)
+			if transErr := r.fsm.TransitionIfCurrentState(
+				finitestate.StatusReloading, finitestate.StatusRunning,
+			); transErr != nil {
+				r.logger.Debug("Could not transition Reloading→Running after ctx-cancel",
+					"error", transErr)
+			}
+			return err
+		}
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
 		return err

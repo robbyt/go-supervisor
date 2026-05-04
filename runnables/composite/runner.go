@@ -198,11 +198,19 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 
 // handleReload runs an accepted reload inside Run's goroutine. Reload has
 // already moved the FSM Running→Reloading; this completes the work and
-// transitions the FSM back to Running (or sets Error on failure). The
-// membership-change vs in-place decision is made here, against the runner's
-// current config — keeping that decision on Run's side guarantees it sees a
-// consistent old/new pair. Returns the reload outcome so waitForEvent owns
-// the channel-protocol step (req.err = err; close(req.done)).
+// transitions the FSM back to Running (or sets Error on real failure).
+// The membership-change vs in-place decision is made here, against the
+// runner's current config — keeping that decision on Run's side guarantees
+// it sees a consistent old/new pair. Returns the reload outcome so
+// waitForEvent owns the channel-protocol step (req.result <- err).
+//
+// Cancellation (context.Canceled / DeadlineExceeded) is treated as control
+// flow, not failure: the runner is shutting down or the caller asked to
+// abort. We try to transition back to Running so Run's subsequent
+// Stopping/Stopped sequence stays valid (Reloading→Stopped is illegal per
+// the FSM table, but Running→Stopping→Stopped is legal); if that
+// transition fails the runner is already terminal and we accept whatever
+// state it's in. The cancellation error still propagates to the caller.
 func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
 	oldConfig := r.getConfig()
 	if oldConfig == nil {
@@ -218,6 +226,16 @@ func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
 	}
 
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Debug("Reload aborted by ctx cancellation", "error", err)
+			if transErr := r.fsm.TransitionIfCurrentState(
+				finitestate.StatusReloading, finitestate.StatusRunning,
+			); transErr != nil {
+				r.logger.Debug("Could not transition Reloading→Running after ctx-cancel",
+					"error", transErr)
+			}
+			return err
+		}
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
 		return err

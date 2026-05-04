@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -491,4 +492,46 @@ func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
 	oldServer.AssertExpectations(t)
 	stateMachine.AssertExpectations(t)
 	assert.Same(t, updatedCfg, server.getConfig())
+}
+
+// TestHandleReload_CtxCancelDoesNotForceError covers the Copilot review catch
+// on PR #111: if executeReload returns context.Canceled (because runCtx fired
+// during shutdown), handleReload must NOT push the FSM to Error. The
+// cancellation error still propagates via the return — that's control flow
+// — but the FSM should be Running so subsequent shutdown transitions stay
+// valid.
+func TestHandleReload_CtxCancelDoesNotForceError(t *testing.T) {
+	t.Parallel()
+
+	initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+	server, err := NewRunner(WithConfig(initialCfg))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		// Stop any goroutines boot may have started; the not-running
+		// error is the common case here (this test never starts the
+		// server fully) — only fail the test on something else.
+		if err := server.stopServer(context.Background()); err != nil &&
+			!errors.Is(err, ErrServerNotRunning) {
+			t.Errorf("cleanup stopServer: %v", err)
+		}
+	})
+
+	// Force FSM into Reloading directly so handleReload's contract
+	// matches the Reload admission gate's normal flow.
+	require.NoError(t, server.fsm.SetState(finitestate.StatusRunning))
+	require.NoError(t, server.fsm.Transition(finitestate.StatusReloading))
+
+	cancelledCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+	err = server.handleReload(cancelledCtx, updatedCfg)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled,
+		"ctx.Canceled must propagate to the caller")
+
+	require.NotEqual(t, finitestate.StatusError, server.GetState(),
+		"ctx-cancellation must NOT push FSM to Error")
+	require.Equal(t, finitestate.StatusRunning, server.GetState(),
+		"FSM should be back in Running so subsequent shutdown transitions stay valid")
 }

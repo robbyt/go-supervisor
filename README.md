@@ -120,8 +120,10 @@ type Runnable interface {
 
 // Reloadable represents a service that can be reloaded.
 // Reload blocks until the reload completes (or aborts via ctx). A non-nil
-// return reports failure; implementations should also transition the FSM
-// to Error so state-channel observers see the same outcome.
+// return reports failure. Implementations that ALSO implement Stateable
+// are encouraged to mirror failures via an FSM Error transition so
+// state-channel observers see the same outcome; plain Reloadable
+// implementations have no FSM and only need to return the error.
 type Reloadable interface {
     Reload(ctx context.Context) error
 }

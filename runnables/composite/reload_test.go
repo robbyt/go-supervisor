@@ -2179,3 +2179,42 @@ func TestComposite_Reload_ChildError_AggregatesAndTransitionsError(t *testing.T)
 	healthy.AssertExpectations(t)
 	failing.AssertExpectations(t)
 }
+
+// TestComposite_Reload_CtxCancelDoesNotForceError covers the Copilot review
+// catch on PR #111: a child Reload returning context.Canceled (because the
+// parent runCtx fired during shutdown) must not push the composite FSM to
+// Error. The cancellation error still propagates via the return — that's
+// control flow — but the FSM should be Running so Run's subsequent
+// Stopping/Stopped transitions remain valid.
+func TestComposite_Reload_CtxCancelDoesNotForceError(t *testing.T) {
+	t.Parallel()
+
+	child := mocks.NewMockRunnable()
+	child.On("String").Return("child").Maybe()
+	child.On("Run", mock.Anything).Return(nil).Maybe()
+	child.On("Stop").Return().Maybe()
+	child.On("Reload", mock.Anything).Return(context.Canceled).Once()
+
+	entries := []RunnableEntry[*mocks.Runnable]{{Runnable: child, Config: nil}}
+	cfg, err := NewConfig("ctx-cancel", entries)
+	require.NoError(t, err)
+
+	runner, err := NewRunner(func() (*Config[*mocks.Runnable], error) { return cfg, nil })
+	require.NoError(t, err)
+	// Force FSM into Reloading directly so handleReload can run without
+	// going through dispatch.
+	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+	require.NoError(t, runner.fsm.Transition(finitestate.StatusReloading))
+
+	err = runner.handleReload(t.Context(), cfg)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled,
+		"ctx.Canceled must propagate to the caller")
+
+	require.NotEqual(t, finitestate.StatusError, runner.fsm.GetState(),
+		"ctx-cancellation must NOT push FSM to Error")
+	require.Equal(t, finitestate.StatusRunning, runner.fsm.GetState(),
+		"FSM should be back in Running so subsequent shutdown transitions stay valid")
+
+	child.AssertExpectations(t)
+}
