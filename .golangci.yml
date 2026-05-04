@@ -22,6 +22,7 @@ linters:
     - misspell       # Detect misspelled English words
     - nilerr         # Detect returning nil after error checks
     - nolintlint     # Check for invalid/missing nolint directives
+    - prealloc       # Suggest preallocation of slices appended to in loops
     - reassign       # Prevent package variable reassignment
     - staticcheck    # Advanced static analysis
     - tagalign       # Check struct tag alignment
