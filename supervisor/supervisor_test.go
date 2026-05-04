@@ -1039,8 +1039,11 @@ func TestPIDZero_Run_SIGTERMDuringBoot(t *testing.T) {
 	execDone := startPIDZeroRun(t, pidZero)
 	eventuallyClosed(t, runStarted, "Run did not start in time")
 
-	// Inject SIGTERM while the startup loop is still polling IsRunning() —
-	// the signal queues in p.signalChan; nothing drains it yet.
+	// Inject SIGTERM while Run is still in its startup phase —
+	// blockUntilRunnableReady is either in its initial time.Sleep
+	// (p.startupInitial, default 50ms) or polling IsRunning() afterwards.
+	// Either way reap hasn't started, so the signal queues in p.signalChan
+	// and nothing drains it yet.
 	pidZero.SendSignal(syscall.SIGTERM)
 
 	// Release the startup gate so blockUntilRunnableReady returns and Run's
