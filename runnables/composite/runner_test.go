@@ -740,8 +740,12 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 		return runner.IsReady()
 	}, 1*time.Second, 5*time.Millisecond)
 
-	// Start reload in background (the mock's Reload .After() keeps the FSM in Reloading)
-	go func() { _ = runner.Reload(t.Context()) }() //nolint:errcheck // background test driver
+	// Start reload in background. The mock's Reload .After(50ms) keeps the
+	// FSM in Reloading long enough for the test to observe it. handleReload
+	// still completes before Run exits in response to Stop, so the Reload
+	// itself returns nil (req.err never gets set to the drained-on-shutdown
+	// sentinel).
+	go func() { assert.NoError(t, runner.Reload(t.Context())) }()
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
 	}, 1*time.Second, 1*time.Millisecond)

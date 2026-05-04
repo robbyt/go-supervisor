@@ -1583,7 +1583,10 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	reloadDone := make(chan struct{})
 	go func() {
 		defer close(reloadDone)
-		_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics, not return value
+		// FSM is Stopped → admission gate fails → Reload returns nil.
+		// assert (not require) — require.FailNow from a non-test goroutine
+		// is undefined behavior per testing docs.
+		assert.NoError(t, runner.Reload(t.Context()))
 	}()
 	select {
 	case <-reloadDone:
@@ -1654,7 +1657,10 @@ func TestCompositeRunner_ReloadWaitsThroughCallerCtxCancel(t *testing.T) {
 		reloadDone := make(chan struct{})
 		go func() {
 			defer close(reloadDone)
-			_ = runner.Reload(reloadCtx) //nolint:errcheck // test exercises ctx-cancellation, not return value
+			// Caller ctx is ignored once dispatched; Reload returns the
+			// work outcome (req.err), which is nil because the eventual
+			// membership-change reload succeeds.
+			assert.NoError(t, runner.Reload(reloadCtx))
 			reloadReturned.Store(true)
 		}()
 
@@ -2001,9 +2007,10 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	require.Eventually(t, runner.IsReady, 2*time.Second, 5*time.Millisecond)
 
 	// First reload: blocks inside child.Reload, parent FSM held in Reloading.
+	// Eventually completes successfully when releaseReload fires below.
 	var first sync.WaitGroup
 	first.Go(func() {
-		_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
+		assert.NoError(t, runner.Reload(t.Context()))
 	})
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
@@ -2108,7 +2115,10 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 		var wg sync.WaitGroup
 		for range 10 {
 			wg.Go(func() {
-				_ = runner.Reload(t.Context()) //nolint:errcheck // concurrent reload test; admission gate drops most callers
+				// Each Reload either dispatches successfully or bails at
+				// the FSM admission gate (which returns nil — not a
+				// failure of *this* reload).
+				assert.NoError(t, runner.Reload(t.Context()))
 			})
 		}
 		wg.Wait()

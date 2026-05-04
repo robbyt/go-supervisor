@@ -213,7 +213,10 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
+			// assert (not require) — require.FailNow from a non-test
+			// goroutine is undefined behavior per testing docs; assert
+			// just records the failure.
+			assert.NoError(t, runner.Reload(t.Context()))
 			close(reloadDone)
 		}()
 
@@ -272,7 +275,12 @@ func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
 
 	firstReloadDone := make(chan struct{})
 	go func() {
-		_ = runner.Reload(t.Context()) //nolint:errcheck // first-reload driver; caller blocks on channel
+		// lc.Started was never called, so canDispatchReload returns false
+		// after configCallback finally returns — the first reload ends in
+		// the runner-stopped abort path. This test cares about FSM
+		// admission serialization (the second Reload below), not whether
+		// the first one succeeds.
+		assert.Error(t, runner.Reload(t.Context()))
 		close(firstReloadDone)
 	}()
 
@@ -335,6 +343,42 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 	})
 }
 
+// TestReloadCanDispatchReturnsFalse_RunnerStopped covers the path where the
+// FSM admission gate succeeds (FSM=Running) but canDispatchReload returns
+// false because the runner has never been Started — lc.DoneCh returns the
+// always-closed sentinel. Reload's post-canDispatchReload select must fire
+// the lc.DoneCh case and surface the "runner stopped" error.
+func TestReloadCanDispatchReturnsFalse_RunnerStopped(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+		// FSM forced to Running so the admission gate succeeds. lc.Started
+		// never called, so lc.DoneCh() returns the pre-closed sentinel
+		// and canDispatchReload returns false.
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		useUpdated = true
+		err = runner.Reload(t.Context())
+		require.Error(t, err,
+			"canDispatchReload returns false → Reload returns 'runner stopped' error")
+		require.Contains(t, err.Error(), "runner stopped")
+		// FSM must be back in Running after the cleanup transition; not
+		// stuck in Reloading and not pushed to Error.
+		require.Equal(t, finitestate.StatusRunning, runner.GetState())
+	})
+}
+
 func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
 	t.Parallel()
 
@@ -394,7 +438,9 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 		ctx, cancel := context.WithCancel(t.Context())
 		reloadDone := make(chan struct{})
 		go func() {
-			_ = runner.Reload(ctx) //nolint:errcheck // test exercises ctx-cancellation path; assertions follow
+			// Reload returns ctx.Err() when caller ctx fires while parked
+			// on the reloadCh send. assert (not require) for goroutine-safety.
+			assert.ErrorIs(t, runner.Reload(ctx), context.Canceled)
 			close(reloadDone)
 		}()
 
@@ -495,7 +541,10 @@ func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
+			// drainReloadCh runs below and sets req.err = "runner stopped
+			// before reload was handled"; Reload surfaces that as a
+			// non-nil error.
+			assert.Error(t, runner.Reload(t.Context()))
 			close(reloadDone)
 		}()
 

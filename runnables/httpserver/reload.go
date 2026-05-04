@@ -65,13 +65,16 @@ func (r *Runner) Reload(ctx context.Context) error {
 	}
 
 	if !r.canDispatchReload(ctx, logger) {
-		dispatchErr := errors.New("reload aborted before dispatch")
+		// canDispatchReload returned false, so one of these channels is
+		// already closed (both are monotonic — once closed, stays closed).
+		// No default branch: the select fires immediately on whichever is
+		// ready, which gives us the specific abort reason.
+		var dispatchErr error
 		select {
 		case <-ctx.Done():
 			dispatchErr = ctx.Err()
 		case <-r.lc.DoneCh():
 			dispatchErr = errors.New("runner stopped before reload dispatch")
-		default:
 		}
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
