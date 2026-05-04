@@ -1,6 +1,7 @@
 package networking
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -87,4 +88,71 @@ func TestGetRandomPortFailsAfterLimit(t *testing.T) {
 	got := GetRandomPort(tb)
 	assert.Equal(t, 0, got)
 	assert.Contains(t, tb.message(), fmt.Sprintf("%d attempts", maxPortAttempts))
+}
+
+// withListenTCP swaps the package-level listenTCP for the duration of a test.
+// Not safe for parallel tests in this package.
+func withListenTCP(t *testing.T, fn func(network, address string) (net.Listener, error)) {
+	t.Helper()
+	original := listenTCP
+	listenTCP = fn
+	t.Cleanup(func() { listenTCP = original })
+}
+
+func TestGetRandomPortFailsOnListenError(t *testing.T) {
+	withListenTCP(t, func(network, address string) (net.Listener, error) {
+		return nil, errors.New("simulated listen failure")
+	})
+
+	tb := &fakeTB{}
+	got := GetRandomPort(tb)
+	assert.Equal(t, 0, got)
+	assert.Contains(t, tb.message(), "Failed to get random port")
+	assert.Contains(t, tb.message(), "simulated listen failure")
+}
+
+func TestGetRandomListeningPortRetriesOnRebindFailure(t *testing.T) {
+	calls := 0
+	var failedPort int
+
+	withListenTCP(t, func(network, address string) (net.Listener, error) {
+		calls++
+		// Calls alternate: GetRandomPort (":0") then re-bind on port (":N").
+		// Fail the first re-bind, succeed afterwards.
+		if address != ":0" && failedPort == 0 {
+			// Capture the port so we can check it gets released, then fail.
+			fmt.Sscanf(address, ":%d", &failedPort)
+			return nil, errors.New("simulated rebind failure")
+		}
+		return net.Listen(network, address)
+	})
+
+	addr := GetRandomListeningPort(t)
+	require.True(t, strings.HasPrefix(addr, "localhost:"))
+
+	// failedPort must NOT remain marked as used after a failed rebind, otherwise
+	// repeated failures would exhaust the pool.
+	require.NotZero(t, failedPort)
+	portMutex.Lock()
+	_, stillUsed := usedPorts[failedPort]
+	portMutex.Unlock()
+	assert.False(t, stillUsed, "port %d was burned in usedPorts after rebind failure", failedPort)
+}
+
+func TestGetRandomListeningPortFailsAfterLimit(t *testing.T) {
+	withListenTCP(t, func(network, address string) (net.Listener, error) {
+		// GetRandomPort uses ":0"; let it succeed so we exercise the
+		// re-bind branch and the lastErr propagation.
+		if address == ":0" {
+			return net.Listen(network, address)
+		}
+		return nil, errors.New("simulated rebind failure")
+	})
+
+	tb := &fakeTB{}
+	got := GetRandomListeningPort(tb)
+	assert.Equal(t, "", got)
+	msg := tb.message()
+	assert.Contains(t, msg, fmt.Sprintf("%d attempts", maxPortAttempts))
+	assert.Contains(t, msg, "simulated rebind failure")
 }
