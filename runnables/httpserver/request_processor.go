@@ -19,13 +19,12 @@ import (
 // HandlerFunc is the middleware/handler signature
 type HandlerFunc func(*RequestProcessor)
 
-// RequestProcessor carries the request/response and middleware chain
+// RequestProcessor carries the request/response and middleware chain.
+// All fields are unexported; access them via the Writer/Request methods
+// and mutate via SetWriter.
 type RequestProcessor struct {
-	// Public fields for direct access
-	writer  ResponseWriter
-	request *http.Request
-
-	// Private fields
+	writer   ResponseWriter
+	request  *http.Request
 	handlers []HandlerFunc
 	index    int
 }
