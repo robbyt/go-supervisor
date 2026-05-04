@@ -649,8 +649,9 @@ func TestRunnerExecuteActions(t *testing.T) {
 		mockEntries := &MockEntriesManager{}
 		mockEntries.On("getPendingActions").Return([]string{}, []string{})
 
-		result := runner.executeActions(t.Context(), mockEntries)
+		result, hadFailure := runner.executeActions(t.Context(), mockEntries)
 		assert.Equal(t, mockEntries, result)
+		assert.False(t, hadFailure)
 
 		mockEntries.AssertExpectations(t)
 	})
@@ -682,7 +683,10 @@ func TestRunnerExecuteActions(t *testing.T) {
 		// Mock removeEntry in case the server fails to start (can happen when no run context)
 		mockEntries.On("removeEntry", "start1").Return(mockEntries).Maybe()
 
-		result := runner.executeActions(t.Context(), mockEntries)
+		// hadFailure may be either true or false depending on scheduling under
+		// the missing run-context path; this test only asserts that the
+		// returned entries collection threads through unchanged.
+		result, _ := runner.executeActions(t.Context(), mockEntries)
 		assert.Equal(t, mockEntries, result)
 
 		mockEntries.AssertExpectations(t)
