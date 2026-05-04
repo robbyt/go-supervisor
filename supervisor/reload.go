@@ -18,11 +18,17 @@ package supervisor
 
 import "sync"
 
-// ReloadAll triggers a reload of all runnables that implement the Reloadable interface.
-// This call blocks until the reload manager accepts the signal. Callers that need
-// non-blocking behavior should invoke this in a goroutine.
+// ReloadAll triggers a reload of all runnables that implement the Reloadable
+// interface. Blocks until the reload manager accepts the signal OR the
+// supervisor's context is done — once shutdown begins, startReloadManager
+// returns and stops draining reloadListener, so the send must abort instead
+// of wedging. Callers that need non-blocking behavior should invoke this in
+// a goroutine.
 func (p *PIDZero) ReloadAll() {
-	p.reloadListener <- struct{}{}
+	select {
+	case p.reloadListener <- struct{}{}:
+	case <-p.ctx.Done():
+	}
 }
 
 // startReloadManager starts a goroutine that listens for reload notifications
