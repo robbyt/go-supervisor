@@ -10,7 +10,6 @@ linters:
     - godox         # Detects usage of FIXME, TODO and other keywords inside comments
     - nilnil        # Checks that there is no simultaneous return of `nil` error and an invalid value
     - noctx         # Finds sending http request without context.Context
-    - prealloc      # Temporarily disable until slice allocation issues are fixed
   enable:
     - bodyclose      # Ensure HTTP response bodies are closed
     - contextcheck   # Ensure functions use a non-inherited context

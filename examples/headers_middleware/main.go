@@ -108,7 +108,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	// Header inspection handler - shows request headers received after middleware processing
 	headerInspectionHandler := func(w http.ResponseWriter, r *http.Request) {
 		// Collect request headers
-		var requestHeaders []HeaderInfo
+		requestHeaders := make([]HeaderInfo, 0, len(r.Header))
 		for name, values := range r.Header {
 			requestHeaders = append(requestHeaders, HeaderInfo{
 				Name:   name,
@@ -195,7 +195,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 
 	specialHandler := func(w http.ResponseWriter, r *http.Request) {
 		// Show headers for this route
-		var requestHeaders []HeaderInfo
+		requestHeaders := make([]HeaderInfo, 0, len(r.Header))
 		for name, values := range r.Header {
 			requestHeaders = append(requestHeaders, HeaderInfo{
 				Name:   name,
