@@ -879,14 +879,7 @@ func TestHandleReload_Branches(t *testing.T) {
 		emptyConfig, err := NewConfig("empty", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
 
-		req := &reloadReq[*mocks.Runnable]{cfg: emptyConfig, done: make(chan struct{})}
-		runner.handleReload(t.Context(), req)
-
-		select {
-		case <-req.done:
-		default:
-			t.Fatal("handleReload must close req.done")
-		}
+		require.NoError(t, runner.handleReload(t.Context(), emptyConfig))
 		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
 	})
 
@@ -912,14 +905,7 @@ func TestHandleReload_Branches(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		req := &reloadReq[*mocks.Runnable]{cfg: newConfig, done: make(chan struct{})}
-		runner.handleReload(t.Context(), req)
-
-		select {
-		case <-req.done:
-		default:
-			t.Fatal("handleReload must close req.done")
-		}
+		require.Error(t, runner.handleReload(t.Context(), newConfig))
 		assert.Equal(t, finitestate.StatusError, runner.fsm.GetState())
 	})
 
@@ -941,14 +927,7 @@ func TestHandleReload_Branches(t *testing.T) {
 		emptyConfig, err := NewConfig("empty", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
 
-		req := &reloadReq[*mocks.Runnable]{cfg: emptyConfig, done: make(chan struct{})}
-		runner.handleReload(t.Context(), req)
-
-		select {
-		case <-req.done:
-		default:
-			t.Fatal("handleReload must close req.done")
-		}
+		require.Error(t, runner.handleReload(t.Context(), emptyConfig))
 		mockFSM.AssertExpectations(t)
 	})
 }

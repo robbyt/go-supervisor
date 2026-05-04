@@ -456,14 +456,7 @@ func TestHandleReloadSetsErrorWhenExecuteReloadFails(t *testing.T) {
 	server.fsm = stateMachine
 
 	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
-	req := &reloadReq{cfg: updatedCfg, done: make(chan struct{})}
-	server.handleReload(t.Context(), req)
-
-	select {
-	case <-req.done:
-	default:
-		t.Fatal("handleReload should close req.done when executeReload fails")
-	}
+	require.Error(t, server.handleReload(t.Context(), updatedCfg))
 	stateMachine.AssertExpectations(t)
 	assert.Same(t, updatedCfg, server.getConfig())
 }
@@ -493,14 +486,7 @@ func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
 		"/",
 		2*time.Second,
 	)
-	req := &reloadReq{cfg: updatedCfg, done: make(chan struct{})}
-	server.handleReload(t.Context(), req)
-
-	select {
-	case <-req.done:
-	default:
-		t.Fatal("handleReload should close req.done when final state transition fails")
-	}
+	require.Error(t, server.handleReload(t.Context(), updatedCfg))
 
 	oldServer.AssertExpectations(t)
 	stateMachine.AssertExpectations(t)

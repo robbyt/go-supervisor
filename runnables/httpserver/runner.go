@@ -201,29 +201,30 @@ func (r *Runner) waitForEvent(ctx context.Context) error {
 			r.setStateError()
 			return fmt.Errorf("%w: %w", ErrHttpServer, err)
 		case req := <-r.reloadCh:
-			r.handleReload(ctx, req)
+			req.err = r.handleReload(ctx, req.cfg)
+			close(req.done)
 		}
 	}
 }
 
 // handleReload runs an accepted reload request. Reload has already moved the
 // FSM from Running to Reloading, so this only completes the restart and then
-// returns the FSM to Running (or Error on failure).
-func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
-	defer close(req.done)
-
-	if err := r.executeReload(ctx, req.cfg); err != nil {
+// returns the FSM to Running (or Error on failure). Returns the reload
+// outcome so the caller (Run's event loop) owns the channel-protocol step
+// (req.err = err; close(req.done)).
+func (r *Runner) handleReload(ctx context.Context, cfg *Config) error {
+	if err := r.executeReload(ctx, cfg); err != nil {
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
-		req.err = err
-		return
+		return err
 	}
 
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 		r.logger.Error("Failed to transition from Reloading to Running", "error", err)
 		r.setStateError()
-		req.err = err
+		return err
 	}
+	return nil
 }
 
 // drainReloadCh closes req.done for any reload request still buffered in

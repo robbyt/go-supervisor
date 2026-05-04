@@ -193,20 +193,20 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 			stopErr := r.stopAllRunnables()
 			return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
 		case req := <-r.reloadCh:
-			r.handleReload(ctx, req)
+			req.err = r.handleReload(ctx, req.cfg)
+			close(req.done)
 		}
 	}
 }
 
-// handleReload runs an accepted reload request inside Run's goroutine. Reload
-// has already moved the FSM Running→Reloading; this completes the work and
+// handleReload runs an accepted reload inside Run's goroutine. Reload has
+// already moved the FSM Running→Reloading; this completes the work and
 // transitions the FSM back to Running (or sets Error on failure). The
 // membership-change vs in-place decision is made here, against the runner's
 // current config — keeping that decision on Run's side guarantees it sees a
-// consistent old/new pair.
-func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
-	defer close(req.done)
-
+// consistent old/new pair. Returns the reload outcome so waitForEvent owns
+// the channel-protocol step (req.err = err; close(req.done)).
+func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
 	oldConfig := r.getConfig()
 	if oldConfig == nil {
 		r.logger.Warn("No current config during reload, treating as empty")
@@ -214,24 +214,24 @@ func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
 	}
 
 	var err error
-	if hasMembershipChanged(oldConfig, req.cfg) {
-		err = r.reloadWithRestart(ctx, req.cfg)
+	if hasMembershipChanged(oldConfig, cfg) {
+		err = r.reloadWithRestart(ctx, cfg)
 	} else {
-		err = r.reloadSkipRestart(ctx, req.cfg)
+		err = r.reloadSkipRestart(ctx, cfg)
 	}
 
 	if err != nil {
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
-		req.err = err
-		return
+		return err
 	}
 
 	if transErr := r.fsm.Transition(finitestate.StatusRunning); transErr != nil {
 		r.logger.Error("Failed to transition Reloading→Running", "error", transErr)
 		r.setStateError()
-		req.err = transErr
+		return transErr
 	}
+	return nil
 }
 
 // drainReloadCh closes done on any reload request still buffered in reloadCh
