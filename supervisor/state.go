@@ -123,7 +123,7 @@ func (p *PIDZero) broadcastState() {
 	defer p.subscriberMutex.Unlock()
 
 	stateMap := p.GetStateMap()
-	if len(stateMap) == 0 || stateMap == nil {
+	if len(stateMap) == 0 {
 		p.logger.Debug("No state to broadcast; stateMap is empty")
 		return
 	}
