@@ -3,7 +3,6 @@ package composite
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -558,7 +557,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// the Error state — it's "wrong state for reload" control flow,
 		// not a runner failure.
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
 			Return(errors.New("transition error")).
 			Once()
 		mockFSM.On("GetState").Return(finitestate.StatusStopped).Maybe()
@@ -588,7 +588,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("config callback error during reload", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -619,7 +621,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 	t.Run("config callback returns nil config", func(t *testing.T) {
 		// Setup mock FSM with expected transitions
 		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
+		mockFSM.On("TransitionIfCurrentState",
+			finitestate.StatusRunning, finitestate.StatusReloading).
+			Return(nil).Once()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -648,215 +652,11 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		assert.Equal(t, finitestate.StatusError, mockFSM.GetState(), "Should be in error state")
 	})
 
-	t.Run("reloadable runnable fails", func(t *testing.T) {
-		// Setup mock FSM with expected transitions
-		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
-		// Do NOT expect SetState(StatusError) since the panic will interrupt execution
-		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
-
-		// Setup mock runnable that fails on Reload
-		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.On("String").Return("runnable1").Maybe()
-		mockRunnable.On("Reload", mock.Anything).
-			Panic("reload failure").
-			Once()
-			// Use Panic() instead of Run() with panic
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable, Config: nil},
-		}
-
-		// Create config and ensure it's non-nil
-		initialConfig, err := NewConfig("test", entries)
-		require.NoError(t, err)
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return initialConfig, nil
-		}
-
-		// Create runner
-		runner, err := NewRunner(configCallback)
-		require.NoError(t, err)
-
-		// Manually set current config (skipping initial load)
-		runner.currentConfig.Store(initialConfig)
-
-		// Replace FSM with our mock
-		runner.fsm = mockFSM
-
-		// Call Reload with panic recovery - expect the panic to propagate
-		didPanic := false
-		panicMsg := ""
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					didPanic = true
-					panicMsg = fmt.Sprintf("%v", r)
-				}
-			}()
-			runner.Reload(t.Context())
-		}()
-
-		// Verify that the panic was propagated (not handled internally)
-		assert.True(t, didPanic, "Runner.Reload() should propagate panics")
-		assert.Contains(t, panicMsg, "reload failure",
-			"Panic message should contain the original panic reason")
-
-		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
-
-		// Verify our mock expectations
-		mockRunnable.AssertExpectations(t)
-	})
-
-	t.Run("reload with ReloadableWithConfig that panics", func(t *testing.T) {
-		// Setup mock FSM with expected transitions
-		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
-		// No SetState error expectation since we won't reach that code due to panic
-		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
-
-		// Setup initial config
-		initialConfig := map[string]string{"key": "initial"}
-		updatedConfig := map[string]string{"key": "updated"}
-
-		// Create a mock that will panic when ReloadWithConfig is called
-		mockReloadable := NewMockReloadableWithConfig()
-		mockReloadable.On("String").Return("reloadable-panic").Maybe()
-		// Use Panic() instead of Run() with a manual panic - more readable and direct
-		mockReloadable.On("ReloadWithConfig", updatedConfig).
-			Panic("intentional panic in ReloadWithConfig").
-			Once()
-		mockReloadable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-			<-args.Get(0).(context.Context).Done()
-		}).Return(context.Canceled).Maybe()
-		mockReloadable.Runnable.On("Stop").Return(nil).Maybe()
-
-		// Create entries
-		initialEntries := []RunnableEntry[*MockReloadableWithConfig]{
-			{Runnable: mockReloadable, Config: initialConfig},
-		}
-
-		updatedEntries := []RunnableEntry[*MockReloadableWithConfig]{
-			{Runnable: mockReloadable, Config: updatedConfig},
-		}
-
-		// Create initial config
-		config, err := NewConfig("test", initialEntries)
-		require.NoError(t, err)
-
-		updatedConfigObj, err := NewConfig("test", updatedEntries)
-		require.NoError(t, err)
-
-		// Variable to track which config to return
-		useUpdatedConfig := false
-
-		// Create config callback
-		configCallback := func() (*Config[*MockReloadableWithConfig], error) {
-			if useUpdatedConfig {
-				return updatedConfigObj, nil
-			}
-			return config, nil
-		}
-
-		// Create runner
-		runner, err := NewRunner(configCallback)
-		require.NoError(t, err)
-
-		// Manually set current config (skipping initial load)
-		runner.currentConfig.Store(config)
-
-		// Replace FSM with our mock
-		runner.fsm = mockFSM
-
-		// Switch to updated config that will cause panic
-		useUpdatedConfig = true
-
-		// Call Reload with panic recovery - we expect the panic to propagate
-		didPanic := false
-		panicMsg := ""
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					didPanic = true
-					panicMsg = fmt.Sprintf("%v", r)
-				}
-			}()
-			runner.Reload(t.Context())
-		}()
-
-		// Verify that the panic was propagated (not handled internally)
-		assert.True(t, didPanic, "Runner.Reload() should propagate panics")
-		assert.Contains(t, panicMsg, "intentional panic in ReloadWithConfig",
-			"Panic message should contain the original panic reason")
-
-		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
-
-		// We shouldn't have reached the error state since panic interrupted execution
-		mockReloadable.AssertExpectations(t)
-	})
-
-	t.Run("reloadable runnable fails with Panic", func(t *testing.T) {
-		// Setup mock FSM with expected transitions
-		mockFSM := new(MockStateMachine)
-		mockFSM.On("Transition", finitestate.StatusReloading).Return(nil).Once()
-		// We don't expect SetState to be called since panic will interrupt execution
-		mockFSM.On("GetState").Return(finitestate.StatusReloading).Maybe()
-
-		// Setup mock runnable that fails on Reload using Panic() instead of Run()
-		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.On("String").Return("runnable-panic").Maybe()
-		mockRunnable.On("Reload", mock.Anything).Panic("intentional panic in Reload").Once()
-
-		// Create entries
-		entries := []RunnableEntry[*mocks.Runnable]{
-			{Runnable: mockRunnable, Config: nil},
-		}
-
-		// Create config
-		initialConfig, err := NewConfig("test", entries)
-		require.NoError(t, err)
-
-		// Create config callback
-		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return initialConfig, nil
-		}
-
-		// Create runner
-		runner, err := NewRunner(configCallback)
-		require.NoError(t, err)
-
-		// Manually set current config (skipping initial load)
-		runner.currentConfig.Store(initialConfig)
-
-		// Replace FSM with our mock
-		runner.fsm = mockFSM
-
-		// Call Reload with panic recovery - expect the panic to propagate
-		didPanic := false
-		panicMsg := ""
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					didPanic = true
-					panicMsg = fmt.Sprintf("%v", r)
-				}
-			}()
-			runner.Reload(t.Context())
-		}()
-
-		// The runner does NOT handle panics internally, so we should see one
-		assert.True(t, didPanic, "Runner.Reload() should propagate panics")
-		assert.Contains(t, panicMsg, "intentional panic in Reload",
-			"Panic message should contain the original panic reason")
-
-		// Since execution was interrupted by panic, only the first mock expectation should be met
-		mockFSM.AssertCalled(t, "Transition", finitestate.StatusReloading)
-	})
+	// Panic-propagation subtests deleted: child Reload now runs in Run's
+	// goroutine (handleReload) rather than inline in Reload's caller, so a
+	// panicking child no longer propagates through Reload's stack frame.
+	// That tradeoff is the explicit point of the structural refactor — keep
+	// FSM mutation single-threaded inside Run.
 }
 
 // TestGetConfig_NilCase tests the getConfig method's handling of nil cases
@@ -950,6 +750,206 @@ func TestSetStateError(t *testing.T) {
 	})
 }
 
+// TestAbortDispatch covers the per-branch cleanup helper used by
+// dispatchReload's ctx.Done()/lc.DoneCh() abort paths.
+func TestAbortDispatch(t *testing.T) {
+	t.Parallel()
+
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+	}
+
+	t.Run("transitions Reloading to Running", func(t *testing.T) {
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusBooting))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusRunning))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusReloading))
+
+		runner.abortDispatch("test reason")
+
+		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
+	})
+
+	t.Run("escalates to Error when transition fails", func(t *testing.T) {
+		mockFSM := new(MockStateMachine)
+		mockFSM.On("Transition", finitestate.StatusRunning).
+			Return(errors.New("transition failed")).Once()
+		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
+
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+		runner.fsm = mockFSM
+
+		runner.abortDispatch("test reason", "key", "value")
+
+		mockFSM.AssertExpectations(t)
+	})
+}
+
+// TestDispatchReload_AbortBranches exercises the two abort cases of
+// dispatchReload's select. Both branches require reloadCh to be unable to
+// accept the send, so the test pre-fills the cap-1 buffer with a sentinel
+// request that no goroutine will consume.
+func TestDispatchReload_AbortBranches(t *testing.T) {
+	t.Parallel()
+
+	configCallback := func() (*Config[*mocks.Runnable], error) {
+		return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+	}
+
+	bringToReloading := func(t *testing.T, r *Runner[*mocks.Runnable]) {
+		t.Helper()
+		require.NoError(t, r.fsm.Transition(finitestate.StatusBooting))
+		require.NoError(t, r.fsm.Transition(finitestate.StatusRunning))
+		require.NoError(t, r.fsm.Transition(finitestate.StatusReloading))
+	}
+
+	t.Run("ctx.Done branch", func(t *testing.T) {
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		// Hold lc.DoneCh open so the lc.DoneCh case is not ready and the
+		// select must pick ctx.Done deterministically. Don't call the
+		// returned `done` — it stays held for the duration of the test.
+		_ = runner.lc.Started()
+
+		bringToReloading(t, runner)
+
+		// Fill the cap-1 reloadCh buffer so the send case blocks.
+		runner.reloadCh <- &reloadReq[*mocks.Runnable]{done: make(chan struct{})}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
+		require.NoError(t, err)
+
+		runner.dispatchReload(ctx, newConfig)
+
+		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
+	})
+
+	t.Run("lc.DoneCh branch", func(t *testing.T) {
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		// Don't call lc.Started() — DoneCh returns the always-closed
+		// sentinel, making the lc.DoneCh case the only ready case once
+		// the buffer is full and ctx is live.
+		bringToReloading(t, runner)
+
+		runner.reloadCh <- &reloadReq[*mocks.Runnable]{done: make(chan struct{})}
+
+		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
+		require.NoError(t, err)
+
+		runner.dispatchReload(t.Context(), newConfig)
+
+		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
+	})
+}
+
+// TestHandleReload_Branches covers the defensive branches in handleReload:
+// the oldConfig==nil treat-as-empty fallback, the reload-failed setStateError
+// path, and the Transition(Running)-fails escalation.
+func TestHandleReload_Branches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil oldConfig treated as empty", func(t *testing.T) {
+		// A fresh runner has no currentConfig. With an empty new config,
+		// hasMembershipChanged(empty, empty) is false → reloadSkipRestart
+		// runs (no-op for empty entries) and FSM transitions back to
+		// Running. This exercises the `oldConfig == nil` fallback at the
+		// top of handleReload.
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+		}
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusBooting))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusRunning))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusReloading))
+
+		emptyConfig, err := NewConfig("empty", []RunnableEntry[*mocks.Runnable]{})
+		require.NoError(t, err)
+
+		req := &reloadReq[*mocks.Runnable]{cfg: emptyConfig, done: make(chan struct{})}
+		runner.handleReload(t.Context(), req)
+
+		select {
+		case <-req.done:
+		default:
+			t.Fatal("handleReload must close req.done")
+		}
+		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
+	})
+
+	t.Run("reload error sets Error state", func(t *testing.T) {
+		// Force reloadWithRestart to fail without spawning child Run
+		// goroutines: the configCallback returns nil, so getConfig stays
+		// nil and stopAllRunnables returns ErrConfigMissing before boot
+		// is reached.
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return nil, nil
+		}
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusBooting))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusRunning))
+		require.NoError(t, runner.fsm.Transition(finitestate.StatusReloading))
+
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("forces-membership-change").Maybe()
+		newConfig, err := NewConfig("new", []RunnableEntry[*mocks.Runnable]{
+			{Runnable: mockRunnable, Config: nil},
+		})
+		require.NoError(t, err)
+
+		req := &reloadReq[*mocks.Runnable]{cfg: newConfig, done: make(chan struct{})}
+		runner.handleReload(t.Context(), req)
+
+		select {
+		case <-req.done:
+		default:
+			t.Fatal("handleReload must close req.done")
+		}
+		assert.Equal(t, finitestate.StatusError, runner.fsm.GetState())
+	})
+
+	t.Run("Transition failure escalates to Error", func(t *testing.T) {
+		// Mock the FSM so the success-path Transition(Running) returns an
+		// error after reloadSkipRestart succeeds.
+		mockFSM := new(MockStateMachine)
+		mockFSM.On("Transition", finitestate.StatusRunning).
+			Return(errors.New("transition failed")).Once()
+		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
+
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", []RunnableEntry[*mocks.Runnable]{})
+		}
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+		runner.fsm = mockFSM
+
+		emptyConfig, err := NewConfig("empty", []RunnableEntry[*mocks.Runnable]{})
+		require.NoError(t, err)
+
+		req := &reloadReq[*mocks.Runnable]{cfg: emptyConfig, done: make(chan struct{})}
+		runner.handleReload(t.Context(), req)
+
+		select {
+		case <-req.done:
+		default:
+			t.Fatal("handleReload must close req.done")
+		}
+		mockFSM.AssertExpectations(t)
+	})
+}
+
 // TestGetChildStates tests the GetChildStates method with various types of runnables
 func TestGetChildStates(t *testing.T) {
 	t.Parallel()
@@ -1005,7 +1005,7 @@ func TestReloadConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call reloadConfig directly
-		runner.reloadSkipRestart(t.Context(), config)
+		require.NoError(t, runner.reloadSkipRestart(t.Context(), config))
 
 		// Verify reloadable interface methods were called
 		mockRunnable1.AssertExpectations(t)
@@ -1043,7 +1043,7 @@ func TestReloadConfig(t *testing.T) {
 		runner, err := NewRunner(configCallback)
 		require.NoError(t, err)
 
-		runner.reloadSkipRestart(t.Context(), config)
+		require.NoError(t, runner.reloadSkipRestart(t.Context(), config))
 
 		// Verify ReloadWithConfig was called with correct configs
 		mockReloadable1.AssertExpectations(t)
@@ -1091,8 +1091,8 @@ func TestReloadConfig(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		runner1.reloadSkipRestart(t.Context(), config1)
-		runner2.reloadSkipRestart(t.Context(), config2)
+		require.NoError(t, runner1.reloadSkipRestart(t.Context(), config1))
+		require.NoError(t, runner2.reloadSkipRestart(t.Context(), config2))
 
 		// Verify expectations
 		mockRunnable.AssertExpectations(t)
@@ -1515,8 +1515,8 @@ func TestHasMembershipChanged(t *testing.T) {
 }
 
 // TestCompositeRunner_ReloadAfterStop verifies that calling Reload after Stop
-// returns promptly instead of hanging. dispatchMembershipReload's outer select
-// on lc.DoneCh() short-circuits once Run has exited.
+// returns promptly instead of hanging. The FSM admission gate fails (state is
+// Stopped, not Running), so Reload returns without dispatching.
 func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	t.Parallel()
 
@@ -1560,9 +1560,9 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 		2*time.Second, 10*time.Millisecond,
 	)
 
-	// Membership-change reload after Stop must not hang. The Reload may
-	// fail at the FSM check or inside dispatchMembershipReload — both are
-	// acceptable; what matters is that it returns promptly.
+	// Membership-change reload after Stop must not hang. The FSM admission
+	// gate fails (state is Stopped, not Running), so Reload returns without
+	// dispatching.
 	useSwapped.Store(true)
 	reloadDone := make(chan struct{})
 	go func() {
@@ -1572,7 +1572,7 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	select {
 	case <-reloadDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Reload after Stop did not return — likely hung in dispatchMembershipReload")
+		t.Fatal("Reload after Stop did not return — likely hung in dispatchReload")
 	}
 
 	cancel()
@@ -1583,16 +1583,17 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	}
 }
 
-// TestCompositeRunner_ReloadCancelMidFlight verifies that cancelling the
-// caller's context after dispatchMembershipReload has handed the request to
-// Run unblocks the caller via the inner ctx.Done() select case.
-func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
+// TestCompositeRunner_ReloadWaitsThroughCallerCtxCancel verifies the
+// post-dispatch contract: once Reload has handed the request to Run, the
+// caller's ctx is intentionally ignored and Reload blocks until the work
+// completes. This guarantees callers never observe FSM=Reloading after
+// Reload has returned.
+func TestCompositeRunner_ReloadWaitsThroughCallerCtxCancel(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		// Slow-stop child blocks Run inside reloadWithRestart so the caller is
-		// observably parked in the post-send select. synctest.Wait() returns
-		// once the bubble is quiescent — the only path to quiescence after
-		// Reload runs through this <-slowStop park.
+		// Slow-stop child blocks Run inside reloadWithRestart, parking the
+		// Reload caller on req.done. The caller's ctx is cancelled while
+		// parked — Reload MUST keep waiting until close(slowStop).
 		slowStop := make(chan struct{})
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("slow").Maybe()
@@ -1633,23 +1634,36 @@ func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
 
 		useSwapped.Store(true)
 		reloadCtx, reloadCancel := context.WithCancel(context.Background())
+		reloadReturned := atomic.Bool{}
 		reloadDone := make(chan struct{})
 		go func() {
 			defer close(reloadDone)
 			runner.Reload(reloadCtx)
+			reloadReturned.Store(true)
 		}()
 
+		// Wait until Reload is parked on req.done (synctest quiescence proves
+		// the bubble has nothing to schedule — Reload's blocked goroutine is
+		// the only suspension).
 		synctest.Wait()
 
+		// Cancel the caller's ctx mid-flight. Reload must NOT return.
 		reloadCancel()
+		synctest.Wait()
+		require.False(t, reloadReturned.Load(),
+			"Reload must wait for completion even after caller ctx cancel")
+
+		// Release the slow child. Run finishes the membership-change reload,
+		// transitions FSM Reloading→Running, closes req.done. Reload returns.
+		close(slowStop)
 		select {
 		case <-reloadDone:
 		case <-time.After(2 * time.Second):
-			t.Fatal("Reload did not return after caller ctx cancel")
+			t.Fatal("Reload did not return after work completed")
 		}
+		require.Equal(t, finitestate.StatusRunning, runner.GetState(),
+			"FSM must be Running after Reload returns — never Reloading")
 
-		// Release the slow child so the runner can shut down cleanly.
-		close(slowStop)
 		runCancel()
 		select {
 		case <-runErr:
@@ -1659,88 +1673,13 @@ func TestCompositeRunner_ReloadCancelMidFlight(t *testing.T) {
 	})
 }
 
-// TestCompositeRunner_AbandonedReloadIsSkipped verifies that a membership-change
-// reload request whose caller has signalled abandonment (cancel chan closed)
-// does NOT execute its side effects (no Stop, no config swap, no boot of new
-// entries) when Run's event loop picks it up. White-box: builds a
-// reloadRequest directly with a pre-closed cancel signal and sends it into
-// the unexported reloadCh, since the public-API path can't reliably wedge
-// between send-success and consumer-read.
-func TestCompositeRunner_AbandonedReloadIsSkipped(t *testing.T) {
-	t.Parallel()
-
-	mockChild := mocks.NewMockRunnable()
-	mockChild.On("String").Return("child").Maybe()
-	mockChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		<-args.Get(0).(context.Context).Done()
-	}).Return(context.Canceled).Maybe()
-	mockChild.On("Stop").Return().Maybe()
-
-	altChild := mocks.NewMockRunnable()
-	altChild.On("String").Return("alt").Maybe()
-	altChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		<-args.Get(0).(context.Context).Done()
-	}).Return(context.Canceled).Maybe()
-	altChild.On("Stop").Return().Maybe()
-
-	initial := []RunnableEntry[*mocks.Runnable]{{Runnable: mockChild}}
-	cb := func() (*Config[*mocks.Runnable], error) {
-		return NewConfig("initial", initial)
-	}
-
-	runner, err := NewRunner(cb)
-	require.NoError(t, err)
-
-	runCtx, runCancel := context.WithCancel(t.Context())
-	defer runCancel()
-	runErr := make(chan error, 1)
-	go func() { runErr <- runner.Run(runCtx) }()
-
-	require.Eventually(
-		t, runner.IsRunning, 2*time.Second, 10*time.Millisecond,
-	)
-
-	originalCfg := runner.getConfig()
-	require.NotNil(t, originalCfg)
-
-	swapped := []RunnableEntry[*mocks.Runnable]{{Runnable: altChild}}
-	newCfg, err := NewConfig("swapped", swapped)
-	require.NoError(t, err)
-
-	cancel := make(chan struct{})
-	close(cancel)
-	req := newReloadRequest(newCfg, cancel)
-	runner.reloadCh <- req
-
-	var doneErr error
-	select {
-	case doneErr = <-req.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for waitForEvent to consume reloadCh")
-	}
-	require.Error(t, doneErr)
-	require.ErrorIs(t, doneErr, ErrReloadAborted)
-	require.Contains(t, doneErr.Error(), "abandoned by caller")
-
-	// Critical: side effects must NOT have happened.
-	mockChild.AssertNotCalled(t, "Stop")
-	require.Same(t, originalCfg, runner.getConfig(),
-		"config must not have been swapped for an abandoned request")
-	altChild.AssertNotCalled(t, "Run")
-
-	runCancel()
-	select {
-	case <-runErr:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return after ctx cancel")
-	}
-}
-
-// TestCompositeRunner_AbandonedReloadIsSkipped_PublicAPI exercises the same
-// abandonment path as the white-box test above, but through the public
-// Reload(ctx) API. ctx is pre-cancelled so dispatchMembershipReload's outer
-// select sees ctx.Done() and returns ErrReloadAborted without enqueueing.
-func TestCompositeRunner_AbandonedReloadIsSkipped_PublicAPI(t *testing.T) {
+// TestCompositeRunner_PreCancelledReloadCtx verifies that calling Reload with
+// a pre-cancelled ctx is a clean no-op: the FSM gate succeeds (Running →
+// Reloading), dispatchReload's outer select fires ctx.Done() before sending,
+// and the deferred FSM cleanup transitions Reloading → Running. No side
+// effects (no Stop, no config swap, no boot of new entries) and the FSM is
+// NOT in Error.
+func TestCompositeRunner_PreCancelledReloadCtx(t *testing.T) {
 	t.Parallel()
 
 	mockChild := mocks.NewMockRunnable()
@@ -1949,11 +1888,10 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 		"runner did not reach Stopping — slow-stop wedge failed")
 
 	// Now send the stale request. waitForEvent is gone; only deferred
-	// drainReloadCh can clear this.
-	cancel := make(chan struct{})
+	// drainReloadCh can clear this and close req.done.
 	staleCfg, err := NewConfig("stale", []RunnableEntry[*mocks.Runnable]{{Runnable: altChild}})
 	require.NoError(t, err)
-	stale := newReloadRequest(staleCfg, cancel)
+	stale := &reloadReq[*mocks.Runnable]{cfg: staleCfg, done: make(chan struct{})}
 	runner.reloadCh <- stale
 	require.Len(t, runner.reloadCh, 1, "stale request must land in buffer")
 
@@ -1971,9 +1909,16 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	require.Empty(t, runner.reloadCh,
 		"deferred drainReloadCh must have cleared the stale request")
 
+	// drainReloadCh closes req.done so any caller blocked on it unblocks
+	// deterministically rather than relying on a separate signal.
+	select {
+	case <-stale.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drainReloadCh must close req.done so callers unblock")
+	}
+
 	// Side effects from the stale request must NOT have fired — altChild
-	// was never started, and we don't see RunReload's "abandoned" message
-	// on req.done because drainReloadCh discards silently.
+	// was never started; drainReloadCh closes done without running apply.
 	altChild.AssertNotCalled(t, "Run")
 	altChild.AssertNotCalled(t, "Stop")
 
@@ -1985,21 +1930,42 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	}
 }
 
-func TestCompositeRunner_ConcurrentReload(t *testing.T) {
+// TestCompositeRunner_ConcurrentReload_DropsOnBusy verifies the FSM
+// admission gate's drop-on-busy semantics: while one Reload is in flight (the
+// FSM is in Reloading), concurrent Reload callers fail the
+// TransitionIfCurrentState gate, return immediately without queueing, and do
+// NOT trigger a second pass through the child's Reload.
+//
+// This is the contract that replaced the prior reloadMu-based queueing: a
+// reload pulls the latest config; if a reload is already in flight, the new
+// caller's request is redundant and is dropped.
+func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	t.Parallel()
 
-	mockRunnable := mocks.NewMockRunnable()
-	mockRunnable.On("String").Return("concurrent-reloader").Maybe()
-	mockRunnable.On("Reload", mock.Anything).Return()
-	mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+	releaseReload := make(chan struct{})
+	// Always release on test exit, even on assertion failure: if the test
+	// fails before the happy-path close(releaseReload) below, the in-flight
+	// reload (and its mocked child.Reload) would otherwise block forever,
+	// leaking a goroutine and obscuring the real failure.
+	releaseOnce := sync.OnceFunc(func() { close(releaseReload) })
+	t.Cleanup(releaseOnce)
+
+	mockChild := mocks.NewMockRunnable()
+	mockChild.On("String").Return("slow-reloader").Maybe()
+	mockChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(context.Canceled).Maybe()
-	mockRunnable.On("Stop").Return().Maybe()
+	mockChild.On("Stop").Return().Maybe()
+	// Reload blocks on releaseReload, holding the parent FSM in Reloading.
+	// .Once() asserts that exactly one Reload reaches the child — concurrent
+	// callers must be dropped at the FSM admission gate.
+	mockChild.On("Reload", mock.Anything).Run(func(_ mock.Arguments) {
+		<-releaseReload
+	}).Return().Once()
 
 	entries := []RunnableEntry[*mocks.Runnable]{
-		{Runnable: mockRunnable, Config: nil},
+		{Runnable: mockChild, Config: nil},
 	}
-
 	configCallback := func() (*Config[*mocks.Runnable], error) {
 		return NewConfig("test", entries)
 	}
@@ -2011,25 +1977,51 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 	defer cancel()
 
 	runErr := make(chan error, 1)
-	go func() {
-		runErr <- runner.Run(ctx)
-	}()
+	go func() { runErr <- runner.Run(ctx) }()
+	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond)
 
+	// First reload: blocks inside child.Reload, parent FSM held in Reloading.
+	var first sync.WaitGroup
+	first.Go(func() {
+		runner.Reload(t.Context())
+	})
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
-	}, 2*time.Second, 10*time.Millisecond)
+		return runner.GetState() == finitestate.StatusReloading
+	}, 2*time.Second, 5*time.Millisecond, "first reload must enter Reloading")
 
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
+	// Spawn N concurrent reloads — each must hit the FSM gate, fail, and
+	// return immediately. They MUST NOT queue and MUST NOT call child.Reload.
+	const concurrent = 10
+	var others sync.WaitGroup
+	for range concurrent {
+		others.Go(func() {
 			runner.Reload(t.Context())
 		})
 	}
-	wg.Wait()
+	// All N must return promptly (they bail at admission). If they queue on a
+	// hypothetical mutex, they'd block until releaseReload closes.
+	done := make(chan struct{})
+	go func() {
+		others.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent Reload callers did not return promptly — they appear to be queueing instead of dropping")
+	}
 
-	require.Eventually(t, func() bool {
-		return runner.IsRunning()
-	}, 2*time.Second, 10*time.Millisecond, "runner should be Running after concurrent reloads, not Error")
+	// FSM still pinned in Reloading by the in-flight first call.
+	assert.Equal(t, finitestate.StatusReloading, runner.GetState())
+
+	// Release the in-flight reload so the runner returns to Running.
+	releaseOnce()
+	first.Wait()
+	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond,
+		"runner should return to Running after the in-flight reload completes")
+
+	// .Once() on Reload asserts exactly one call reached the child.
+	mockChild.AssertExpectations(t)
 
 	cancel()
 	require.Eventually(t, func() bool {
@@ -2041,4 +2033,74 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 			return false
 		}
 	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
+}
+
+// TestCompositeRunner_ConcurrentReload exercises the FSM admission gate
+// under fan-in: 10 concurrent Reload callers must leave the runner in
+// Running, never Error. The FSM gate (TIC(Running, Reloading)) admits at
+// most one in-flight reload at a time; the rest drop.
+//
+// Run under synctest so the scheduling is deterministic and the test does
+// not depend on wall-clock budgets — an earlier wall-clock variant flaked on
+// slow CI runners where preemption between the now-removed catch-all defer
+// and the next admission could drive the FSM to Error.
+func TestCompositeRunner_ConcurrentReload(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("concurrent-reloader").Maybe()
+		mockRunnable.On("Reload", mock.Anything).Return()
+		mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		mockRunnable.On("Stop").Return().Maybe()
+
+		entries := []RunnableEntry[*mocks.Runnable]{
+			{Runnable: mockRunnable, Config: nil},
+		}
+
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", entries)
+		}
+
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		runErr := make(chan error, 1)
+		go func() {
+			runErr <- runner.Run(ctx)
+		}()
+
+		synctest.Wait()
+		require.True(t, runner.IsRunning())
+
+		// Fan out 10 concurrent Reload callers. The FSM admission gate
+		// (TIC(Running, Reloading)) admits one at a time; the rest fail the
+		// gate and drop. Each admitted call dispatches through Run's event
+		// loop, which owns the Reloading→Running transition on completion.
+		// wg.Wait is durably blocking under synctest because wg.Go was
+		// called inside the bubble.
+		var wg sync.WaitGroup
+		for range 10 {
+			wg.Go(func() {
+				runner.Reload(t.Context())
+			})
+		}
+		wg.Wait()
+
+		require.Equal(t, finitestate.StatusRunning, runner.GetState(),
+			"runner should be Running after concurrent reloads, not Error")
+
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-runErr:
+			require.NoError(t, err)
+		default:
+			t.Fatal("runner should shut down cleanly")
+		}
+	})
 }
