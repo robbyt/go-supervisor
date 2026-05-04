@@ -11,6 +11,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/composite"
 	"github.com/robbyt/go-supervisor/supervisor"
+	"github.com/robbyt/go-supervisor/supervisor/lifecycle"
 )
 
 // WorkerConfig is the configuration structure for the Worker, used for initial config and for
@@ -52,8 +53,8 @@ type Worker struct {
 	tickCount atomic.Int64
 	tickChan  chan struct{}
 
+	lc           *lifecycle.StartStop
 	ctx          context.Context
-	cancel       context.CancelFunc
 	tickerCancel context.CancelFunc
 	logger       *slog.Logger
 }
@@ -78,6 +79,7 @@ func NewWorker(config WorkerConfig, logger *slog.Logger) (*Worker, error) {
 		config:     config,
 		nextConfig: make(chan WorkerConfig, 1), // Buffer of 1 allows one pending config
 		tickChan:   make(chan struct{}, 1),     // Buffer of 1 allows one tick to be pending
+		lc:         lifecycle.New(),
 		logger:     logger,
 	}, nil
 }
@@ -87,15 +89,19 @@ func (w *Worker) String() string {
 	return fmt.Sprintf("Worker{config: %s}", w.getConfig())
 }
 
-// Run starts the worker's main loop.
+// Run starts the worker's main loop. The lifecycle helper coordinates Run/Stop
+// across all orderings — including stop-before-run and reuse across composite
+// restart cycles — so Stop reliably blocks until Run has returned.
 func (w *Worker) Run(ctx context.Context) error {
 	logger := w.logger.WithGroup("Run")
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	done := w.lc.Started()
+	defer done()
+
 	w.mu.Lock()
 	w.ctx = runCtx
-	w.cancel = cancel
 	w.mu.Unlock()
 
 	cfg := w.getConfig()
@@ -107,7 +113,10 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-runCtx.Done():
-			logger.Info("Worker stopped")
+			logger.Info("Worker stopped via context")
+			return nil
+		case <-w.lc.StopCh():
+			logger.Info("Worker stopped via Stop")
 			return nil
 		case <-w.tickChan:
 			w.processTick()
@@ -119,18 +128,16 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// Stop signals the worker to gracefully shut down by cancelling its context.
+// Stop signals the worker to shut down and blocks until Run has returned, per
+// the supervisor.Runnable contract. The lifecycle helper handles all orderings
+// — stop-before-run, stop-during-run, stop-after-run, and concurrent Stop
+// callers — so a misordered Stop never silently drops the request.
 func (w *Worker) Stop() {
 	currentName := w.getConfig().JobName
 	logger := w.logger.WithGroup("Stop").With("name", currentName)
 	logger.Info("Stopping worker...")
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if c := w.cancel; c != nil {
-		w.cancel = nil
-		c()
-	}
 	w.tickCount.Store(0)
+	w.lc.Stop()
 }
 
 // startTicker starts a new ticker goroutine that sends tick notifications to the worker.

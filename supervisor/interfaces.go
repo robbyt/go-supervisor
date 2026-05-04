@@ -27,16 +27,26 @@ type Runnable interface {
 
 	// Run starts the service with the given context and returns an error if it fails.
 	// Run is a blocking call that runs the work unit until it is stopped.
+	// Cleanup errors that occur during shutdown should be returned from Run so
+	// the supervisor's own Run() returns the error and the failure becomes
+	// observable to the supervisor's caller.
 	Run(ctx context.Context) error
-	// Stop signals the service to stop.
-	// Stop is a blocking call that stops the work unit.
+	// Stop signals the service to stop. Stop is a blocking call that returns
+	// once the service has finished its teardown. By contract Stop returns no
+	// error: failures during teardown should be surfaced via the runnable's
+	// own logging or via Stateable.GetStateChan (e.g., transitioning to an
+	// Error state); any error that should propagate to the supervisor must
+	// come back through Run's return value.
 	Stop()
 }
 
 // Reloadable represents a service that can be reloaded.
 type Reloadable interface {
-	// Reload signals the service to reload its configuration.
-	// Reload is a blocking call that reloads the configuration of the work unit.
+	// Reload signals the service to reload its configuration. Reload is a
+	// blocking call that returns once the reload has completed (or aborted
+	// via ctx). By contract Reload returns no error: failures should be
+	// surfaced via the runnable's own logging or via Stateable.GetStateChan
+	// (e.g., transitioning to an Error state).
 	Reload(ctx context.Context)
 }
 

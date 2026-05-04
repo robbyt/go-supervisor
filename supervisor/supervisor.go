@@ -79,7 +79,11 @@ func WithLogHandler(handler slog.Handler) Option {
 	}
 }
 
-// WithSignals sets custom signals for the PIDZero instance to listen for.
+// WithSignals replaces the OS signals the supervisor subscribes to.
+// The supervisor only special-cases SIGINT and SIGTERM (graceful shutdown)
+// and SIGHUP (reload all runnables); any other signal in the list is logged
+// and otherwise ignored. Subscribing to additional signals is therefore only
+// useful for preventing them from reaching the default Go handler.
 func WithSignals(signals ...os.Signal) Option {
 	return func(p *PIDZero) {
 		p.subscribeSignals = signals
@@ -129,10 +133,11 @@ func WithStartupInitial(initial time.Duration) Option {
 // goroutines to complete. If a runnable's Stop() blocks past the remaining
 // budget, its goroutine is abandoned (logged warning) and shutdown
 // continues to the next runnable. A timeout of 0 disables the deadline
-// (waits indefinitely).
+// (waits indefinitely); negative values are ignored and leave the current
+// setting in place.
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return func(p *PIDZero) {
-		if timeout > 0 {
+		if timeout >= 0 {
 			p.shutdownTimeout = timeout
 		}
 	}
