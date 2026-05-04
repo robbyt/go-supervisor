@@ -11,9 +11,11 @@ import (
 // ReloadableWithConfig is an interface for sub-runnables that can reload with
 // a specific configuration. Implementations should honor ctx — at minimum to
 // abort the reload if the caller cancels — but may also use it for deadline
-// propagation if the reload itself is bounded. Like Reloadable.Reload, this
-// returns no error: failures should surface via the runnable's own logging
-// or via Stateable.GetStateChan (e.g. transitioning to an Error state).
+// propagation if the reload itself is bounded. ctx must be non-nil; callers
+// without a meaningful ctx should pass context.Background() or context.TODO().
+// Like Reloadable.Reload, this returns no error: failures should surface via
+// the runnable's own logging or via Stateable.GetStateChan (e.g. transitioning
+// to an Error state).
 type ReloadableWithConfig interface {
 	ReloadWithConfig(ctx context.Context, config any)
 }

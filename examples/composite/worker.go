@@ -181,8 +181,9 @@ func (w *Worker) startTicker(ctx context.Context, interval time.Duration) {
 // ReloadWithConfig receives a new config from the composite Runnable, and
 // sends it to the Run loop via a channel. It handles potential back-pressure
 // by replacing a pending config with the latest received if the channel is
-// full. ctx is honored: if the caller cancels before the queue accepts the
-// config, the call returns without queueing.
+// full. ctx must be non-nil — pass context.Background() or context.TODO()
+// when no caller ctx is available. If ctx is cancelled before the queue
+// accepts the config, the call returns without queueing.
 func (w *Worker) ReloadWithConfig(ctx context.Context, config any) {
 	logger := w.logger.WithGroup("ReloadWithConfig")
 	cfg, ok := config.(WorkerConfig)
@@ -205,36 +206,39 @@ func (w *Worker) ReloadWithConfig(ctx context.Context, config any) {
 		return
 	}
 
-	// Non-blocking send to nextConfig channel.
-	// If the channel is full (meaning a config is already waiting),
-	// discard the waiting one and queue the new one (newer config wins).
-	// Honor ctx so a cancelled caller doesn't get its config queued.
+	// Fast path: try to queue without blocking. Honor ctx so a cancelled
+	// caller doesn't get its config queued.
 	select {
 	case <-ctx.Done():
 		logger.Debug("Reload aborted before queueing", "error", ctx.Err())
 		return
 	case w.nextConfig <- cfg:
-		logger.Info(
-			"Configuration queued for update",
-			"cfg", cfg)
+		logger.Info("Configuration queued for update", "cfg", cfg)
+		return
 	default:
-		// Channel is full, discard the old pending config and add the new one.
-		old := <-w.nextConfig
+	}
 
-		logger.Info(
-			"Discarding old config",
-			"old", old,
-			"new", cfg)
+	// Channel was full. Drain the pending config non-blockingly — Run
+	// may have consumed it concurrently between our default-branch fall
+	// through and this point, so a blocking receive could wedge.
+	select {
+	case old := <-w.nextConfig:
+		logger.Info("Discarding old config", "old", old, "new", cfg)
+	default:
+	}
 
-		select {
-		case <-ctx.Done():
-			logger.Debug("Reload aborted while requeueing", "error", ctx.Err())
-			return
-		case w.nextConfig <- cfg:
-			logger.Info(
-				"Replaced pending configuration with the newest one",
-				"new", cfg)
-		}
+	// Retry the send. Still non-blocking on the send path because Run
+	// could refill nextConfig before our retry; in that case drop newest
+	// (best-effort newer-wins semantics — under contention something has
+	// to give).
+	select {
+	case <-ctx.Done():
+		logger.Debug("Reload aborted while requeueing", "error", ctx.Err())
+		return
+	case w.nextConfig <- cfg:
+		logger.Info("Replaced pending configuration with the newest one", "new", cfg)
+	default:
+		logger.Warn("Reload dropped — queue refilled before requeue", "new", cfg)
 	}
 }
 
