@@ -737,7 +737,7 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 1*time.Second, 5*time.Millisecond)
 
 	// Start reload in background (the mock's Reload .After() keeps the FSM in Reloading)

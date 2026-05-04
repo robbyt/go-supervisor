@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegration_NoRaceCondition verifies that when IsRunning() returns true,
+// TestIntegration_NoRaceCondition verifies that when IsReady() returns true,
 // the server is actually accepting TCP connections.
 func TestIntegration_NoRaceCondition(t *testing.T) {
 	if testing.Short() {
@@ -60,11 +60,11 @@ func testSingleRunnerRaceCondition(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 5*time.Second, 10*time.Millisecond, "Server should report as running")
 
 	conn, err := net.DialTimeout("tcp", port, 100*time.Millisecond)
-	require.NoError(t, err, "TCP connection should succeed when IsRunning() returns true")
+	require.NoError(t, err, "TCP connection should succeed when IsReady() returns true")
 
 	if conn != nil {
 		require.NoError(t, conn.Close())
@@ -72,7 +72,7 @@ func testSingleRunnerRaceCondition(t *testing.T) {
 
 	client := &http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get("http://" + port + "/health")
-	require.NoError(t, err, "HTTP request should succeed when IsRunning()=true")
+	require.NoError(t, err, "HTTP request should succeed when IsReady()=true")
 
 	if resp != nil {
 		require.NoError(t, resp.Body.Close())
@@ -118,7 +118,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "New", runner.GetState())
-	assert.False(t, runner.IsRunning())
+	assert.False(t, runner.IsReady())
 
 	ctx, cancel := context.WithCancel(t.Context())
 	runErr := make(chan error, 1)
@@ -132,7 +132,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "Should transition to Booting")
 
 	assert.Eventually(t, func() bool {
-		return runner.IsRunning() && runner.GetState() == "Running"
+		return runner.IsReady() && runner.GetState() == "Running"
 	}, 5*time.Second, 50*time.Millisecond, "Should transition to Running")
 
 	conn, err := net.DialTimeout("tcp", port, 100*time.Millisecond)
@@ -164,5 +164,5 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		return runner.GetState() == "Stopped"
 	}, 1*time.Second, 10*time.Millisecond, "Should be Stopped")
 
-	assert.False(t, runner.IsRunning())
+	assert.False(t, runner.IsReady())
 }

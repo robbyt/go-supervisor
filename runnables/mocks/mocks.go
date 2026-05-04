@@ -93,9 +93,13 @@ func (m *MockRunnableWithStateable) GetStateChan(ctx context.Context) <-chan str
 	return args.Get(0).(chan string)
 }
 
-// IsRunning mocks the IsRunning method of the Stateable interface.
-// It returns true if the service is currently running, as configured in test expectations.
-func (m *MockRunnableWithStateable) IsRunning() bool {
+// IsReady mocks the IsReady method of the Readiness interface. It returns
+// true once the service has finished its startup phase, as configured in
+// test expectations. Stateable and Readiness are now orthogonal interfaces;
+// MockRunnableWithStateable implements both for backwards compatibility with
+// existing tests. Tests that want only Readiness (no Stateable) should use
+// MockRunnableWithReadiness instead.
+func (m *MockRunnableWithStateable) IsReady() bool {
 	args := m.Called()
 	return args.Bool(0)
 }
@@ -103,6 +107,27 @@ func (m *MockRunnableWithStateable) IsRunning() bool {
 // NewMockRunnableWithStateable creates a new MockRunnableWithStateable.
 func NewMockRunnableWithStateable() *MockRunnableWithStateable {
 	return &MockRunnableWithStateable{
+		Runnable: NewMockRunnable(),
+	}
+}
+
+// MockRunnableWithReadiness extends Runnable to implement only the Readiness
+// interface (without Stateable's GetState/GetStateChan). Use this for tests
+// that exercise the supervisor's startup gate without setting up state-channel
+// monitoring expectations.
+type MockRunnableWithReadiness struct {
+	*Runnable
+}
+
+// IsReady mocks the IsReady method of the Readiness interface.
+func (m *MockRunnableWithReadiness) IsReady() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
+
+// NewMockRunnableWithReadiness creates a new MockRunnableWithReadiness.
+func NewMockRunnableWithReadiness() *MockRunnableWithReadiness {
+	return &MockRunnableWithReadiness{
 		Runnable: NewMockRunnable(),
 	}
 }

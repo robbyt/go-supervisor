@@ -50,7 +50,11 @@ type entriesManager interface {
 }
 
 // httpServerRunner defines the interface for running an HTTP server.
+// Stateable is needed for the cluster's state observation; Readiness is
+// needed for waitForReady's startup polling. Now that Stateable and
+// Readiness are orthogonal, both must be listed explicitly.
 type httpServerRunner interface {
 	supervisor.Runnable
 	supervisor.Stateable
+	supervisor.Readiness
 }

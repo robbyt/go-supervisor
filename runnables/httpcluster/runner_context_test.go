@@ -41,7 +41,7 @@ func TestRunnerContextPersistence(t *testing.T) {
 
 			mockServer.On("Stop").Return().Maybe()
 			mockServer.On("GetState").Return(finitestate.StatusRunning)
-			mockServer.On("IsRunning").Return(true)
+			mockServer.On("IsReady").Return(true)
 
 			stateChan := make(chan string, 1)
 			stateChan <- finitestate.StatusRunning
@@ -65,7 +65,7 @@ func TestRunnerContextPersistence(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Send config to create a server
@@ -129,7 +129,7 @@ func TestRunnerContextPersistence(t *testing.T) {
 			}).Return(nil)
 			mockServer.On("Stop").Return().Maybe()
 			mockServer.On("GetState").Return(finitestate.StatusRunning)
-			mockServer.On("IsRunning").Return(true)
+			mockServer.On("IsReady").Return(true)
 
 			stateChan := make(chan string, 1)
 			stateChan <- finitestate.StatusRunning
@@ -153,7 +153,7 @@ func TestRunnerContextPersistence(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Create a server

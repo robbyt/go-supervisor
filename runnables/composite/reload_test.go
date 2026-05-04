@@ -120,14 +120,14 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, 2*time.Second, 10*time.Millisecond)
 		assert.Equal(t, 1, callbackCalls)
 
 		runner.Reload(t.Context())
 		assert.Equal(t, len(entries), callbackCalls)
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, 1*time.Second, 100*time.Millisecond)
 
 		// Cancel the context and wait for shutdown before verifying expectations
@@ -1584,7 +1584,7 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	go func() { runErr <- runner.Run(ctx) }()
 
 	require.Eventually(
-		t, runner.IsRunning, 2*time.Second, 10*time.Millisecond,
+		t, runner.IsReady, 2*time.Second, 10*time.Millisecond,
 	)
 
 	runner.Stop()
@@ -1664,7 +1664,7 @@ func TestCompositeRunner_ReloadWaitsThroughCallerCtxCancel(t *testing.T) {
 		go func() { runErr <- runner.Run(runCtx) }()
 
 		synctest.Wait()
-		require.True(t, runner.IsRunning())
+		require.True(t, runner.IsReady())
 
 		useSwapped.Store(true)
 		reloadCtx, reloadCancel := context.WithCancel(context.Background())
@@ -1745,7 +1745,7 @@ func TestCompositeRunner_PreCancelledReloadCtx(t *testing.T) {
 	defer runCancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(runCtx) }()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, runner.IsReady, 2*time.Second, 10*time.Millisecond)
 
 	originalCfg := runner.getConfig()
 	useSwapped.Store(true)
@@ -1801,7 +1801,7 @@ func TestCompositeRunner_CancelledReloadDoesNotErrorState(t *testing.T) {
 	defer runCancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(runCtx) }()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, runner.IsReady, 2*time.Second, 10*time.Millisecond)
 
 	useSwapped.Store(true)
 	cancelledCtx, cancel := context.WithCancel(context.Background())
@@ -1844,7 +1844,7 @@ func TestCompositeRunner_ReloadAfterStopDoesNotErrorState(t *testing.T) {
 	defer runCancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(runCtx) }()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, runner.IsReady, 2*time.Second, 10*time.Millisecond)
 
 	runner.Stop()
 	require.Eventually(t,
@@ -1904,7 +1904,7 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	defer runCancel()
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(runCtx) }()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, runner.IsReady, 2*time.Second, 10*time.Millisecond)
 
 	// Trigger Stop in a goroutine — it'll block in stopAllRunnables on slowStop.
 	stopReturned := make(chan struct{})
@@ -2012,7 +2012,7 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 
 	runErr := make(chan error, 1)
 	go func() { runErr <- runner.Run(ctx) }()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, runner.IsReady, 2*time.Second, 5*time.Millisecond)
 
 	// First reload: blocks inside child.Reload, parent FSM held in Reloading.
 	var first sync.WaitGroup
@@ -2051,7 +2051,7 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	// Release the in-flight reload so the runner returns to Running.
 	releaseOnce()
 	first.Wait()
-	require.Eventually(t, runner.IsRunning, 2*time.Second, 5*time.Millisecond,
+	require.Eventually(t, runner.IsReady, 2*time.Second, 5*time.Millisecond,
 		"runner should return to Running after the in-flight reload completes")
 
 	// .Once() on Reload asserts exactly one call reached the child.
@@ -2109,7 +2109,7 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 		}()
 
 		synctest.Wait()
-		require.True(t, runner.IsRunning())
+		require.True(t, runner.IsReady())
 
 		// Fan out 10 concurrent Reload callers. The FSM admission gate
 		// (TIC(Running, Reloading)) admits one at a time; the rest fail the

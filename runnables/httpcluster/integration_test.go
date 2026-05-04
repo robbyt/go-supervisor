@@ -33,7 +33,7 @@ func TestIntegration_BasicServerLifecycle(t *testing.T) {
 
 	// Wait for running
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Add a server
@@ -116,7 +116,7 @@ func TestIntegration_ConfigurationChanges(t *testing.T) {
 
 	// Wait for running
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Create initial config
@@ -261,7 +261,7 @@ func TestIntegration_StateReporting(t *testing.T) {
 
 	// Wait for running state
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Send config to trigger reload
@@ -293,7 +293,7 @@ func TestIntegration_StateReporting(t *testing.T) {
 
 	// Wait for reload to complete
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond, "Runner should be back to running after reload")
 
 	// Stop runner
@@ -353,7 +353,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	// Wait for running
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Send invalid config (this should not crash the runner)
@@ -370,7 +370,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	// Wait for invalid config to be processed (should not create any servers)
 	assert.Eventually(t, func() bool {
-		return runner.GetServerCount() == 0 && runner.IsRunning()
+		return runner.GetServerCount() == 0 && runner.IsReady()
 	}, time.Second, 10*time.Millisecond, "Invalid config should not create servers but runner should continue")
 
 	// Send multiple rapid config updates
@@ -405,7 +405,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	}
 
 	assert.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Stop runner
@@ -438,7 +438,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 
 	// Wait for running
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond)
 
 	// Create initial configuration
@@ -487,7 +487,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 
 	// Wait for server to be fully ready
 	require.Eventually(t, func() bool {
-		return originalRunner.IsRunning()
+		return originalRunner.IsReady()
 	}, time.Second, 10*time.Millisecond, "Server should be running")
 
 	// Apply the exact same configuration again
@@ -500,7 +500,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 
 	// Wait for configuration processing to complete
 	require.Eventually(t, func() bool {
-		return runner.IsRunning() // Cluster should be back to running state
+		return runner.IsReady() // Cluster should be back to running state
 	}, time.Second, 10*time.Millisecond, "Cluster should return to running state")
 
 	// Verify server count is still 1
@@ -528,7 +528,7 @@ func TestIntegration_IdenticalConfigPreservesServerInstance(t *testing.T) {
 
 	// Wait for configuration processing to complete
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 10*time.Millisecond, "Cluster should remain running")
 
 	// Verify everything is still the same
@@ -595,7 +595,7 @@ func TestIntegration_IdenticalConfigDoesNotTriggerActions(t *testing.T) {
 	entry := entries1.get("test-server")
 	require.NotNil(t, entry)
 	mockRunner := mocks.NewMockRunnableWithStateable()
-	mockRunner.On("IsRunning").Return(true)
+	mockRunner.On("IsReady").Return(true)
 	mockRunner.On("GetState").Return("Running")
 	entry.runner = mockRunner
 	entry.action = actionNone // Clear action after "starting"

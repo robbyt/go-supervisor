@@ -46,7 +46,7 @@ func testHttpClusterRaceCondition(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return cluster.IsRunning()
+		return cluster.IsReady()
 	}, 5*time.Second, 50*time.Millisecond, "Cluster should be running")
 	route, err := httpserver.NewRouteFromHandlerFunc(
 		"test",
@@ -152,7 +152,7 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "New", cluster.GetState())
-	assert.False(t, cluster.IsRunning())
+	assert.False(t, cluster.IsReady())
 	assert.Equal(t, 0, cluster.GetServerCount())
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -167,7 +167,7 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "Should transition to Booting")
 
 	assert.Eventually(t, func() bool {
-		return cluster.IsRunning() && cluster.GetState() == "Running"
+		return cluster.IsReady() && cluster.GetState() == "Running"
 	}, 5*time.Second, 50*time.Millisecond, "Should transition to Running")
 	route1, err := httpserver.NewRouteFromHandlerFunc("svc1", "/svc1",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -260,10 +260,10 @@ func TestIntegration_HttpClusterFullLifecycle(t *testing.T) {
 		return cluster.GetState() == "Stopped"
 	}, 1*time.Second, 10*time.Millisecond, "Should be Stopped")
 
-	assert.False(t, cluster.IsRunning())
+	assert.False(t, cluster.IsReady())
 }
 
-// TestHTTPClusterReadinessRaceCondition verifies that cluster.IsRunning() returns true
+// TestHTTPClusterReadinessRaceCondition verifies that cluster.IsReady() returns true
 // only when servers are actually ready to accept TCP connections.
 func TestHTTPClusterReadinessRaceCondition(t *testing.T) {
 	t.Parallel()
@@ -284,7 +284,7 @@ func TestHTTPClusterReadinessRaceCondition(t *testing.T) {
 	}()
 
 	assert.Eventually(t, func() bool {
-		return cluster.IsRunning()
+		return cluster.IsReady()
 	}, 5*time.Second, 10*time.Millisecond, "Cluster should be running")
 
 	route, err := httpserver.NewRouteFromHandlerFunc(
@@ -311,7 +311,7 @@ func TestHTTPClusterReadinessRaceCondition(t *testing.T) {
 	}
 
 	assert.Eventually(t, func() bool {
-		return cluster.IsRunning() && cluster.GetServerCount() == 1
+		return cluster.IsReady() && cluster.GetServerCount() == 1
 	}, 10*time.Second, 50*time.Millisecond, "Server should be reported as running")
 
 	conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)

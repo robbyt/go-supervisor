@@ -114,6 +114,21 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
 
+	case *mocks.MockRunnableWithReadiness:
+		mockObj.On("Run", mock.Anything).Return(nil)
+		mockObj.On("Stop").Return()
+		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("String").Return(displayName)
+
+		// Call and verify methods
+		err := mockObj.Run(context.Background())
+		require.NoError(t, err)
+		mockObj.Stop()
+		mockObj.Reload(t.Context())
+		name := mockObj.String()
+		assert.Equal(t, displayName, name)
+		mockObj.AssertExpectations(t)
+
 	default:
 		t.Fatalf("Unsupported mock type: %T", mockRunnable)
 	}
@@ -212,17 +227,31 @@ func TestMockRunnableWithStateable(t *testing.T) {
 		mockRunnable.AssertExpectations(t)
 	})
 
-	t.Run("IsRunning method", func(t *testing.T) {
+	t.Run("IsReady method", func(t *testing.T) {
 		// Create a mock
 		mockRunnable := mocks.NewMockRunnableWithStateable()
-		mockRunnable.On("IsRunning", mock.Anything).Return(true)
-		r := mockRunnable.IsRunning()
+		// IsReady takes no arguments; the expectation must match accordingly.
+		mockRunnable.On("IsReady").Return(true)
+		r := mockRunnable.IsReady()
 		assert.True(t, r)
 		mockRunnable.AssertExpectations(t)
 	})
 
 	t.Run("inherits from base Runnable", func(t *testing.T) {
 		testHelperInheritedMethods(t, mocks.NewMockRunnableWithStateable(), "StatefulService")
+	})
+}
+
+func TestMockRunnableWithReadiness(t *testing.T) {
+	t.Run("IsReady method", func(t *testing.T) {
+		mockRunnable := mocks.NewMockRunnableWithReadiness()
+		mockRunnable.On("IsReady").Return(true).Once()
+		require.True(t, mockRunnable.IsReady())
+		mockRunnable.AssertExpectations(t)
+	})
+
+	t.Run("inherits from base Runnable", func(t *testing.T) {
+		testHelperInheritedMethods(t, mocks.NewMockRunnableWithReadiness(), "ReadinessService")
 	})
 }
 

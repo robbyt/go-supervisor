@@ -27,7 +27,7 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 	stateChan := make(chan string, 5)
 	mockStateable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
 
-	mockStateable.On("IsRunning").Return(true).Once()
+	mockStateable.On("IsReady").Return(true).Once()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

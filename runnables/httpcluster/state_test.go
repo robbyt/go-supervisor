@@ -62,14 +62,14 @@ func TestGetStateChanWithTimeout(t *testing.T) {
 	}
 }
 
-func TestIsRunning(t *testing.T) {
+func TestIsReady(t *testing.T) {
 	t.Parallel()
 
 	runner, err := NewRunner()
 	require.NoError(t, err)
 
 	// Initially not running
-	assert.False(t, runner.IsRunning())
+	assert.False(t, runner.IsReady())
 
 	// Transition to running state
 	err = runner.fsm.Transition(finitestate.StatusBooting)
@@ -78,7 +78,7 @@ func TestIsRunning(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now should be running
-	assert.True(t, runner.IsRunning())
+	assert.True(t, runner.IsReady())
 }
 
 // MockFSMForStateError is a mock FSM that can simulate error conditions

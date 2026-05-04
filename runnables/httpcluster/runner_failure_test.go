@@ -34,7 +34,7 @@ func createCrashingMockServer(
 	}).Return(crashErr)
 	mockServer.On("Stop").Return().Maybe()
 	mockServer.On("GetState").Return(finitestate.StatusRunning).Maybe()
-	mockServer.On("IsRunning").Return(true).Maybe()
+	mockServer.On("IsReady").Return(true).Maybe()
 	stateChan := make(chan string, 1)
 	stateChan <- finitestate.StatusRunning
 	mockServer.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
@@ -42,7 +42,7 @@ func createCrashingMockServer(
 }
 
 // createErroredMockServer returns a mock whose GetState reports Error so
-// waitForIsRunning short-circuits via its `s == "Error"` branch. Used to
+// waitForReady short-circuits via its `s == "Error"` branch. Used to
 // simulate a child that fails to reach Running during a config update.
 func createErroredMockServer(ctx context.Context) *mocks.MockRunnableWithStateable {
 	mockServer := mocks.NewMockRunnableWithStateable()
@@ -51,7 +51,7 @@ func createErroredMockServer(ctx context.Context) *mocks.MockRunnableWithStateab
 	}).Return(nil)
 	mockServer.On("Stop").Return().Maybe()
 	mockServer.On("GetState").Return(finitestate.StatusError).Maybe()
-	mockServer.On("IsRunning").Return(false).Maybe()
+	mockServer.On("IsReady").Return(false).Maybe()
 	stateChan := make(chan string, 1)
 	stateChan <- finitestate.StatusError
 	mockServer.On("GetStateChan", mock.Anything).Return(stateChan).Maybe()
@@ -94,7 +94,7 @@ func TestRunner_ChildRuntimeError_TransitionsToError(t *testing.T) {
 	go func() {
 		runErr <- cluster.Run(ctx)
 	}()
-	require.Eventually(t, cluster.IsRunning, time.Second, 5*time.Millisecond)
+	require.Eventually(t, cluster.IsReady, time.Second, 5*time.Millisecond)
 
 	cluster.configSiphon <- map[string]*httpserver.Config{
 		failingServerID: createTestHTTPConfig(t, ":18001"),
@@ -151,7 +151,7 @@ func TestRunner_ConfigUpdateFailure_TransitionsToError(t *testing.T) {
 	go func() {
 		runErr <- cluster.Run(ctx)
 	}()
-	require.Eventually(t, cluster.IsRunning, time.Second, 5*time.Millisecond)
+	require.Eventually(t, cluster.IsReady, time.Second, 5*time.Millisecond)
 
 	cluster.configSiphon <- map[string]*httpserver.Config{
 		"broken": createTestHTTPConfig(t, ":18101"),
@@ -211,7 +211,7 @@ func TestRunner_PartialFailure_GoodSiblingsSurvive(t *testing.T) {
 	go func() {
 		runErr <- cluster.Run(ctx)
 	}()
-	require.Eventually(t, cluster.IsRunning, time.Second, 5*time.Millisecond)
+	require.Eventually(t, cluster.IsReady, time.Second, 5*time.Millisecond)
 
 	cluster.configSiphon <- map[string]*httpserver.Config{
 		brokenID:   createTestHTTPConfig(t, ":18201"),

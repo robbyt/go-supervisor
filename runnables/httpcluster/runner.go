@@ -119,10 +119,11 @@ func (r *Runner) GetServerCount() int {
 	return r.currentEntries.count()
 }
 
-// waitForIsRunning waits for an httpserver to reach Running state.
-// It returns true if the server was ready within the timeout deadline.
-// If the server is in error state, it returns false.
-func (r *Runner) waitForIsRunning(
+// waitForReady waits for an httpserver to finish its startup phase
+// (IsReady returns true). Returns true if the server was ready within the
+// timeout deadline. If the server reports Error or Stopped state, returns
+// false immediately.
+func (r *Runner) waitForReady(
 	ctx context.Context,
 	timeout time.Duration,
 	server httpServerRunner,
@@ -140,7 +141,7 @@ func (r *Runner) waitForIsRunning(
 		case <-ctx.Done():
 			return false
 		case <-timer.C:
-			if server.IsRunning() {
+			if server.IsReady() {
 				return true
 			}
 
@@ -428,7 +429,7 @@ func (r *Runner) startServers(
 		}
 
 		// Wait for server to be ready
-		if !r.waitForIsRunning(ctx, r.deadlineServerStart, runner) {
+		if !r.waitForReady(ctx, r.deadlineServerStart, runner) {
 			// Distinguish parent-ctx cancellation (the cluster is being told
 			// to stop — not a server failure) from a real readiness failure
 			// (timeout elapsed or server reached Error/Stopped). Only the
