@@ -591,11 +591,6 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		mockFSM.On("TransitionIfCurrentState",
 			finitestate.StatusRunning, finitestate.StatusReloading).
 			Return(nil).Once()
-		// Reload's deferred best-effort cleanup. May or may not fire depending
-		// on whether the test path reaches it; .Maybe() leaves it tolerant.
-		mockFSM.On("TransitionIfCurrentState",
-			finitestate.StatusReloading, finitestate.StatusRunning).
-			Return(errors.New("not in Reloading")).Maybe()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -629,11 +624,6 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		mockFSM.On("TransitionIfCurrentState",
 			finitestate.StatusRunning, finitestate.StatusReloading).
 			Return(nil).Once()
-		// Reload's deferred best-effort cleanup. May or may not fire depending
-		// on whether the test path reaches it; .Maybe() leaves it tolerant.
-		mockFSM.On("TransitionIfCurrentState",
-			finitestate.StatusReloading, finitestate.StatusRunning).
-			Return(errors.New("not in Reloading")).Maybe()
 		mockFSM.On("SetState", finitestate.StatusError).Return(nil).Once()
 		mockFSM.On("GetState").Return(finitestate.StatusError).Maybe()
 		// Must not expect Transition to Running since error path should prevent that
@@ -1845,60 +1835,72 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
 }
 
+// TestCompositeRunner_ConcurrentReload exercises the FSM admission gate
+// under fan-in: 10 concurrent Reload callers must leave the runner in
+// Running, never Error. The FSM gate (TIC(Running, Reloading)) admits at
+// most one in-flight reload at a time; the rest drop.
+//
+// Run under synctest so the scheduling is deterministic and the test does
+// not depend on wall-clock budgets — an earlier wall-clock variant flaked on
+// slow CI runners where preemption between the now-removed catch-all defer
+// and the next admission could drive the FSM to Error.
 func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		mockRunnable := mocks.NewMockRunnable()
+		mockRunnable.On("String").Return("concurrent-reloader").Maybe()
+		mockRunnable.On("Reload", mock.Anything).Return()
+		mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		mockRunnable.On("Stop").Return().Maybe()
 
-	mockRunnable := mocks.NewMockRunnable()
-	mockRunnable.On("String").Return("concurrent-reloader").Maybe()
-	mockRunnable.On("Reload", mock.Anything).Return()
-	mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
-		<-args.Get(0).(context.Context).Done()
-	}).Return(context.Canceled).Maybe()
-	mockRunnable.On("Stop").Return().Maybe()
+		entries := []RunnableEntry[*mocks.Runnable]{
+			{Runnable: mockRunnable, Config: nil},
+		}
 
-	entries := []RunnableEntry[*mocks.Runnable]{
-		{Runnable: mockRunnable, Config: nil},
-	}
+		configCallback := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", entries)
+		}
 
-	configCallback := func() (*Config[*mocks.Runnable], error) {
-		return NewConfig("test", entries)
-	}
+		runner, err := NewRunner(configCallback)
+		require.NoError(t, err)
 
-	runner, err := NewRunner(configCallback)
-	require.NoError(t, err)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		runErr := make(chan error, 1)
+		go func() {
+			runErr <- runner.Run(ctx)
+		}()
 
-	runErr := make(chan error, 1)
-	go func() {
-		runErr <- runner.Run(ctx)
-	}()
+		synctest.Wait()
+		require.True(t, runner.IsRunning())
 
-	require.Eventually(t, func() bool {
-		return runner.IsRunning()
-	}, 2*time.Second, 10*time.Millisecond)
+		// Fan out 10 concurrent Reload callers. The FSM admission gate
+		// (TIC(Running, Reloading)) admits one at a time; the rest fail the
+		// gate and drop. Each admitted call dispatches through Run's event
+		// loop, which owns the Reloading→Running transition on completion.
+		// wg.Wait is durably blocking under synctest because wg.Go was
+		// called inside the bubble.
+		var wg sync.WaitGroup
+		for range 10 {
+			wg.Go(func() {
+				runner.Reload(t.Context())
+			})
+		}
+		wg.Wait()
 
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
-			runner.Reload(t.Context())
-		})
-	}
-	wg.Wait()
+		require.Equal(t, finitestate.StatusRunning, runner.GetState(),
+			"runner should be Running after concurrent reloads, not Error")
 
-	require.Eventually(t, func() bool {
-		return runner.IsRunning()
-	}, 2*time.Second, 10*time.Millisecond, "runner should be Running after concurrent reloads, not Error")
-
-	cancel()
-	require.Eventually(t, func() bool {
+		cancel()
+		synctest.Wait()
 		select {
 		case err := <-runErr:
-			assert.NoError(t, err)
-			return true
+			require.NoError(t, err)
 		default:
-			return false
+			t.Fatal("runner should shut down cleanly")
 		}
-	}, 2*time.Second, 10*time.Millisecond, "runner should shut down cleanly")
+	})
 }

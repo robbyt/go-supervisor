@@ -30,6 +30,13 @@ type ReloadableWithConfig interface {
 // accepted by Run's loop. Once accepted, Reload waits for the work to finish
 // — caller's ctx is intentionally ignored at that point so the caller never
 // observes FSM=Reloading after Reload returns.
+//
+// Cleanup follows httpserver's per-branch pattern (no catch-all defer): each
+// abort path that leaves FSM=Reloading transitions it back explicitly. A
+// catch-all defer would race the next admission gate — after handleReload
+// completed Reloading→Running and a new caller won the gate, the previous
+// caller's defer could fire `TIC(Reloading→Running)` and erroneously release
+// the new caller's gate, derailing the new request's Run loop transition.
 func (r *Runner[T]) Reload(ctx context.Context) {
 	logger := r.logger.WithGroup("Reload")
 
@@ -57,25 +64,6 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 		return
 	}
 
-	// Best-effort FSM cleanup: covers the outer-abort cases (Run never picked
-	// up the request) where we hold Reloading but no apply ever ran. Run's
-	// handleReload owns the transition for any request it dispatched, so this
-	// is a no-op in the success path.
-	defer func() {
-		if transErr := r.fsm.TransitionIfCurrentState(
-			finitestate.StatusReloading, finitestate.StatusRunning,
-		); transErr != nil {
-			current := r.fsm.GetState()
-			if current == finitestate.StatusReloading {
-				logger.Error("FSM stuck in Reloading after dispatch", "error", transErr)
-				r.setStateError()
-			} else {
-				logger.Debug("FSM moved out of Reloading during reload",
-					"current", current)
-			}
-		}
-	}()
-
 	newConfig, err := r.configCallback()
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
@@ -92,10 +80,12 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 }
 
 // dispatchReload sends an accepted reload to Run's event loop and waits for
-// completion. Aborts cleanly if the runner has already exited or the caller's
-// ctx fires before Run picks the request up — once dispatched, the work runs
-// to completion and the caller waits unconditionally on done (mirrors
-// httpserver's pattern).
+// completion. On the happy path, handleReload owns the FSM transition
+// Reloading→Running; on the shutdown path, drainReloadCh owns it. On either
+// abort path before send (caller's ctx fires, runner stops), this function
+// transitions the FSM back to Running explicitly. Mirrors httpserver's
+// per-branch cleanup so we never leave a catch-all defer racing the next
+// caller's admission gate.
 func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
 	logger := r.logger.WithGroup("dispatchReload")
 	req := &reloadReq[T]{cfg: newConfig, done: make(chan struct{})}
@@ -106,8 +96,16 @@ func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
 		<-req.done
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition Reloading→Running", "error", err)
+			r.setStateError()
+		}
 	case <-r.lc.DoneCh():
 		logger.Debug("Runner stopped before reload dispatch")
+		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+			logger.Error("Failed to transition Reloading→Running", "error", err)
+			r.setStateError()
+		}
 	}
 }
 

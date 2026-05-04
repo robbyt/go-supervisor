@@ -231,12 +231,22 @@ func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
 // after Run's select loop exits. Without this, a Reload caller blocked on
 // done would only unblock via lc.DoneCh() in its outer select — closing done
 // makes the protocol explicit and unblocks the caller's done branch
-// deterministically. The Reload caller's deferred FSM cleanup transitions
-// any leftover Reloading state back to Running.
+// deterministically.
+//
+// Also transitions the FSM Reloading→Running before closing done. Run is the
+// single FSM mutator during reload, so this best-effort transition (a no-op
+// if FSM isn't Reloading) keeps the runner's subsequent Stopping/Stopped
+// transitions valid: Reloading→Stopped is not a legal transition per the FSM
+// table, but Running→Stopping→Stopped is.
 func (r *Runner[T]) drainReloadCh() {
 	for {
 		select {
 		case req := <-r.reloadCh:
+			if err := r.fsm.TransitionIfCurrentState(
+				finitestate.StatusReloading, finitestate.StatusRunning,
+			); err != nil {
+				r.logger.Debug("drainReloadCh: FSM not in Reloading", "error", err)
+			}
 			close(req.done)
 		default:
 			return
