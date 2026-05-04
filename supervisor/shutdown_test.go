@@ -423,6 +423,78 @@ func TestPIDZero_Shutdown(t *testing.T) {
 	})
 }
 
+// TestPIDZero_ShutdownSender_DuringReload covers Codex stability gap #7: a
+// ShutdownSender trigger fires while a reload is in flight. With the T1.3
+// channel-dispatch fix the listener cancels p.ctx and reap's existing
+// <-p.ctx.Done() arm invokes Shutdown — so an in-flight Reload doesn't wedge
+// the shutdown handoff. Pre-T1.3, the listener called Shutdown() inline,
+// which created a circular wait (listener inside Shutdown's p.wg.Wait while
+// startShutdownManager waited on the listener via shutdownWg.Wait); T1.2's
+// shutdownTimeout bounded that wedge but logged "Shutdown timeout exceeded".
+// We pin the post-T1.3 contract — Shutdown must complete promptly, not
+// burn the full shutdownTimeout — by making the configured budget small and
+// asserting Run returns well within it.
+//
+// Cannot use synctest: this calls pidZero.Run(), which uses signal.Notify.
+func TestPIDZero_ShutdownSender_DuringReload(t *testing.T) {
+	t.Parallel()
+
+	const shutdownBudget = 500 * time.Millisecond
+
+	runnable := mocks.NewMockRunnableWithShutdownSender()
+	shutdownChan := make(chan struct{}, 1)
+	runStarted := make(chan struct{})
+	reloadStarted := make(chan struct{})
+	releaseReload := make(chan struct{})
+
+	runnable.On("GetShutdownTrigger").Return(shutdownChan).Once()
+	runnable.On("String").Return("shutdownReloadRunnable").Maybe()
+	runnable.On("Run", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		close(runStarted)
+		<-ctx.Done()
+	})
+	runnable.On("Reload", mock.Anything).Return().Once().Run(func(args mock.Arguments) {
+		close(reloadStarted)
+		<-releaseReload
+	})
+	runnable.On("Stop").Once()
+
+	pidZero := newTestPIDZero(t,
+		WithRunnables(runnable),
+		WithShutdownTimeout(shutdownBudget),
+	)
+
+	execDone := startPIDZeroRun(t, pidZero)
+	eventuallyClosed(t, runStarted, "Run did not start in time")
+
+	// Kick off a reload and wait until the mock confirms it's actually
+	// inside Reload (not just queued by the manager). At that point the
+	// reload-manager goroutine is blocked on releaseReload.
+	go pidZero.ReloadAll()
+	eventuallyClosed(t, reloadStarted, "Reload did not start in time")
+
+	// Fire the shutdown trigger while Reload is mid-call. The listener
+	// cancels p.ctx; reap's <-p.ctx.Done() arm dispatches Shutdown.
+	shutdownStart := time.Now()
+	shutdownChan <- struct{}{}
+
+	// Release the reload so the reload-manager goroutine can return and
+	// observe its own ctx.Done(). Shutdown's wg.Wait must not wedge.
+	close(releaseReload)
+
+	requirePIDZeroRunDone(t, execDone, time.Second)
+	shutdownDuration := time.Since(shutdownStart)
+
+	// With T1.3 shutdown should complete promptly — well inside the
+	// configured budget. A regression that re-introduces the circular wait
+	// would push this near or past the budget (bounded by T1.2's deadline).
+	require.Less(t, shutdownDuration, shutdownBudget/2,
+		"Shutdown took %v of %v budget — circular wait between listener and shutdown manager?",
+		shutdownDuration, shutdownBudget)
+	runnable.AssertExpectations(t)
+}
+
 func newTestPIDZero(t *testing.T, opts ...Option) *PIDZero {
 	t.Helper()
 

@@ -985,6 +985,76 @@ func TestPIDZero_Run_PreCancelledCtxStopsAtFirst(t *testing.T) {
 		"C's Run must not be called when parent ctx is pre-cancelled (iter > 0)")
 }
 
+// slowBootRunnable wraps MockRunnableWithStateable so the test can gate
+// IsRunning() on a channel rather than testify's count-based mock returns.
+// This holds the supervisor's startup loop in blockUntilRunnableReady until
+// the gate is closed, giving the test a deterministic window to inject a
+// signal mid-boot.
+type slowBootRunnable struct {
+	*mocks.MockRunnableWithStateable
+	ready chan struct{}
+}
+
+func (s *slowBootRunnable) IsRunning() bool {
+	select {
+	case <-s.ready:
+		return true
+	default:
+		return false
+	}
+}
+
+// TestPIDZero_Run_SIGTERMDuringBoot covers Codex stability gap #8: SIGTERM
+// arriving during the startup loop, before all Stateable runnables have
+// transitioned to Running. signal.Notify's buffered channel queues the
+// signal; the startup loop doesn't drain it (only reap does). Once boot
+// completes the queued SIGTERM is processed and Shutdown runs cleanly.
+//
+// Cannot use synctest: this calls pidZero.Run(), which uses signal.Notify.
+func TestPIDZero_Run_SIGTERMDuringBoot(t *testing.T) {
+	t.Parallel()
+
+	runStarted := make(chan struct{})
+	ready := make(chan struct{})
+
+	base := mocks.NewMockRunnableWithStateable()
+	base.On("String").Return("slowBootRunnable").Maybe()
+	base.On("Run", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
+		ctx := args.Get(0).(context.Context)
+		close(runStarted)
+		<-ctx.Done()
+	})
+	base.On("GetState").Return("Booting").Maybe()
+	base.On("GetStateChan", mock.Anything).Return(make(chan string)).Maybe()
+	base.On("Stop").Once()
+
+	runnable := &slowBootRunnable{MockRunnableWithStateable: base, ready: ready}
+
+	pidZero := newTestPIDZero(t,
+		WithRunnables(runnable),
+		WithStartupTimeout(2*time.Second),
+		WithShutdownTimeout(time.Second),
+	)
+
+	execDone := startPIDZeroRun(t, pidZero)
+	eventuallyClosed(t, runStarted, "Run did not start in time")
+
+	// Inject SIGTERM while Run is still in its startup phase —
+	// blockUntilRunnableReady is either in its initial time.Sleep
+	// (p.startupInitial, default 50ms) or polling IsRunning() afterwards.
+	// Either way reap hasn't started, so the signal queues in p.signalChan
+	// and nothing drains it yet.
+	pidZero.SendSignal(syscall.SIGTERM)
+
+	// Release the startup gate so blockUntilRunnableReady returns and Run's
+	// startup loop falls through into reap, which drains the buffered
+	// SIGTERM and triggers Shutdown.
+	close(ready)
+
+	requirePIDZeroRunDone(t, execDone, 3*time.Second)
+	base.AssertExpectations(t)
+}
+
 // TestPIDZero_Reap_UnhandledSignal tests the default case in signal handling.
 func TestPIDZero_Reap_UnhandledSignal(t *testing.T) {
 	t.Parallel()
