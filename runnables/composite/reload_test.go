@@ -58,8 +58,8 @@ type MockReloadableWithConfig struct {
 	*mocks.Runnable
 }
 
-func (m *MockReloadableWithConfig) ReloadWithConfig(config any) {
-	m.Called(config)
+func (m *MockReloadableWithConfig) ReloadWithConfig(ctx context.Context, config any) {
+	m.Called(ctx, config)
 }
 
 func NewMockReloadableWithConfig() *MockReloadableWithConfig {
@@ -430,7 +430,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockReloadable1 := NewMockReloadableWithConfig()
 		mockReloadable1.On("String").Return("reloadable1")
-		mockReloadable1.On("ReloadWithConfig", updatedConfig1).Once()
+		mockReloadable1.On("ReloadWithConfig", mock.Anything, updatedConfig1).Once()
 		mockReloadable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Once()
@@ -442,7 +442,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockReloadable2 := NewMockReloadableWithConfig()
 		mockReloadable2.On("String").Return("reloadable2")
-		mockReloadable2.On("ReloadWithConfig", updatedConfig2).Once()
+		mockReloadable2.On("ReloadWithConfig", mock.Anything, updatedConfig2).Once()
 		mockReloadable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Once()
@@ -1018,13 +1018,13 @@ func TestReloadConfig(t *testing.T) {
 		mockReloadable1.On("String").Return("reloadable1").Maybe()
 
 		customConfig1 := map[string]string{"key": "value1"}
-		mockReloadable1.On("ReloadWithConfig", customConfig1).Once()
+		mockReloadable1.On("ReloadWithConfig", mock.Anything, customConfig1).Once()
 
 		mockReloadable2 := NewMockReloadableWithConfig()
 		mockReloadable2.On("String").Return("reloadable2").Maybe()
 
 		customConfig2 := map[string]string{"key": "value2"}
-		mockReloadable2.On("ReloadWithConfig", customConfig2).Once()
+		mockReloadable2.On("ReloadWithConfig", mock.Anything, customConfig2).Once()
 
 		// Create entries
 		entries := []RunnableEntry[*MockReloadableWithConfig]{
@@ -1061,7 +1061,7 @@ func TestReloadConfig(t *testing.T) {
 		mockReloadable.On("String").Return("reloadable").Maybe()
 
 		customConfig := map[string]string{"key": "value"}
-		mockReloadable.On("ReloadWithConfig", customConfig).Once()
+		mockReloadable.On("ReloadWithConfig", mock.Anything, customConfig).Once()
 
 		// Create both configs
 		entries1 := []RunnableEntry[*mocks.Runnable]{
@@ -1097,6 +1097,40 @@ func TestReloadConfig(t *testing.T) {
 		// Verify expectations
 		mockRunnable.AssertExpectations(t)
 		mockReloadable.AssertExpectations(t)
+	})
+
+	// Covers the T3.4 contract: reloadSkipRestart threads its ctx into the
+	// ReloadableWithConfig branch (not just into the Reloadable fallback).
+	// Without this, a child reload couldn't observe caller cancellation.
+	t.Run("threads ctx into ReloadWithConfig", func(t *testing.T) {
+		mockReloadable := NewMockReloadableWithConfig()
+		mockReloadable.On("String").Return("ctx-reloadable").Maybe()
+
+		cfg := map[string]string{"key": "v"}
+		// Capture the ctx the runner passes through and verify it matches.
+		var receivedCtx context.Context
+		mockReloadable.On("ReloadWithConfig", mock.Anything, cfg).Run(func(args mock.Arguments) {
+			receivedCtx = args.Get(0).(context.Context)
+		}).Once()
+
+		entries := []RunnableEntry[*MockReloadableWithConfig]{
+			{Runnable: mockReloadable, Config: cfg},
+		}
+		config, err := NewConfig("ctx-test", entries)
+		require.NoError(t, err)
+
+		runner, err := NewRunner(func() (*Config[*MockReloadableWithConfig], error) {
+			return config, nil
+		})
+		require.NoError(t, err)
+
+		callerCtx := t.Context()
+		require.NoError(t, runner.reloadSkipRestart(callerCtx, config))
+
+		mockReloadable.AssertExpectations(t)
+		require.NotNil(t, receivedCtx, "ReloadWithConfig must receive a non-nil ctx")
+		require.Same(t, callerCtx, receivedCtx,
+			"ReloadWithConfig must receive the same ctx the caller passed to reloadSkipRestart")
 	})
 }
 

@@ -262,7 +262,7 @@ func TestWorker_ReloadWithConfig(t *testing.T) {
 		JobName:  "updated-job-reload",
 	}
 	t.Logf("Reloading with valid config: %+v", newConfig)
-	worker.ReloadWithConfig(newConfig)
+	worker.ReloadWithConfig(t.Context(), newConfig)
 
 	// Wait for the configuration to be applied using Eventually
 	require.Eventually(t, func() bool {
@@ -276,7 +276,7 @@ func TestWorker_ReloadWithConfig(t *testing.T) {
 	// --- Test Invalid Config Type ---
 	configAfterValidReload := readWorkerConfig(t, worker) // Store state before invalid reload
 	t.Log("Reloading with invalid type 'string'")
-	worker.ReloadWithConfig("invalid type") // Pass a non-WorkerConfig type
+	worker.ReloadWithConfig(t.Context(), "invalid type") // Pass a non-WorkerConfig type
 
 	// Wait a short time and assert config hasn't changed
 	assert.Eventually(t, func() bool {
@@ -294,7 +294,7 @@ func TestWorker_ReloadWithConfig(t *testing.T) {
 	// --- Test Invalid Config Values ---
 	invalidValueConfig := WorkerConfig{Interval: 0, JobName: "wont-apply"}
 	t.Logf("Reloading with invalid value config: %+v", invalidValueConfig)
-	worker.ReloadWithConfig(invalidValueConfig)
+	worker.ReloadWithConfig(t.Context(), invalidValueConfig)
 
 	// Wait and assert config hasn't changed
 	assert.Eventually(t, func() bool {
@@ -307,6 +307,34 @@ func TestWorker_ReloadWithConfig(t *testing.T) {
 		currentConfig,
 		"Config should not change after invalid value reload",
 	)
+}
+
+// TestWorker_ReloadWithConfig_RespectsCtx covers the T3.4 contract: a
+// cancelled ctx aborts ReloadWithConfig before the new config gets queued.
+// Without ctx-honoring, a SIGHUP-bombing caller could leak configs into the
+// worker's queue even after the supervisor has begun shutting down.
+func TestWorker_ReloadWithConfig_RespectsCtx(t *testing.T) {
+	t.Parallel()
+	logger, _ := testLogger(t, false)
+
+	initial := WorkerConfig{Interval: 50 * time.Millisecond, JobName: "ctx-test"}
+	worker, err := NewWorker(initial, logger)
+	require.NoError(t, err)
+
+	// No need to start Run — ReloadWithConfig only touches the nextConfig
+	// queue, and the queue is drained by Run. With no Run goroutine, the
+	// queue stays empty unless ReloadWithConfig pushes into it.
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	newCfg := WorkerConfig{Interval: 100 * time.Millisecond, JobName: "should-not-queue"}
+	worker.ReloadWithConfig(cancelled, newCfg)
+
+	select {
+	case queued := <-worker.nextConfig:
+		t.Fatalf("ReloadWithConfig queued a config despite cancelled ctx: %+v", queued)
+	default:
+	}
 }
 
 // TestWorker_Execution_Timing tests that the worker ticks according to the configured interval,
@@ -398,7 +426,7 @@ func TestWorker_Execution_Timing(t *testing.T) {
 	// --- Test Reloaded Interval ---
 	newConfig := WorkerConfig{Interval: reloadedInterval, JobName: "timing-job-reloaded"}
 	t.Logf("Reloading config with interval: %v", reloadedInterval)
-	worker.ReloadWithConfig(newConfig)
+	worker.ReloadWithConfig(t.Context(), newConfig)
 
 	// Ensure config is applied before measuring again
 	require.Eventually(t, func() bool {
@@ -470,6 +498,7 @@ func TestWorker_ReloadWithConfig_Concurrency(t *testing.T) {
 	reloadWg.Add(numReloads)
 
 	finalConfig := WorkerConfig{} // Store the config from the last reload goroutine
+	reloadCtx := t.Context()
 
 	// Launch concurrent reloads
 	for i := range numReloads {
@@ -484,7 +513,7 @@ func TestWorker_ReloadWithConfig_Concurrency(t *testing.T) {
 			if index == numReloads-1 {
 				finalConfig = cfg
 			}
-			worker.ReloadWithConfig(cfg)
+			worker.ReloadWithConfig(reloadCtx, cfg)
 		}(i)
 	}
 
