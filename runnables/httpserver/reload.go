@@ -83,17 +83,18 @@ func (r *Runner) Reload(ctx context.Context) error {
 		return dispatchErr
 	}
 
-	req := &reloadReq{cfg: newCfg, done: make(chan struct{})}
+	// Buffer 1: lets Run/drain side send-and-go without coordinating with
+	// our receive. The req only ever has one writer (whichever side runs
+	// first) and one reader.
+	req := &reloadReq{cfg: newCfg, result: make(chan error, 1)}
 	select {
 	case r.reloadCh <- req:
-		// Accepted. Wait for Run to finish the restart (or for the runner to
-		// stop, in which case drainReloadCh closes req.done). Caller's ctx
-		// is intentionally ignored here: returning while Run is still
-		// restarting would let the caller observe FSM=Reloading after Reload
-		// returned. req.err carries the outcome — close(done) → <-done
-		// gives us the happens-before edge.
-		<-req.done
-		return req.err
+		// Accepted. Wait for Run's event loop (or drainReloadCh on Run
+		// exit) to send the outcome on req.result. Caller's ctx is
+		// intentionally ignored here: returning while Run is still
+		// restarting would let the caller observe FSM=Reloading after
+		// Reload returned.
+		return <-req.result
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {

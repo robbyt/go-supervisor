@@ -95,14 +95,16 @@ func (r *Runner[T]) Reload(ctx context.Context) error {
 // per-branch cleanup so we never leave a catch-all defer racing the next
 // caller's admission gate.
 func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) error {
-	req := &reloadReq[T]{cfg: newConfig, done: make(chan struct{})}
+	// Buffer 1: lets the Run/drain side send-and-go without coordinating
+	// with our receive. The req only ever has one writer (whichever side
+	// runs first) and one reader.
+	req := &reloadReq[T]{cfg: newConfig, result: make(chan error, 1)}
 	select {
 	case r.reloadCh <- req:
-		// Accepted. Wait for Run to finish (or for drainReloadCh to close
-		// done if Run exits before processing). req.err carries the
-		// outcome; close(done) → <-done provides the happens-before edge.
-		<-req.done
-		return req.err
+		// Accepted. Wait for Run's event loop (or drainReloadCh on Run
+		// exit) to send the outcome on req.result. The send happens-before
+		// the receive, so we read whatever Run produced.
+		return <-req.result
 	case <-ctx.Done():
 		r.abortDispatch("Reload caller ctx done before dispatch", "error", ctx.Err())
 		return ctx.Err()

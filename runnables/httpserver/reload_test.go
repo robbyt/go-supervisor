@@ -182,7 +182,7 @@ func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
 		require.Equal(t, 2, callbackCalls, "Reload should check whether the config changed")
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("unchanged reload should not dispatch to the Run event loop")
 		default:
 		}
@@ -231,7 +231,7 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		select {
 		case req := <-runner.reloadCh:
 			assert.Same(t, updatedCfg, req.cfg)
-			close(req.done)
+			req.result <- nil
 		default:
 			t.Fatal("changed reload should dispatch to the Run event loop")
 		}
@@ -335,7 +335,7 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("pre-canceled caller context should prevent reload dispatch")
 		default:
 		}
@@ -403,7 +403,7 @@ func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
 
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("reload should not dispatch when no Run loop is active")
 		default:
 		}
@@ -431,7 +431,7 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 		defer done()
 		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
-		blockingReq := &reloadReq{cfg: initialCfg, done: make(chan struct{})}
+		blockingReq := &reloadReq{cfg: initialCfg, result: make(chan error, 1)}
 		runner.reloadCh <- blockingReq
 
 		useUpdated = true

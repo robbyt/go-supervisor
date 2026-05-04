@@ -819,7 +819,7 @@ func TestDispatchReload_AbortBranches(t *testing.T) {
 		bringToReloading(t, runner)
 
 		// Fill the cap-1 reloadCh buffer so the send case blocks.
-		runner.reloadCh <- &reloadReq[*mocks.Runnable]{done: make(chan struct{})}
+		runner.reloadCh <- &reloadReq[*mocks.Runnable]{result: make(chan error, 1)}
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -842,7 +842,7 @@ func TestDispatchReload_AbortBranches(t *testing.T) {
 		// the buffer is full and ctx is live.
 		bringToReloading(t, runner)
 
-		runner.reloadCh <- &reloadReq[*mocks.Runnable]{done: make(chan struct{})}
+		runner.reloadCh <- &reloadReq[*mocks.Runnable]{result: make(chan error, 1)}
 
 		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
@@ -1917,7 +1917,7 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	// drainReloadCh can clear this and close req.done.
 	staleCfg, err := NewConfig("stale", []RunnableEntry[*mocks.Runnable]{{Runnable: altChild}})
 	require.NoError(t, err)
-	stale := &reloadReq[*mocks.Runnable]{cfg: staleCfg, done: make(chan struct{})}
+	stale := &reloadReq[*mocks.Runnable]{cfg: staleCfg, result: make(chan error, 1)}
 	runner.reloadCh <- stale
 	require.Len(t, runner.reloadCh, 1, "stale request must land in buffer")
 
@@ -1935,12 +1935,13 @@ func TestCompositeRunner_DrainReloadCh_OnShutdown(t *testing.T) {
 	require.Empty(t, runner.reloadCh,
 		"deferred drainReloadCh must have cleared the stale request")
 
-	// drainReloadCh closes req.done so any caller blocked on it unblocks
-	// deterministically rather than relying on a separate signal.
+	// drainReloadCh sends the abandonment error on req.result so any
+	// caller blocked on the receive unblocks deterministically.
 	select {
-	case <-stale.done:
+	case err := <-stale.result:
+		require.Error(t, err, "drainReloadCh must surface the abandonment error")
 	case <-time.After(2 * time.Second):
-		t.Fatal("drainReloadCh must close req.done so callers unblock")
+		t.Fatal("drainReloadCh must send on req.result so callers unblock")
 	}
 
 	// Side effects from the stale request must NOT have fired — altChild

@@ -46,16 +46,14 @@ type Runner[T runnable] struct {
 // otherwise observe FSM=Reloading and trip on Reloading→Stopped (an invalid
 // transition per transitions.Typical).
 //
-// done is closed by Run after handleReload finishes — including from
-// drainReloadCh on Run exit — so a caller blocked on done always unblocks.
-//
-// err is set by handleReload before closing done. Reload reads it after
-// <-done and returns it to its own caller. close(done) → <-done provides
-// the happens-before edge, so no mutex is needed.
+// result is the result channel: Run sends the reload outcome on it (nil on
+// success, non-nil on failure) — including from drainReloadCh on Run exit,
+// which sends the abandonment sentinel — so a caller blocked on the receive
+// always unblocks with a meaningful value. The channel doubles as both the
+// completion signal and the error carrier; no shared mutable field needed.
 type reloadReq[T runnable] struct {
-	cfg  *Config[T]
-	done chan struct{}
-	err  error
+	cfg    *Config[T]
+	result chan error
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
@@ -193,8 +191,7 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 			stopErr := r.stopAllRunnables()
 			return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
 		case req := <-r.reloadCh:
-			req.err = r.handleReload(ctx, req.cfg)
-			close(req.done)
+			req.result <- r.handleReload(ctx, req.cfg)
 		}
 	}
 }
@@ -234,13 +231,13 @@ func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
 	return nil
 }
 
-// drainReloadCh closes done on any reload request still buffered in reloadCh
-// after Run's select loop exits. Without this, a Reload caller blocked on
-// done would only unblock via lc.DoneCh() in its outer select — closing done
-// makes the protocol explicit and unblocks the caller's done branch
-// deterministically.
+// drainReloadCh sends an abandonment error on req.result for any reload
+// request still buffered in reloadCh after Run's select loop exits. Without
+// this, a Reload caller blocked on the receive would only unblock via
+// lc.DoneCh() in its outer select — sending here makes the protocol explicit
+// and unblocks the caller's result branch deterministically.
 //
-// Also transitions the FSM Reloading→Running before closing done. Run is the
+// Also transitions the FSM Reloading→Running before sending. Run is the
 // single FSM mutator during reload, so this best-effort transition (a no-op
 // if FSM isn't Reloading) keeps the runner's subsequent Stopping/Stopped
 // transitions valid: Reloading→Stopped is not a legal transition per the FSM
@@ -254,11 +251,11 @@ func (r *Runner[T]) drainReloadCh() {
 			); err != nil {
 				r.logger.Debug("drainReloadCh: FSM not in Reloading", "error", err)
 			}
-			// Surface the abandonment via req.err so Reload's <-req.done
-			// branch returns a non-nil error per T3.1. Without this, an
-			// accepted-then-drained reload silently looks like success.
-			req.err = errors.New("runner stopped before reload was handled")
-			close(req.done)
+			// Surface the abandonment via req.result so Reload's
+			// <-req.result branch returns a non-nil error per T3.1.
+			// Without this, an accepted-then-drained reload would
+			// silently look like success.
+			req.result <- errors.New("runner stopped before reload was handled")
 		default:
 			return
 		}
