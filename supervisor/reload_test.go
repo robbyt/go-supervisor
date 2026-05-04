@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/mocks"
@@ -311,5 +312,39 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 				return false
 			}
 		}, 2*time.Second, 10*time.Millisecond, "shutdown timed out")
+	})
+
+	// Once the supervisor's ctx is cancelled, startReloadManager exits and stops
+	// draining reloadListener. Without the ctx-aware select in ReloadAll, an
+	// unbuffered send into the dead channel wedges forever — SIGHUP-bombing
+	// during shutdown (`go p.ReloadAll()` on each SIGHUP) leaks goroutines.
+	// Drives startReloadManager directly inside synctest because Run() uses
+	// signal.Notify, which isn't synctest-compatible.
+	t.Run("ReloadAll returns after ctx cancel without wedging", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			mockService := mocks.NewMockRunnable()
+
+			pidZero := newTestPIDZero(t, WithContext(ctx), WithRunnables(mockService))
+			pidZero.wg.Go(pidZero.startReloadManager)
+
+			cancel()
+			synctest.Wait()
+
+			reloadDone := make(chan struct{})
+			go func() {
+				pidZero.ReloadAll()
+				close(reloadDone)
+			}()
+			synctest.Wait()
+
+			select {
+			case <-reloadDone:
+			default:
+				t.Fatal("ReloadAll wedged after ctx cancel — unbuffered send with no drainer")
+			}
+		})
 	})
 }
