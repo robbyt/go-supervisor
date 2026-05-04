@@ -87,7 +87,6 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 // per-branch cleanup so we never leave a catch-all defer racing the next
 // caller's admission gate.
 func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
-	logger := r.logger.WithGroup("dispatchReload")
 	req := &reloadReq[T]{cfg: newConfig, done: make(chan struct{})}
 	select {
 	case r.reloadCh <- req:
@@ -95,17 +94,24 @@ func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
 		// done if Run exits before processing).
 		<-req.done
 	case <-ctx.Done():
-		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
-		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-			logger.Error("Failed to transition Reloading→Running", "error", err)
-			r.setStateError()
-		}
+		r.abortDispatch("Reload caller ctx done before dispatch", "error", ctx.Err())
 	case <-r.lc.DoneCh():
-		logger.Debug("Runner stopped before reload dispatch")
-		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
-			logger.Error("Failed to transition Reloading→Running", "error", err)
-			r.setStateError()
-		}
+		r.abortDispatch("Runner stopped before reload dispatch")
+	}
+}
+
+// abortDispatch is the per-branch cleanup for dispatchReload's abort paths.
+// Reload moved FSM Running→Reloading at admission; we must put it back to
+// Running before returning so the next admission gate sees a clean state. If
+// the transition fails (e.g., FSM was already moved by a concurrent shutdown
+// or setStateError), escalate to Error: by this point the FSM is in some
+// terminal-leaning state and a stuck Reloading is the worst outcome.
+func (r *Runner[T]) abortDispatch(reason string, attrs ...any) {
+	logger := r.logger.WithGroup("dispatchReload")
+	logger.Debug(reason, attrs...)
+	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
+		logger.Error("Failed to transition Reloading→Running", "error", err)
+		r.setStateError()
 	}
 }
 
