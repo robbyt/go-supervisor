@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -112,16 +113,16 @@ func TestGetRandomPortFailsOnListenError(t *testing.T) {
 }
 
 func TestGetRandomListeningPortRetriesOnRebindFailure(t *testing.T) {
-	calls := 0
 	var failedPort int
 
 	withListenTCP(t, func(network, address string) (net.Listener, error) {
-		calls++
 		// Calls alternate: GetRandomPort (":0") then re-bind on port (":N").
 		// Fail the first re-bind, succeed afterwards.
 		if address != ":0" && failedPort == 0 {
 			// Capture the port so we can check it gets released, then fail.
-			fmt.Sscanf(address, ":%d", &failedPort)
+			p, err := strconv.Atoi(strings.TrimPrefix(address, ":"))
+			require.NoError(t, err)
+			failedPort = p
 			return nil, errors.New("simulated rebind failure")
 		}
 		return net.Listen(network, address)
@@ -151,7 +152,7 @@ func TestGetRandomListeningPortFailsAfterLimit(t *testing.T) {
 
 	tb := &fakeTB{}
 	got := GetRandomListeningPort(tb)
-	assert.Equal(t, "", got)
+	assert.Empty(t, got)
 	msg := tb.message()
 	assert.Contains(t, msg, fmt.Sprintf("%d attempts", maxPortAttempts))
 	assert.Contains(t, msg, "simulated rebind failure")
