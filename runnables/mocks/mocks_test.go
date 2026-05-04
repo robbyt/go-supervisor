@@ -212,11 +212,11 @@ func TestMockRunnableWithStateable(t *testing.T) {
 		mockRunnable.AssertExpectations(t)
 	})
 
-	t.Run("IsRunning method", func(t *testing.T) {
+	t.Run("IsReady method", func(t *testing.T) {
 		// Create a mock
 		mockRunnable := mocks.NewMockRunnableWithStateable()
-		mockRunnable.On("IsRunning", mock.Anything).Return(true)
-		r := mockRunnable.IsRunning()
+		mockRunnable.On("IsReady", mock.Anything).Return(true)
+		r := mockRunnable.IsReady()
 		assert.True(t, r)
 		mockRunnable.AssertExpectations(t)
 	})

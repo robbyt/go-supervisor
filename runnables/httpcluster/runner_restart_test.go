@@ -87,7 +87,7 @@ func TestPortBindingRaceCondition(t *testing.T) {
 			}()
 
 			require.Eventually(t, func() bool {
-				return runner.IsRunning()
+				return runner.IsReady()
 			}, 2*time.Second, 10*time.Millisecond)
 
 			// Use a fixed port to test rapid binding/unbinding
@@ -105,7 +105,7 @@ func TestPortBindingRaceCondition(t *testing.T) {
 				runner.mu.RLock()
 				defer runner.mu.RUnlock()
 				entry := runner.currentEntries.get(serverID)
-				return entry != nil && entry.runner != nil && entry.runner.IsRunning()
+				return entry != nil && entry.runner != nil && entry.runner.IsReady()
 			}, 5*time.Second, 10*time.Millisecond)
 
 			// Perform rapid stop/start cycles
@@ -132,7 +132,7 @@ func TestPortBindingRaceCondition(t *testing.T) {
 					runner.mu.RLock()
 					defer runner.mu.RUnlock()
 					entry := runner.currentEntries.get(serverID)
-					return entry != nil && entry.runner != nil && entry.runner.IsRunning()
+					return entry != nil && entry.runner != nil && entry.runner.IsReady()
 				}, 5*time.Second, 10*time.Millisecond) {
 					successCount++
 				}
@@ -176,7 +176,7 @@ func TestConcurrentServerManagement(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create multiple servers
@@ -217,7 +217,7 @@ func TestConcurrentServerManagement(t *testing.T) {
 		for i := range numServers {
 			serverID := fmt.Sprintf("server%d", i)
 			entry := runner.currentEntries.get(serverID)
-			if entry != nil && entry.runner != nil && entry.runner.IsRunning() {
+			if entry != nil && entry.runner != nil && entry.runner.IsReady() {
 				runningCount++
 			}
 		}
@@ -261,7 +261,7 @@ func TestConcurrentRestartStress(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create two servers with different ports
@@ -338,8 +338,8 @@ func TestConcurrentRestartStress(t *testing.T) {
 		entry1 := runner.currentEntries.get("server1")
 		entry2 := runner.currentEntries.get("server2")
 
-		return entry1 != nil && entry1.runner != nil && entry1.runner.IsRunning() &&
-			entry2 != nil && entry2.runner != nil && entry2.runner.IsRunning()
+		return entry1 != nil && entry1.runner != nil && entry1.runner.IsReady() &&
+			entry2 != nil && entry2.runner != nil && entry2.runner.IsReady()
 	}, 5*time.Second, 10*time.Millisecond, "Both servers should be running after concurrent restarts")
 }
 
@@ -367,7 +367,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 
 			// Wait for runner to start
 			require.Eventually(b, func() bool {
-				return runner.IsRunning()
+				return runner.IsReady()
 			}, 2*time.Second, 100*time.Millisecond)
 
 			// Create server
@@ -384,7 +384,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 				runner.mu.RLock()
 				defer runner.mu.RUnlock()
 				entry := runner.currentEntries.get(serverID)
-				return entry != nil && entry.runner != nil && entry.runner.IsRunning()
+				return entry != nil && entry.runner != nil && entry.runner.IsReady()
 			}, 5*time.Second, 100*time.Millisecond)
 
 			b.ResetTimer()
@@ -402,7 +402,7 @@ func BenchmarkServerRestarts(b *testing.B) {
 				for attempts := 0; attempts < 100; attempts++ {
 					runner.mu.RLock()
 					entry := runner.currentEntries.get(serverID)
-					if entry != nil && entry.runner != nil && entry.runner.IsRunning() {
+					if entry != nil && entry.runner != nil && entry.runner.IsReady() {
 						runner.mu.RUnlock()
 						restartSuccess = true
 						break
@@ -448,7 +448,7 @@ func BenchmarkServerRestartsNoDelay(b *testing.B) {
 
 	// Wait for runner to start
 	require.Eventually(b, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 2*time.Second, 100*time.Millisecond)
 
 	// Create server
@@ -465,7 +465,7 @@ func BenchmarkServerRestartsNoDelay(b *testing.B) {
 		runner.mu.RLock()
 		defer runner.mu.RUnlock()
 		entry := runner.currentEntries.get(serverID)
-		return entry != nil && entry.runner != nil && entry.runner.IsRunning()
+		return entry != nil && entry.runner != nil && entry.runner.IsReady()
 	}, 5*time.Second, 100*time.Millisecond)
 
 	b.ResetTimer()
@@ -485,7 +485,7 @@ func BenchmarkServerRestartsNoDelay(b *testing.B) {
 
 		runner.mu.RLock()
 		entry := runner.currentEntries.get(serverID)
-		if entry != nil && entry.runner != nil && entry.runner.IsRunning() {
+		if entry != nil && entry.runner != nil && entry.runner.IsReady() {
 			successCount++
 		} else {
 			failureCount++
@@ -519,7 +519,7 @@ func BenchmarkConcurrentStateChecks(b *testing.B) {
 
 	// Wait for runner to start
 	require.Eventually(b, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create multiple servers

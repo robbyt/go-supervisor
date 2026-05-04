@@ -43,7 +43,8 @@ func (r *Runner) GetStateChanWithTimeout(ctx context.Context) <-chan string {
 	return r.fsm.GetStateChan(ctx)
 }
 
-// IsRunning returns true if the HTTP server is currently running.
-func (r *Runner) IsRunning() bool {
+// IsReady reports whether the HTTP server has finished its startup phase.
+// Returns true once the FSM has reached the Running state.
+func (r *Runner) IsReady() bool {
 	return r.fsm.GetState() == finitestate.StatusRunning
 }

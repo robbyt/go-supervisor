@@ -74,8 +74,8 @@ func TestGetStateChan(t *testing.T) {
 	}, 1*time.Second, 10*time.Millisecond, "Channel should be closed after context cancellation")
 }
 
-// TestIsRunning verifies that IsRunning returns the correct value based on the state
-func TestIsRunning(t *testing.T) {
+// TestIsReady verifies that IsReady returns the correct value based on the state
+func TestIsReady(t *testing.T) {
 	t.Parallel()
 
 	server, listenPort := createTestServer(t,
@@ -85,32 +85,32 @@ func TestIsRunning(t *testing.T) {
 	// Test when state is not running
 	err := server.fsm.SetState(finitestate.StatusNew)
 	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is New")
+	assert.False(t, server.IsReady(), "Should return false when state is New")
 
 	// Test when state is Booting
 	err = server.fsm.SetState(finitestate.StatusBooting)
 	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Booting")
+	assert.False(t, server.IsReady(), "Should return false when state is Booting")
 
 	// Test when state is Running
 	err = server.fsm.SetState(finitestate.StatusRunning)
 	require.NoError(t, err)
-	assert.True(t, server.IsRunning(), "Should return true when state is Running")
+	assert.True(t, server.IsReady(), "Should return true when state is Running")
 
 	// Test when state is Stopping
 	err = server.fsm.SetState(finitestate.StatusStopping)
 	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Stopping")
+	assert.False(t, server.IsReady(), "Should return false when state is Stopping")
 
 	// Test when state is Stopped
 	err = server.fsm.SetState(finitestate.StatusStopped)
 	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Stopped")
+	assert.False(t, server.IsReady(), "Should return false when state is Stopped")
 
 	// Test when state is Error
 	err = server.fsm.SetState(finitestate.StatusError)
 	require.NoError(t, err)
-	assert.False(t, server.IsRunning(), "Should return false when state is Error")
+	assert.False(t, server.IsReady(), "Should return false when state is Error")
 }
 
 // TestSetStateError verifies the error state setting functionality

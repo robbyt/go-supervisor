@@ -23,8 +23,9 @@ func (r *Runner[T]) GetStateChanWithTimeout(ctx context.Context) <-chan string {
 	return r.fsm.GetStateChan(ctx)
 }
 
-// IsRunning returns true if the runner is in the Running state.
-func (r *Runner[T]) IsRunning() bool {
+// IsReady reports whether the composite runner has finished its startup
+// phase. Returns true once the FSM has reached the Running state.
+func (r *Runner[T]) IsReady() bool {
 	return r.fsm.GetState() == finitestate.StatusRunning
 }
 

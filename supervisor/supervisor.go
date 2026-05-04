@@ -243,9 +243,11 @@ func (p *PIDZero) Run() error {
 			}
 		})
 
-		// if this Runnable implements the Stateable block here until IsRunning()
-		if stateable, ok := r.(Stateable); ok {
-			err := p.blockUntilRunnableReady(stateable)
+		// If this Runnable implements Readiness, block here until IsReady()
+		// returns true (or startup deadline fires). The startup gate cares
+		// about readiness, not state-reporting — Stateable is unrelated.
+		if ready, ok := r.(Readiness); ok {
+			err := p.blockUntilRunnableReady(ready)
 			if err != nil {
 				// Ctx-cancellation is a clean shutdown trigger, not a
 				// runnable failure — match reap's nil return.
@@ -259,7 +261,7 @@ func (p *PIDZero) Run() error {
 				return err
 			}
 		} else {
-			p.logger.Debug("Runnable does not implement Stateable, continuing", "runnable", r)
+			p.logger.Debug("Runnable does not implement Readiness, continuing", "runnable", r)
 		}
 
 		// Honor cancellation between iterations so a mid-startup cancel
@@ -276,8 +278,10 @@ func (p *PIDZero) Run() error {
 	return p.reap()
 }
 
-// blockUntilRunnableReady blocks until the runnable is in a running state.
-func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
+// blockUntilRunnableReady polls the Readiness gate until the runnable
+// reports it has finished its startup phase, or the startup deadline
+// fires, or the supervisor's ctx is cancelled.
+func (p *PIDZero) blockUntilRunnableReady(r Readiness) error {
 	startupCtx, cancel := context.WithTimeout(p.ctx, p.startupTimeout)
 	defer cancel()
 
@@ -289,8 +293,8 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 	time.Sleep(timeout) // Initial delay before checking the runnable state
 
 	for {
-		if r.IsRunning() {
-			logger.Debug("Runnable is running")
+		if r.IsReady() {
+			logger.Debug("Runnable is ready")
 			return nil
 		}
 
@@ -319,8 +323,8 @@ func (p *PIDZero) blockUntilRunnableReady(r Stateable) error {
 			return p.ctx.Err()
 		case <-ticker.C:
 			// continue waiting, adding an exponential backoff
-			if r.IsRunning() {
-				logger.Debug("Runnable is running")
+			if r.IsReady() {
+				logger.Debug("Runnable is ready")
 				return nil
 			}
 			timeout = timeout * 2

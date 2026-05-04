@@ -167,7 +167,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 	t.Run("immediately ready", func(t *testing.T) {
 		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("ready-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(true).Once()
+		mockRunnable.On("IsReady").Return(true).Once()
 
 		sv, err := New(
 			WithRunnables(mockRunnable),
@@ -187,9 +187,9 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 	t.Run("becomes ready after delay", func(t *testing.T) {
 		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("delayed-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Once()
-		mockRunnable.On("IsRunning").Return(false).Once()
-		mockRunnable.On("IsRunning").Return(true).Once()
+		mockRunnable.On("IsReady").Return(false).Once()
+		mockRunnable.On("IsReady").Return(false).Once()
+		mockRunnable.On("IsReady").Return(true).Once()
 
 		sv, err := New(
 			WithRunnables(mockRunnable),
@@ -211,7 +211,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		// Setup mock that never reports as running
 		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("stuck-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+		mockRunnable.On("IsReady").Return(false).Maybe() // Always returns false
 
 		// Create supervisor with a very short timeout
 		sv, err := New(
@@ -237,7 +237,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		// Setup mock that never reports as running
 		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("canceled-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+		mockRunnable.On("IsReady").Return(false).Maybe() // Always returns false
 
 		// Create supervisor with a context
 		ctx, cancel := context.WithCancel(context.Background())
@@ -271,7 +271,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		for i := range iterations {
 			mockRunnable := mocks.NewMockRunnableWithStateable()
 			mockRunnable.On("String").Return("racy-runnable").Maybe()
-			mockRunnable.On("IsRunning").Return(false).Maybe()
+			mockRunnable.On("IsReady").Return(false).Maybe()
 
 			ctx, cancel := context.WithCancel(context.Background())
 			sv, err := New(
@@ -295,7 +295,7 @@ func TestBlockUntilRunnableReady(t *testing.T) {
 		// Setup mock that never reports as running
 		mockRunnable := mocks.NewMockRunnableWithStateable()
 		mockRunnable.On("String").Return("error-runnable").Maybe()
-		mockRunnable.On("IsRunning").Return(false).Maybe() // Always returns false
+		mockRunnable.On("IsReady").Return(false).Maybe() // Always returns false
 
 		sv, err := New(
 			WithRunnables(mockRunnable),
@@ -345,8 +345,8 @@ func TestBlockUntilRunnableReady_TickerRetry(t *testing.T) {
 	mockRunnable.On("String").Return("delayed-ready-runnable").Maybe()
 
 	// First few calls return false, then true
-	mockRunnable.On("IsRunning").Return(false).Times(4) // Initial check + 3 ticker retries
-	mockRunnable.On("IsRunning").Return(true).Once()    // Finally becomes ready
+	mockRunnable.On("IsReady").Return(false).Times(4) // Initial check + 3 ticker retries
+	mockRunnable.On("IsReady").Return(true).Once()    // Finally becomes ready
 
 	sv, err := New(
 		WithRunnables(mockRunnable),
@@ -874,12 +874,12 @@ func TestPIDZero_CancelContextFromParent(t *testing.T) {
 //
 // Cannot use synctest: pidZero.Run() calls signal.Notify, which is incompatible
 // with synctest. Synchronization is via a sync.Once-guarded channel send from
-// A's IsRunning callback — deterministic without timing assumptions.
+// A's IsReady callback — deterministic without timing assumptions.
 func TestPIDZero_Run_StartupCancelStopsLoop(t *testing.T) {
 	t.Parallel()
 
-	// A: Stateable, IsRunning always returns false so blockUntilRunnableReady
-	// stays in its polling loop. The first IsRunning call signals reachedCh,
+	// A: Stateable, IsReady always returns false so blockUntilRunnableReady
+	// stays in its polling loop. The first IsReady call signals reachedCh,
 	// which the test uses to know Run has entered blockUntilRunnableReady.
 	reachedCh := make(chan struct{}, 1)
 	var signalOnce sync.Once
@@ -888,7 +888,7 @@ func TestPIDZero_Run_StartupCancelStopsLoop(t *testing.T) {
 	a.On("GetState").Return("not-running").Maybe()
 	aStateChan := make(chan string)
 	a.On("GetStateChan", mock.Anything).Return(aStateChan).Maybe()
-	a.On("IsRunning").Return(false).Run(func(args mock.Arguments) {
+	a.On("IsReady").Return(false).Run(func(args mock.Arguments) {
 		signalOnce.Do(func() { reachedCh <- struct{}{} })
 	})
 	a.On("Run", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
@@ -986,7 +986,7 @@ func TestPIDZero_Run_PreCancelledCtxStopsAtFirst(t *testing.T) {
 }
 
 // slowBootRunnable wraps MockRunnableWithStateable so the test can gate
-// IsRunning() on a channel rather than testify's count-based mock returns.
+// IsReady() on a channel rather than testify's count-based mock returns.
 // This holds the supervisor's startup loop in blockUntilRunnableReady until
 // the gate is closed, giving the test a deterministic window to inject a
 // signal mid-boot.
@@ -995,7 +995,7 @@ type slowBootRunnable struct {
 	ready chan struct{}
 }
 
-func (s *slowBootRunnable) IsRunning() bool {
+func (s *slowBootRunnable) IsReady() bool {
 	select {
 	case <-s.ready:
 		return true
@@ -1041,7 +1041,7 @@ func TestPIDZero_Run_SIGTERMDuringBoot(t *testing.T) {
 
 	// Inject SIGTERM while Run is still in its startup phase —
 	// blockUntilRunnableReady is either in its initial time.Sleep
-	// (p.startupInitial, default 50ms) or polling IsRunning() afterwards.
+	// (p.startupInitial, default 50ms) or polling IsReady() afterwards.
 	// Either way reap hasn't started, so the signal queues in p.signalChan
 	// and nothing drains it yet.
 	pidZero.SendSignal(syscall.SIGTERM)
@@ -1161,7 +1161,7 @@ func TestPIDZero_Run_RunnableStartupFailure(t *testing.T) {
 	// Create a failing stateable runnable
 	mockRunnable := mocks.NewMockRunnableWithStateable()
 	mockRunnable.On("String").Return("failing-runnable").Maybe()
-	mockRunnable.On("IsRunning").Return(false) // Never becomes ready, called multiple times during timeout
+	mockRunnable.On("IsReady").Return(false) // Never becomes ready, called multiple times during timeout
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once()
 
@@ -1201,7 +1201,7 @@ func TestPIDZero_Shutdown_NoTimeout(t *testing.T) {
 	mockRunnable.On("String").Return("noTimeoutRunnable").Maybe()
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once().After(50 * time.Millisecond) // Small delay to test wait
-	mockRunnable.On("IsRunning").Return(true)
+	mockRunnable.On("IsReady").Return(true)
 
 	// Setup for Stateable interface
 	stateChan := make(chan string)

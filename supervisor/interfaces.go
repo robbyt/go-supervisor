@@ -50,10 +50,13 @@ type Reloadable interface {
 	Reload(ctx context.Context)
 }
 
-// Stateable represents a service that can report its state.
+// Stateable represents a service that reports its current state. It is
+// orthogonal to Readiness: a service can be Stateable without being Readiness
+// (no startup gate participation), and a service can be Readiness without
+// being Stateable (transient readiness signal only). The supervisor uses
+// Stateable for continuous state observation (logging, GetStateChan
+// monitoring) and Readiness for the one-shot startup gate.
 type Stateable interface {
-	Readiness
-
 	// GetState returns the current state of the service.
 	GetState() string
 
@@ -61,10 +64,15 @@ type Stateable interface {
 	GetStateChan(context.Context) <-chan string
 }
 
-// Readiness provides a way to check if a Runnable is currently running,
-// used to determine if a Runnable is done with it's startup phase.
+// Readiness reports whether the service has finished its startup phase. The
+// supervisor's Run() polls IsReady on every Readiness runnable before
+// proceeding to spawn the next one, so a runnable only needs to implement
+// Readiness if it has a meaningful startup phase the supervisor should wait
+// on. Returning true means the service is initialized enough for downstream
+// runnables to start; it does not imply the service is in any particular
+// FSM state.
 type Readiness interface {
-	IsRunning() bool
+	IsReady() bool
 }
 
 // ReloadSender represents a service that can trigger reloads.

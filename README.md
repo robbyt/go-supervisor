@@ -124,17 +124,19 @@ type Reloadable interface {
     Reload(ctx context.Context)
 }
 
-// Stateable represents a service that can report its state.
-// Embeds Readiness so the supervisor can wait for startup completion.
+// Stateable represents a service that reports its current state.
+// Orthogonal to Readiness: implement Stateable for state-channel
+// observability, Readiness for the startup gate, or both.
 type Stateable interface {
-    Readiness
     GetState() string
     GetStateChan(context.Context) <-chan string
 }
 
 // Readiness reports whether the service has finished its startup phase.
+// The supervisor's Run() polls IsReady on every Readiness runnable before
+// proceeding to spawn the next.
 type Readiness interface {
-    IsRunning() bool
+    IsReady() bool
 }
 
 // ReloadSender lets a service trigger reloads from inside.
@@ -158,7 +160,7 @@ Capabilities are detected by interface assertion — implement only what you nee
 - `WithSignals(...)` — override the OS signals to listen for. Only `SIGINT`,
   `SIGTERM`, and `SIGHUP` are special-cased; other signals are logged and
   ignored.
-- `WithStartupTimeout(d)` — bound how long a runnable's `IsRunning()` may take
+- `WithStartupTimeout(d)` — bound how long a runnable's `IsReady()` may take
   to return true before the supervisor gives up on startup.
 - `WithShutdownTimeout(d)` — TOTAL wall-clock budget for graceful shutdown,
   shared between per-runnable `Stop()` calls and the final goroutine wait. A

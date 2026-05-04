@@ -206,8 +206,18 @@ func (w *Worker) ReloadWithConfig(ctx context.Context, config any) {
 		return
 	}
 
-	// Fast path: try to queue without blocking. Honor ctx so a cancelled
-	// caller doesn't get its config queued.
+	// Fast-fail on an already-cancelled ctx so we don't race the queue
+	// send. If we entered the select directly, both <-ctx.Done() and
+	// w.nextConfig <- cfg can be immediately ready and select picks
+	// pseudo-randomly — the queue could win and a cancelled config gets
+	// enqueued.
+	if err := ctx.Err(); err != nil {
+		logger.Debug("Reload aborted before queueing", "error", err)
+		return
+	}
+
+	// Fast path: try to queue without blocking. Honor ctx so a caller
+	// cancelled mid-flight doesn't get its config queued.
 	select {
 	case <-ctx.Done():
 		logger.Debug("Reload aborted before queueing", "error", ctx.Err())

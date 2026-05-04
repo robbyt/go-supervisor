@@ -45,7 +45,7 @@ func testCompositeRaceCondition(t *testing.T) {
 			<-ctx.Done()
 		})
 		mock1.On("Stop").Return()
-		mock1.On("IsRunning").Return(true)
+		mock1.On("IsReady").Return(true)
 		mock1.On("GetState").Return("Running")
 
 		mock2.On("String").Return("service2")
@@ -55,7 +55,7 @@ func testCompositeRaceCondition(t *testing.T) {
 			<-ctx.Done()
 		})
 		mock2.On("Stop").Return()
-		mock2.On("IsRunning").Return(true)
+		mock2.On("IsReady").Return(true)
 		mock2.On("GetState").Return("Running")
 
 		mock3.On("String").Return("service3")
@@ -65,7 +65,7 @@ func testCompositeRaceCondition(t *testing.T) {
 			<-ctx.Done()
 		})
 		mock3.On("Stop").Return()
-		mock3.On("IsRunning").Return(true)
+		mock3.On("IsReady").Return(true)
 		mock3.On("GetState").Return("Running")
 
 		callback := func() (*Config[*mocks.MockRunnableWithStateable], error) {
@@ -89,14 +89,14 @@ func testCompositeRaceCondition(t *testing.T) {
 
 		synctest.Wait()
 
-		assert.True(t, runner.IsRunning(), "Composite should report as running")
+		assert.True(t, runner.IsReady(), "Composite should report as running")
 		assert.Len(t, runCalled, 3, "All 3 Run() methods should have been called")
 
-		assert.True(t, mock1.IsRunning(),
+		assert.True(t, mock1.IsReady(),
 			"RACE CONDITION: Composite reports running but child 1 not running")
-		assert.True(t, mock2.IsRunning(),
+		assert.True(t, mock2.IsReady(),
 			"RACE CONDITION: Composite reports running but child 2 not running")
-		assert.True(t, mock3.IsRunning(),
+		assert.True(t, mock3.IsReady(),
 			"RACE CONDITION: Composite reports running but child 3 not running")
 
 		childStates := runner.GetChildStates()
@@ -161,7 +161,7 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "New", runner.GetState())
-		assert.False(t, runner.IsRunning())
+		assert.False(t, runner.IsReady())
 
 		ctx, cancel := context.WithCancel(t.Context())
 
@@ -172,7 +172,7 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 
 		synctest.Wait()
 
-		assert.True(t, runner.IsRunning(), "Should be Running")
+		assert.True(t, runner.IsReady(), "Should be Running")
 		assert.Equal(t, "Running", runner.GetState())
 
 		mock1.AssertCalled(t, "Run", mock.Anything)
@@ -194,7 +194,7 @@ func TestIntegration_CompositeFullLifecycle(t *testing.T) {
 		}
 
 		assert.Equal(t, "Stopped", runner.GetState())
-		assert.False(t, runner.IsRunning())
+		assert.False(t, runner.IsReady())
 
 		mock1.AssertCalled(t, "Stop")
 		mock2.AssertCalled(t, "Stop")

@@ -164,7 +164,7 @@ func TestRunnerBasicInterface(t *testing.T) {
 	t.Run("State interface", func(t *testing.T) {
 		// Initial state
 		assert.Equal(t, finitestate.StatusNew, runner.GetState())
-		assert.False(t, runner.IsRunning())
+		assert.False(t, runner.IsReady())
 
 		// GetStateChan
 		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
@@ -201,7 +201,7 @@ func TestRunnerRun(t *testing.T) {
 
 		// Wait for runner to reach running state
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Cancel context to stop
@@ -233,7 +233,7 @@ func TestRunnerRun(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Stop via method
@@ -292,7 +292,7 @@ func TestRunnerRun(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Close siphon
@@ -328,7 +328,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Send config update with dynamic port
@@ -352,7 +352,7 @@ func TestRunnerConfigUpdate(t *testing.T) {
 		}, time.Second, 10*time.Millisecond, "Server should be created")
 
 		// Verify runner continues running
-		assert.True(t, runner.IsRunning())
+		assert.True(t, runner.IsReady())
 
 		cancel()
 		stopCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
@@ -396,7 +396,7 @@ func TestRunnerConfigUpdate_TOCTOU(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, time.Second, 5*time.Millisecond)
 
 	addr := networking.GetRandomListeningPort(t)
@@ -405,7 +405,7 @@ func TestRunnerConfigUpdate_TOCTOU(t *testing.T) {
 	}
 
 	// Race: call processConfigUpdate directly (bypassing the single-goroutine
-	// event loop) while simultaneously stopping, to test whether the IsRunning()
+	// event loop) while simultaneously stopping, to test whether the IsReady()
 	// check outside the mutex causes a problem.
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -461,7 +461,7 @@ func TestRunnerStateTransitions(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Stop
@@ -500,7 +500,7 @@ func TestRunnerStateTransitions(t *testing.T) {
 		runner.setStateError()
 
 		assert.Equal(t, finitestate.StatusError, runner.GetState())
-		assert.False(t, runner.IsRunning())
+		assert.False(t, runner.IsReady())
 	})
 }
 
@@ -521,7 +521,7 @@ func TestRunnerConcurrency(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Send multiple configs concurrently
@@ -554,7 +554,7 @@ func TestRunnerConcurrency(t *testing.T) {
 
 		// Verify runner continues running after concurrent updates
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond, "Runner did not continue running after concurrent updates")
 
 		cancel()
@@ -575,7 +575,7 @@ func TestRunnerConcurrency(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Read state concurrently
@@ -587,7 +587,7 @@ func TestRunnerConcurrency(t *testing.T) {
 				state := runner.GetState()
 				assert.NotEmpty(t, state)
 
-				isRunning := runner.IsRunning()
+				isRunning := runner.IsReady()
 				assert.True(t, isRunning)
 
 				str := runner.String()
@@ -613,7 +613,7 @@ func TestRunnerConcurrency(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Call Stop concurrently
@@ -710,7 +710,7 @@ func TestRunnerContextManagement(t *testing.T) {
 
 		// Wait for running
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		cancel()
@@ -730,7 +730,7 @@ func createMockServer(ctx context.Context) *mocks.MockRunnableWithStateable {
 
 	mockServer.On("Stop").Return()
 	mockServer.On("GetState").Return(finitestate.StatusRunning).Maybe()
-	mockServer.On("IsRunning").Return(true).Maybe()
+	mockServer.On("IsReady").Return(true).Maybe()
 
 	stateChan := make(chan string, 1)
 	stateChan <- finitestate.StatusRunning
@@ -749,7 +749,7 @@ func createNonReadyMockServer(ctx context.Context) *mocks.MockRunnableWithStatea
 
 	mockServer.On("Stop").Return()
 	mockServer.On("GetState").Return(finitestate.StatusNew).Maybe()
-	mockServer.On("IsRunning").Return(false).Maybe()
+	mockServer.On("IsReady").Return(false).Maybe()
 
 	stateChan := make(chan string, 1)
 	stateChan <- finitestate.StatusNew
@@ -786,7 +786,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		// Create two servers
@@ -835,7 +835,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		configs := map[string]*httpserver.Config{
@@ -874,7 +874,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		configs := map[string]*httpserver.Config{
@@ -918,7 +918,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		configs := map[string]*httpserver.Config{
@@ -965,7 +965,7 @@ func TestRunnerWithMockFactory(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
-			return runner.IsRunning()
+			return runner.IsReady()
 		}, time.Second, 10*time.Millisecond)
 
 		testConfig := createTestHTTPConfig(t, ":8001")

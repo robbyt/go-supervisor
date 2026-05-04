@@ -157,7 +157,7 @@ func TestMembershipChangesBasic(t *testing.T) {
 
 	// Wait for initial configuration to be applied
 	assert.Eventually(t, func() bool {
-		return runner.IsRunning()
+		return runner.IsReady()
 	}, 1*time.Second, 10*time.Millisecond)
 
 	// --- Test Step 1: Remove worker1, add worker3 ---
