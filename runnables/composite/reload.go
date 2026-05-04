@@ -8,9 +8,14 @@ import (
 	"github.com/robbyt/go-supervisor/supervisor"
 )
 
-// ReloadableWithConfig is an interface for sub-runnables that can reload with specific config
+// ReloadableWithConfig is an interface for sub-runnables that can reload with
+// a specific configuration. Implementations should honor ctx — at minimum to
+// abort the reload if the caller cancels — but may also use it for deadline
+// propagation if the reload itself is bounded. Like Reloadable.Reload, this
+// returns no error: failures should surface via the runnable's own logging
+// or via Stateable.GetStateChan (e.g. transitioning to an Error state).
 type ReloadableWithConfig interface {
-	ReloadWithConfig(config any)
+	ReloadWithConfig(ctx context.Context, config any)
 }
 
 // Reload updates the configuration and handles runnables appropriately. If
@@ -165,7 +170,7 @@ func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T])
 		if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
 			// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config
 			logger.Debug("Reloading child runnable with config")
-			reloadableWithConfig.ReloadWithConfig(entry.Config)
+			reloadableWithConfig.ReloadWithConfig(ctx, entry.Config)
 		} else if reloadable, ok := any(entry.Runnable).(supervisor.Reloadable); ok {
 			// Fall back to standard Reloadable interface, assume the configCallback
 			// has somehow updated the runnable's internal state

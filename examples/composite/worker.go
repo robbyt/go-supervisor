@@ -178,10 +178,12 @@ func (w *Worker) startTicker(ctx context.Context, interval time.Duration) {
 	logger.Debug("Ticker setup complete", "interval", interval)
 }
 
-// ReloadWithConfig receives a new config from the composite Runnable, and sends it to the Run
-// loop via a channel. It handles potential back-pressure by replacing a pending config with the
-// latest received if the channel is full.
-func (w *Worker) ReloadWithConfig(config any) {
+// ReloadWithConfig receives a new config from the composite Runnable, and
+// sends it to the Run loop via a channel. It handles potential back-pressure
+// by replacing a pending config with the latest received if the channel is
+// full. ctx is honored: if the caller cancels before the queue accepts the
+// config, the call returns without queueing.
+func (w *Worker) ReloadWithConfig(ctx context.Context, config any) {
 	logger := w.logger.WithGroup("ReloadWithConfig")
 	cfg, ok := config.(WorkerConfig)
 	if !ok {
@@ -206,7 +208,11 @@ func (w *Worker) ReloadWithConfig(config any) {
 	// Non-blocking send to nextConfig channel.
 	// If the channel is full (meaning a config is already waiting),
 	// discard the waiting one and queue the new one (newer config wins).
+	// Honor ctx so a cancelled caller doesn't get its config queued.
 	select {
+	case <-ctx.Done():
+		logger.Debug("Reload aborted before queueing", "error", ctx.Err())
+		return
 	case w.nextConfig <- cfg:
 		logger.Info(
 			"Configuration queued for update",
@@ -220,11 +226,15 @@ func (w *Worker) ReloadWithConfig(config any) {
 			"old", old,
 			"new", cfg)
 
-		w.nextConfig <- cfg
-
-		logger.Info(
-			"Replaced pending configuration with the newest one",
-			"new", cfg)
+		select {
+		case <-ctx.Done():
+			logger.Debug("Reload aborted while requeueing", "error", ctx.Err())
+			return
+		case w.nextConfig <- cfg:
+			logger.Info(
+				"Replaced pending configuration with the newest one",
+				"new", cfg)
+		}
 	}
 }
 
