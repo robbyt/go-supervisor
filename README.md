@@ -110,29 +110,60 @@ their state, respectively. The supervisor will discover the capabilities of each
 and manage them accordingly.
 
 ```go
-// Runnable represents a service that can be run and stopped
+// Runnable represents a service that can be run and stopped.
+// Run blocks until the service exits; Stop blocks until Run returns.
 type Runnable interface {
     fmt.Stringer
     Run(ctx context.Context) error
     Stop()
 }
 
-// Reloadable represents a service that can be reloaded
+// Reloadable represents a service that can be reloaded.
+// Reload blocks until the reload completes (or aborts via ctx).
 type Reloadable interface {
-    Reload()
+    Reload(ctx context.Context)
 }
 
-// Stateable represents a service that can report its state
+// Stateable represents a service that can report its state.
+// Embeds Readiness so the supervisor can wait for startup completion.
 type Stateable interface {
+    Readiness
     GetState() string
     GetStateChan(context.Context) <-chan string
 }
 
-// ReloadSender represents a service that can trigger reloads
+// Readiness reports whether the service has finished its startup phase.
+type Readiness interface {
+    IsRunning() bool
+}
+
+// ReloadSender lets a service trigger reloads from inside.
 type ReloadSender interface {
     GetReloadTrigger() <-chan struct{}
 }
+
+// ShutdownSender lets a service trigger supervisor-wide shutdown from inside.
+type ShutdownSender interface {
+    GetShutdownTrigger() <-chan struct{}
+}
 ```
+
+Capabilities are detected by interface assertion — implement only what you need.
+
+### Supervisor options
+
+- `WithRunnables(...)` — register the services to manage.
+- `WithContext(ctx)` — provide a parent context for cancellation.
+- `WithLogHandler(h)` — install a custom `slog.Handler`.
+- `WithSignals(...)` — override the OS signals to listen for. Only `SIGINT`,
+  `SIGTERM`, and `SIGHUP` are special-cased; other signals are logged and
+  ignored.
+- `WithStartupTimeout(d)` — bound how long a runnable's `IsRunning()` may take
+  to return true before the supervisor gives up on startup.
+- `WithShutdownTimeout(d)` — TOTAL wall-clock budget for graceful shutdown,
+  shared between per-runnable `Stop()` calls and the final goroutine wait. A
+  runnable whose `Stop()` overruns the remaining budget is abandoned (logged
+  warning). `0` disables the deadline.
 
 ## Advanced Usage
 
@@ -153,7 +184,7 @@ type Config struct {
     Interval time.Duration
 }
 
-func (s *ConfigurableService) Reload() {
+func (s *ConfigurableService) Reload(ctx context.Context) {
     s.mu.Lock()
     defer s.mu.Unlock()
     

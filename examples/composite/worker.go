@@ -55,6 +55,7 @@ type Worker struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	tickerCancel context.CancelFunc
+	done         chan struct{}
 	logger       *slog.Logger
 }
 
@@ -93,10 +94,16 @@ func (w *Worker) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Reset done so the worker can be reused across restart cycles
+	// (composite's membership-change reload may stop and restart this
+	// instance under the same id).
 	w.mu.Lock()
 	w.ctx = runCtx
 	w.cancel = cancel
+	w.done = make(chan struct{})
+	done := w.done
 	w.mu.Unlock()
+	defer close(done)
 
 	cfg := w.getConfig()
 	logger = logger.With("name", cfg.JobName)
@@ -119,18 +126,25 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// Stop signals the worker to gracefully shut down by cancelling its context.
+// Stop signals the worker to gracefully shut down by cancelling its context
+// and blocks until Run has returned, per the supervisor.Runnable contract.
 func (w *Worker) Stop() {
 	currentName := w.getConfig().JobName
 	logger := w.logger.WithGroup("Stop").With("name", currentName)
 	logger.Info("Stopping worker...")
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if c := w.cancel; c != nil {
 		w.cancel = nil
 		c()
 	}
 	w.tickCount.Store(0)
+	// Capture the current done channel under the lock so a concurrent
+	// Run-restart can't swap it out from under us.
+	done := w.done
+	w.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 }
 
 // startTicker starts a new ticker goroutine that sends tick notifications to the worker.

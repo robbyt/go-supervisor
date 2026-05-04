@@ -1,48 +1,35 @@
-/*
-Package mocks provides mock implementations of all supervisor interfaces for testing.
-These mocks implement the Runnable, Reloadable, Stateable, and ReloadSender interfaces
-following the canonical testify/mock pattern. Tests that need delayed return values
-should use Call.After(d) per-expectation instead of mock-instance fields.
-
-Example:
-```go
-import (
-
-	"context"
-	"testing"
-	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-
-	"github.com/robbyt/go-supervisor"
-	"github.com/robbyt/go-supervisor/runnables/mocks"
-
-)
-
-	func TestMyComponent(t *testing.T) {
-		// Create a mock service
-		mockRunnable := mocks.NewMockRunnable()
-
-		// Set expectations (use .After(d) for delayed returns)
-		mockRunnable.On("Run", mock.Anything).Return(nil)
-		mockRunnable.On("Stop").Once().After(100*time.Millisecond)
-
-		// For state-based tests
-		stateCh := make(chan string)
-		mockRunnable.On("GetStateChan", mock.Anything).Return(stateCh)
-
-		// Create supervisor with mock
-		super := supervisor.New([]supervisor.Runnable{mockRunnable})
-
-		// Run test...
-
-		// Verify expectations
-		mockRunnable.AssertExpectations(t)
-	}
-
-```
-*/
+// Package mocks provides mock implementations of supervisor interfaces for
+// testing: Runnable, Reloadable, Stateable, ReloadSender, and ShutdownSender.
+// All mocks follow the canonical testify/mock pattern. Tests that need delayed
+// return values should use Call.After(d) per-expectation rather than
+// mock-instance fields.
+//
+// Example:
+//
+//	import (
+//		"testing"
+//		"time"
+//
+//		"github.com/stretchr/testify/mock"
+//
+//		"github.com/robbyt/go-supervisor/runnables/mocks"
+//		"github.com/robbyt/go-supervisor/supervisor"
+//	)
+//
+//	func TestMyComponent(t *testing.T) {
+//		mockRunnable := mocks.NewMockRunnable()
+//
+//		mockRunnable.On("Run", mock.Anything).Return(nil)
+//		mockRunnable.On("Stop").Return().After(100 * time.Millisecond)
+//
+//		super, err := supervisor.New(supervisor.WithRunnables(mockRunnable))
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		_ = super // run test...
+//
+//		mockRunnable.AssertExpectations(t)
+//	}
 package mocks
 
 import (
