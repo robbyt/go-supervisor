@@ -15,7 +15,7 @@ func TestGetRandomPort(t *testing.T) {
 	t.Parallel()
 
 	p := GetRandomPort(t)
-	assert.Greater(t, p, 0)
+	assert.Positive(t, p)
 	assert.LessOrEqual(t, p, 65535)
 }
 
