@@ -16,7 +16,11 @@ limitations under the License.
 
 package supervisor
 
-import "sync"
+import (
+	"context"
+	"errors"
+	"sync"
+)
 
 // ReloadAll triggers a reload of all runnables that implement the Reloadable
 // interface. Blocks until the reload manager accepts the signal OR the
@@ -88,7 +92,16 @@ func (p *PIDZero) reloadAllRunnables() int {
 			}
 
 			p.logger.Debug("Reloading", "runnable", r)
-			reloader.Reload(p.ctx)
+			if err := reloader.Reload(p.ctx); err != nil {
+				// Best-effort: log the failure and continue. The runnable
+				// has typically also transitioned its FSM to Error, so
+				// state-channel observers see the failure too. Filter
+				// context.Canceled — it just means the supervisor's ctx
+				// was already cancelled when the reload tried to dispatch.
+				if !errors.Is(err, context.Canceled) {
+					p.logger.Error("Reload failed", "runnable", r, "error", err)
+				}
+			}
 			reloads++
 
 			if stateable, ok := r.(Stateable); ok {

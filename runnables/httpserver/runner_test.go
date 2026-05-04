@@ -439,7 +439,7 @@ func TestReloadSkipsWhenAdmissionFails(t *testing.T) {
 	stateMachine.On("GetState").Return(finitestate.StatusStopped).Once()
 	server.fsm = stateMachine
 
-	server.Reload(t.Context())
+	require.NoError(t, server.Reload(t.Context()))
 
 	stateMachine.AssertExpectations(t)
 }

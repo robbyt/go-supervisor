@@ -568,7 +568,7 @@ func TestPIDZero_Reap_HandleSIGHUP(t *testing.T) {
 	t.Parallel()
 	mockRunnable := mocks.NewMockRunnable()
 	mockRunnable.On("Run", mock.Anything).Return(nil).Once()
-	mockRunnable.On("Reload", mock.Anything).Once()
+	mockRunnable.On("Reload", mock.Anything).Return(nil).Once()
 	mockRunnable.On("Stop").Once()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -610,8 +610,8 @@ func TestPIDZero_Reap_MultipleSignals(t *testing.T) {
 	mockRunnable1.On("Run", mock.Anything).Return(nil).Once()
 	mockRunnable2.On("Run", mock.Anything).Return(nil).Once()
 
-	mockRunnable1.On("Reload", mock.Anything).Once()
-	mockRunnable2.On("Reload", mock.Anything).Once()
+	mockRunnable1.On("Reload", mock.Anything).Return(nil).Once()
+	mockRunnable2.On("Reload", mock.Anything).Return(nil).Once()
 
 	mockRunnable1.On("Stop").Once()
 	mockRunnable2.On("Stop").Once()

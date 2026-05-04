@@ -74,7 +74,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 	t.Run("reload with reloadable runnables", func(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1")
-		mockRunnable1.On("Reload", mock.Anything).Once()
+		mockRunnable1.On("Reload", mock.Anything).Return(nil).Once()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -82,7 +82,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2")
-		mockRunnable2.On("Reload", mock.Anything).Once()
+		mockRunnable2.On("Reload", mock.Anything).Return(nil).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -124,7 +124,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond)
 		assert.Equal(t, 1, callbackCalls)
 
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 		assert.Equal(t, len(entries), callbackCalls)
 		require.Eventually(t, func() bool {
 			return runner.IsReady()
@@ -199,7 +199,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 			require.Equal(t, finitestate.StatusRunning, runner.GetState())
 
 			useUpdatedEntries = true
-			runner.Reload(t.Context())
+			require.NoError(t, runner.Reload(t.Context()))
 			synctest.Wait()
 
 			config := runner.getConfig()
@@ -225,7 +225,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Reload", mock.Anything).Once()
+		mockRunnable1.On("Reload", mock.Anything).Return(nil).Once()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			// Block until context is canceled - this mimics real runnable behavior
 			<-args.Get(0).(context.Context).Done()
@@ -234,7 +234,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Reload", mock.Anything).Once()
+		mockRunnable2.On("Reload", mock.Anything).Return(nil).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			// Block until context is canceled - this mimics real runnable behavior
 			<-args.Get(0).(context.Context).Done()
@@ -313,7 +313,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		useUpdatedEntries = true
 
 		// Call Reload
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Verify reload completes and runner returns to Running state
 		require.Eventually(t, func() bool {
@@ -353,7 +353,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		// Setup mock runnables with blocking behavior
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1")
-		mockRunnable1.On("Reload", mock.Anything).Once()
+		mockRunnable1.On("Reload", mock.Anything).Return(nil).Once()
 		// Make Run properly block until context cancellation
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
@@ -362,7 +362,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2")
-		mockRunnable2.On("Reload", mock.Anything).Once()
+		mockRunnable2.On("Reload", mock.Anything).Return(nil).Once()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Once()
@@ -404,7 +404,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 1, callbackCalls, "Config callback should be called once during startup")
 
 		// Call Reload with the same configuration
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Verify reload completes and runner stays in Running state
 		require.Eventually(t, func() bool {
@@ -511,7 +511,7 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		useUpdatedEntries = true
 
 		// Call Reload
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Verify reload completes and runner returns to Running state
 		require.Eventually(t, func() bool {
@@ -578,7 +578,7 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		require.NoError(t, err)
 		runner.fsm = mockFSM
 
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// SetState(Error) must NOT be called — that would be wrong control flow.
 		mockFSM.AssertNotCalled(t, "SetState", finitestate.StatusError)
@@ -608,8 +608,9 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// Replace FSM with our mock
 		runner.fsm = mockFSM
 
-		// Call Reload - should handle the callback error
-		runner.Reload(t.Context())
+		// Call Reload - should handle the callback error and surface it
+		// via the new error return per the T3.1 contract.
+		require.Error(t, runner.Reload(t.Context()))
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -643,8 +644,8 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		// Replace FSM with our mock
 		runner.fsm = mockFSM
 
-		// Call Reload - should handle the nil config case
-		runner.Reload(t.Context())
+		// Call Reload - nil config surfaces via the new error return.
+		require.Error(t, runner.Reload(t.Context()))
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -826,7 +827,8 @@ func TestDispatchReload_AbortBranches(t *testing.T) {
 		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
 
-		runner.dispatchReload(ctx, newConfig)
+		require.ErrorIs(t, runner.dispatchReload(ctx, newConfig), context.Canceled,
+			"ctx.Done branch must return ctx.Err()")
 
 		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
 	})
@@ -845,7 +847,8 @@ func TestDispatchReload_AbortBranches(t *testing.T) {
 		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
 
-		runner.dispatchReload(t.Context(), newConfig)
+		require.Error(t, runner.dispatchReload(t.Context(), newConfig),
+			"lc.DoneCh branch must surface 'runner stopped' error")
 
 		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
 	})
@@ -980,11 +983,11 @@ func TestReloadConfig(t *testing.T) {
 		// Setup mock runnables
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
-		mockRunnable1.On("Reload", mock.Anything).Once()
+		mockRunnable1.On("Reload", mock.Anything).Return(nil).Once()
 
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
-		mockRunnable2.On("Reload", mock.Anything).Once()
+		mockRunnable2.On("Reload", mock.Anything).Return(nil).Once()
 
 		// Create entries
 		entries := []RunnableEntry[*mocks.Runnable]{
@@ -1054,7 +1057,7 @@ func TestReloadConfig(t *testing.T) {
 		// Setup mock that implements standard Reloadable
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("runnable").Maybe()
-		mockRunnable.On("Reload", mock.Anything).Once()
+		mockRunnable.On("Reload", mock.Anything).Return(nil).Once()
 
 		// Setup mock that implements ReloadableWithConfig
 		mockReloadable := NewMockReloadableWithConfig()
@@ -1284,7 +1287,7 @@ func TestReloadMembershipChanged(t *testing.T) {
 		assert.Empty(t, initialConfig.Entries, "Initial config should have empty entries")
 
 		// Now reload to get the config with the runnable
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
@@ -1434,7 +1437,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable1 := mocks.NewMockRunnable()
 		mockRunnable1.On("String").Return("runnable1").Maybe()
 		mockRunnable1.On("Stop").Return(nil).Once()
-		mockRunnable1.On("Reload", mock.Anything).Maybe()
+		mockRunnable1.On("Reload", mock.Anything).Return(nil).Maybe()
 		mockRunnable1.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1442,7 +1445,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable2 := mocks.NewMockRunnable()
 		mockRunnable2.On("String").Return("runnable2").Maybe()
 		mockRunnable2.On("Stop").Return(nil).Once()
-		mockRunnable2.On("Reload", mock.Anything).Maybe()
+		mockRunnable2.On("Reload", mock.Anything).Return(nil).Maybe()
 		mockRunnable2.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1451,7 +1454,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable3 := mocks.NewMockRunnable()
 		mockRunnable3.On("String").Return("runnable3").Maybe()
 		mockRunnable3.On("Stop").Return(nil).Once()
-		mockRunnable3.On("Reload", mock.Anything).Maybe()
+		mockRunnable3.On("Reload", mock.Anything).Return(nil).Maybe()
 		mockRunnable3.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1459,7 +1462,7 @@ func TestHasMembershipChanged(t *testing.T) {
 		mockRunnable4 := mocks.NewMockRunnable()
 		mockRunnable4.On("String").Return("runnable4").Maybe()
 		mockRunnable4.On("Stop").Return(nil).Once()
-		mockRunnable4.On("Reload", mock.Anything).Maybe()
+		mockRunnable4.On("Reload", mock.Anything).Return(nil).Maybe()
 		mockRunnable4.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -1510,7 +1513,7 @@ func TestHasMembershipChanged(t *testing.T) {
 
 		// Switch to using entirely new set of runnables
 		useUpdatedEntries = true
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Wait for reload to complete
 		require.Eventually(t, func() bool {
@@ -1601,7 +1604,7 @@ func TestCompositeRunner_ReloadAfterStop(t *testing.T) {
 	reloadDone := make(chan struct{})
 	go func() {
 		defer close(reloadDone)
-		runner.Reload(t.Context())
+		_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics, not return value
 	}()
 	select {
 	case <-reloadDone:
@@ -1672,7 +1675,7 @@ func TestCompositeRunner_ReloadWaitsThroughCallerCtxCancel(t *testing.T) {
 		reloadDone := make(chan struct{})
 		go func() {
 			defer close(reloadDone)
-			runner.Reload(reloadCtx)
+			_ = runner.Reload(reloadCtx) //nolint:errcheck // test exercises ctx-cancellation, not return value
 			reloadReturned.Store(true)
 		}()
 
@@ -1752,7 +1755,8 @@ func TestCompositeRunner_PreCancelledReloadCtx(t *testing.T) {
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	runner.Reload(cancelledCtx)
+	require.ErrorIs(t, runner.Reload(cancelledCtx), context.Canceled,
+		"cancelled reload must surface ctx.Err() via the return")
 
 	// FSM should still be Running (NOT Error). The cancelled reload is
 	// normal control flow, not a failure.
@@ -1806,7 +1810,7 @@ func TestCompositeRunner_CancelledReloadDoesNotErrorState(t *testing.T) {
 	useSwapped.Store(true)
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	runner.Reload(cancelledCtx)
+	require.ErrorIs(t, runner.Reload(cancelledCtx), context.Canceled)
 
 	require.Equal(t, finitestate.StatusRunning, runner.GetState(),
 		"caller cancellation is normal control flow — FSM must stay in Running")
@@ -1851,8 +1855,11 @@ func TestCompositeRunner_ReloadAfterStopDoesNotErrorState(t *testing.T) {
 		func() bool { return runner.GetState() == finitestate.StatusStopped },
 		2*time.Second, 10*time.Millisecond)
 
-	// Reload after Stop. Initial Transition(Reloading) will fail.
-	runner.Reload(t.Context())
+	// Reload after Stop. Initial Transition(Reloading) will fail; the
+	// admission gate returns nil (not an error) because there's no failure
+	// of *this* reload to surface — just a stale request against a stopped
+	// runner.
+	require.NoError(t, runner.Reload(t.Context()))
 
 	require.Equal(t, finitestate.StatusStopped, runner.GetState(),
 		"Reload-after-Stop must not move FSM to Error")
@@ -1995,7 +2002,7 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	// callers must be dropped at the FSM admission gate.
 	mockChild.On("Reload", mock.Anything).Run(func(_ mock.Arguments) {
 		<-releaseReload
-	}).Return().Once()
+	}).Return(nil).Once()
 
 	entries := []RunnableEntry[*mocks.Runnable]{
 		{Runnable: mockChild, Config: nil},
@@ -2017,7 +2024,7 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	// First reload: blocks inside child.Reload, parent FSM held in Reloading.
 	var first sync.WaitGroup
 	first.Go(func() {
-		runner.Reload(t.Context())
+		_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
 	})
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
@@ -2029,7 +2036,9 @@ func TestCompositeRunner_ConcurrentReload_DropsOnBusy(t *testing.T) {
 	var others sync.WaitGroup
 	for range concurrent {
 		others.Go(func() {
-			runner.Reload(t.Context())
+			// These reloads are expected to bail at the FSM admission gate.
+			// Reload returns nil for that path (not an error of *this* reload).
+			require.NoError(t, runner.Reload(t.Context()))
 		})
 	}
 	// All N must return promptly (they bail at admission). If they queue on a
@@ -2083,7 +2092,7 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mockRunnable := mocks.NewMockRunnable()
 		mockRunnable.On("String").Return("concurrent-reloader").Maybe()
-		mockRunnable.On("Reload", mock.Anything).Return()
+		mockRunnable.On("Reload", mock.Anything).Return(nil)
 		mockRunnable.On("Run", mock.Anything).Run(func(args mock.Arguments) {
 			<-args.Get(0).(context.Context).Done()
 		}).Return(context.Canceled).Maybe()
@@ -2120,7 +2129,7 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 		var wg sync.WaitGroup
 		for range 10 {
 			wg.Go(func() {
-				runner.Reload(t.Context())
+				_ = runner.Reload(t.Context()) //nolint:errcheck // concurrent reload test; admission gate drops most callers
 			})
 		}
 		wg.Wait()
@@ -2137,4 +2146,46 @@ func TestCompositeRunner_ConcurrentReload(t *testing.T) {
 			t.Fatal("runner should shut down cleanly")
 		}
 	})
+}
+
+// TestComposite_Reload_ChildError_AggregatesAndTransitionsError covers the
+// T3.1 contract: a child Reload failure surfaces (a) via Reload's error
+// return (errors.Join across all children) and (b) via the composite FSM
+// transitioning to Error. Composite is "fail-fast group of tightly-coupled
+// dependents" — a child failure must be observable to the parent.
+func TestComposite_Reload_ChildError_AggregatesAndTransitionsError(t *testing.T) {
+	t.Parallel()
+
+	healthy := mocks.NewMockRunnable()
+	healthy.On("String").Return("healthy").Maybe()
+	healthy.On("Run", mock.Anything).Return(nil).Maybe()
+	healthy.On("Stop").Return().Maybe()
+	healthy.On("Reload", mock.Anything).Return(nil).Once()
+
+	failing := mocks.NewMockRunnable()
+	failing.On("String").Return("failing").Maybe()
+	failing.On("Run", mock.Anything).Return(nil).Maybe()
+	failing.On("Stop").Return().Maybe()
+	childErr := errors.New("child reload exploded")
+	failing.On("Reload", mock.Anything).Return(childErr).Once()
+
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: healthy, Config: nil},
+		{Runnable: failing, Config: nil},
+	}
+	cfg, err := NewConfig("err-test", entries)
+	require.NoError(t, err)
+
+	runner, err := NewRunner(func() (*Config[*mocks.Runnable], error) { return cfg, nil })
+	require.NoError(t, err)
+
+	// Drive reloadSkipRestart directly — no Run loop needed; we want to
+	// observe the aggregated return value.
+	joinedErr := runner.reloadSkipRestart(t.Context(), cfg)
+	require.Error(t, joinedErr, "aggregated error must surface")
+	require.ErrorIs(t, joinedErr, childErr,
+		"errors.Join must include the child's wrapped error")
+
+	healthy.AssertExpectations(t)
+	failing.AssertExpectations(t)
 }

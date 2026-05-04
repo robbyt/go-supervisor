@@ -19,7 +19,7 @@ import (
 // been accepted by Run's loop. Once accepted, Reload waits for the restart to
 // complete (or for the runner to stop) so the caller never observes the FSM
 // in Reloading after Reload returns.
-func (r *Runner) Reload(ctx context.Context) {
+func (r *Runner) Reload(ctx context.Context) error {
 	logger := r.logger.WithGroup("Reload")
 
 	// Fast-path: if the caller's ctx is already cancelled, bail before
@@ -28,7 +28,7 @@ func (r *Runner) Reload(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
-		return
+		return ctx.Err()
 	default:
 	}
 
@@ -36,37 +36,48 @@ func (r *Runner) Reload(ctx context.Context) {
 		finitestate.StatusRunning,
 		finitestate.StatusReloading,
 	); err != nil {
+		// Runner is in Reloading/Stopping/Stopped/Booting/Error. There's no
+		// failure of *this* reload to surface — return nil.
 		logger.Debug("Skipping reload - not in Running",
 			"current", r.fsm.GetState(), "error", err)
-		return
+		return nil
 	}
 
 	newCfg, err := r.configCallback()
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
 		r.setStateError()
-		return
+		return fmt.Errorf("config callback failed: %w", err)
 	}
 	if newCfg == nil {
 		logger.Error("config callback returned nil")
 		r.setStateError()
-		return
+		return errors.New("config callback returned nil")
 	}
 	if old := r.getConfig(); old != nil && newCfg.Equal(old) {
 		logger.Debug("Config unchanged, skipping reload")
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
 			r.setStateError()
+			return err
 		}
-		return
+		return nil
 	}
 
 	if !r.canDispatchReload(ctx, logger) {
+		dispatchErr := errors.New("reload aborted before dispatch")
+		select {
+		case <-ctx.Done():
+			dispatchErr = ctx.Err()
+		case <-r.lc.DoneCh():
+			dispatchErr = errors.New("runner stopped before reload dispatch")
+		default:
+		}
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
 			r.setStateError()
 		}
-		return
+		return dispatchErr
 	}
 
 	req := &reloadReq{cfg: newCfg, done: make(chan struct{})}
@@ -76,20 +87,24 @@ func (r *Runner) Reload(ctx context.Context) {
 		// stop, in which case drainReloadCh closes req.done). Caller's ctx
 		// is intentionally ignored here: returning while Run is still
 		// restarting would let the caller observe FSM=Reloading after Reload
-		// returned.
+		// returned. req.err carries the outcome — close(done) → <-done
+		// gives us the happens-before edge.
 		<-req.done
+		return req.err
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
 			r.setStateError()
 		}
+		return ctx.Err()
 	case <-r.lc.DoneCh():
 		logger.Debug("Runner stopped before reload dispatch")
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
 			r.setStateError()
 		}
+		return errors.New("runner stopped before reload dispatch")
 	}
 }
 

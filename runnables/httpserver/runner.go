@@ -68,9 +68,14 @@ type Runner struct {
 // than the caller's ctx. done is closed by Run after executeReload finishes
 // (success or failure) — including from drainReloadCh on Run exit, so a caller
 // blocked on done always unblocks.
+//
+// err is set by handleReload before closing done; Reload reads it after
+// <-done and returns it. close(done) → <-done provides the happens-before
+// edge, so no mutex is needed.
 type reloadReq struct {
 	cfg  *Config
 	done chan struct{}
+	err  error
 }
 
 // NewRunner creates a new HTTP server runner instance with the provided options.
@@ -210,12 +215,14 @@ func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
 	if err := r.executeReload(ctx, req.cfg); err != nil {
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
+		req.err = err
 		return
 	}
 
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 		r.logger.Error("Failed to transition from Reloading to Running", "error", err)
 		r.setStateError()
+		req.err = err
 	}
 }
 

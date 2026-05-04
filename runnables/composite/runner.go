@@ -48,9 +48,14 @@ type Runner[T runnable] struct {
 //
 // done is closed by Run after handleReload finishes — including from
 // drainReloadCh on Run exit — so a caller blocked on done always unblocks.
+//
+// err is set by handleReload before closing done. Reload reads it after
+// <-done and returns it to its own caller. close(done) → <-done provides
+// the happens-before edge, so no mutex is needed.
 type reloadReq[T runnable] struct {
 	cfg  *Config[T]
 	done chan struct{}
+	err  error
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
@@ -218,12 +223,14 @@ func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
 	if err != nil {
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
+		req.err = err
 		return
 	}
 
 	if transErr := r.fsm.Transition(finitestate.StatusRunning); transErr != nil {
 		r.logger.Error("Failed to transition Reloading→Running", "error", transErr)
 		r.setStateError()
+		req.err = transErr
 	}
 }
 

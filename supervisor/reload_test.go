@@ -1,8 +1,12 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -16,6 +20,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// syncBuffer is a tiny mutex-guarded bytes.Buffer for slog handler output
+// that's written from the supervisor's goroutine and read from the test
+// goroutine — avoids the data race a bare bytes.Buffer would trigger.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 // TestPIDZero_ReloadManager tests the reload manager functionality.
 func TestPIDZero_ReloadManager(t *testing.T) {
 	t.Run("handles reload notifications", func(t *testing.T) {
@@ -25,7 +49,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 
 		sender.On("GetReloadTrigger").Return(reloadTrigger)
 		sender.On("Run", mock.Anything).Return(nil)
-		sender.On("Reload", mock.Anything).Return().Once()
+		sender.On("Reload", mock.Anything).Return(nil).Once()
 		sender.On("Stop").Return()
 
 		p, err := New(WithContext(context.Background()), WithRunnables(sender))
@@ -64,8 +88,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender1.On("Run", mock.Anything).Return(nil)
 		sender2.On("Run", mock.Anything).Return(nil)
 
-		sender1.On("Reload", mock.Anything).Return().Times(2)
-		sender2.On("Reload", mock.Anything).Return().Times(2)
+		sender1.On("Reload", mock.Anything).Return(nil).Times(2)
+		sender2.On("Reload", mock.Anything).Return(nil).Times(2)
 
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
@@ -135,8 +159,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService1 := mocks.NewMockRunnable()
 		mockService2 := mocks.NewMockRunnable()
 
-		mockService1.On("Reload", mock.Anything).Once()
-		mockService2.On("Reload", mock.Anything).Once()
+		mockService1.On("Reload", mock.Anything).Return(nil).Once()
+		mockService2.On("Reload", mock.Anything).Return(nil).Once()
 
 		mockService1.On("Run", mock.Anything).Return(nil).Once()
 		mockService2.On("Run", mock.Anything).Return(nil).Once()
@@ -194,8 +218,8 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		sender2.On("GetReloadTrigger").Return(reloadTrigger2)
 		sender1.On("Run", mock.Anything).Return(nil)
 		sender2.On("Run", mock.Anything).Return(nil)
-		sender1.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
-		sender2.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return()
+		sender1.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return(nil)
+		sender2.On("Reload", mock.Anything).Run(func(_ mock.Arguments) { reloadCount.Add(1) }).Return(nil)
 		sender1.On("Stop").Return()
 		sender2.On("Stop").Return()
 
@@ -241,7 +265,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
-		mockService.On("Reload", mock.Anything).Return().After(500 * time.Millisecond)
+		mockService.On("Reload", mock.Anything).Return(nil).After(500 * time.Millisecond)
 
 		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
 		require.NoError(t, err)
@@ -277,7 +301,7 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 		mockService := mocks.NewMockRunnable()
 		mockService.On("Run", mock.Anything).Return(nil)
 		mockService.On("Stop").Return()
-		mockService.On("Reload", mock.Anything).Return()
+		mockService.On("Reload", mock.Anything).Return(nil)
 
 		pid0, err := New(WithContext(context.Background()), WithRunnables(mockService))
 		require.NoError(t, err)
@@ -347,4 +371,55 @@ func TestPIDZero_ReloadManager(t *testing.T) {
 			}
 		})
 	})
+}
+
+// TestSupervisor_ReloadAll_LogsPerRunnableError covers the T3.1 supervisor
+// caller contract: a child Reload error doesn't stop the iteration, gets
+// logged with the runnable's identity, but is otherwise non-propagating.
+// (context.Canceled is filtered to keep shutdown logs clean.)
+func TestSupervisor_ReloadAll_LogsPerRunnableError(t *testing.T) {
+	t.Parallel()
+
+	mockService := mocks.NewMockRunnable()
+	mockService.On("String").Return("failingService").Maybe()
+	mockService.On("Run", mock.Anything).Return(nil)
+	mockService.On("Stop").Return()
+	reloadErr := errors.New("explicit reload failure")
+	mockService.On("Reload", mock.Anything).Return(reloadErr).Once()
+
+	logBuf := &syncBuffer{}
+	handler := slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
+
+	pid0, err := New(
+		WithContext(context.Background()),
+		WithRunnables(mockService),
+		WithLogHandler(handler),
+	)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- pid0.Run() }()
+
+	require.Eventually(t, func() bool {
+		return pid0.ctx.Err() == nil
+	}, time.Second, 5*time.Millisecond)
+
+	pid0.ReloadAll()
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(logBuf.String(), "Reload failed") &&
+			strings.Contains(logBuf.String(), "explicit reload failure")
+	}, 2*time.Second, 10*time.Millisecond, "supervisor must log per-runnable Reload error")
+
+	pid0.Shutdown()
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-done:
+			return assert.NoError(t, err)
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "shutdown timed out")
+
+	mockService.AssertExpectations(t)
 }

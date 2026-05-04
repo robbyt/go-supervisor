@@ -80,7 +80,7 @@ func TestConcurrentReloadsRaceCondition(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runner.Reload(t.Context())
+			_ = runner.Reload(t.Context()) //nolint:errcheck // race-detector test; concurrent reloads expected to bail at admission gate
 		}()
 	}
 

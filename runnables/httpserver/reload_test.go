@@ -128,7 +128,7 @@ func TestRapidReload(t *testing.T) {
 	// Perform rapid reloads
 	for range 10 {
 		// Force config change by updating cfgCallback's closure state
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 		// Don't wait between reloads to test rapid changes
 	}
 
@@ -177,7 +177,7 @@ func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
 		require.Equal(t, 1, callbackCalls, "NewRunner should load the initial config")
 		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		require.Equal(t, 2, callbackCalls, "Reload should check whether the config changed")
 		select {
@@ -213,7 +213,7 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(t.Context())
+			_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
 			close(reloadDone)
 		}()
 
@@ -272,7 +272,7 @@ func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
 
 	firstReloadDone := make(chan struct{})
 	go func() {
-		runner.Reload(t.Context())
+		_ = runner.Reload(t.Context()) //nolint:errcheck // first-reload driver; caller blocks on channel
 		close(firstReloadDone)
 	}()
 
@@ -286,7 +286,8 @@ func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 	assert.Equal(t, int32(1), reloadCallbackCalls.Load())
 
-	runner.Reload(t.Context())
+	// Reload while FSM is in Reloading: admission gate fails → returns nil.
+	require.NoError(t, runner.Reload(t.Context()))
 	assert.Equal(t, int32(1), reloadCallbackCalls.Load(),
 		"second reload should not run configCallback while FSM is Reloading")
 
@@ -322,7 +323,7 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		runner.Reload(ctx)
+		require.ErrorIs(t, runner.Reload(ctx), context.Canceled)
 
 		select {
 		case req := <-runner.reloadCh:
@@ -351,7 +352,10 @@ func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
 		require.NoError(t, err)
 
 		useUpdated = true
-		runner.Reload(t.Context())
+		// Runner FSM is in "New" (never started); admission gate fails and
+		// Reload returns nil — there's no failure of *this* reload to surface.
+		// The point of this test is that no reloadReq gets dispatched.
+		require.NoError(t, runner.Reload(t.Context()))
 
 		select {
 		case req := <-runner.reloadCh:
@@ -390,7 +394,7 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 		ctx, cancel := context.WithCancel(t.Context())
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(ctx)
+			_ = runner.Reload(ctx) //nolint:errcheck // test exercises ctx-cancellation path; assertions follow
 			close(reloadDone)
 		}()
 
@@ -437,9 +441,13 @@ func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
 	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	failReload = true
-	runner.Reload(t.Context())
+	reloadErr := runner.Reload(t.Context())
 
 	assert.Equal(t, finitestate.StatusError, runner.GetState())
+	require.Error(t, reloadErr,
+		"T3.1 contract: configCallback failure must surface via Reload's return")
+	require.ErrorIs(t, reloadErr, callbackErr,
+		"the wrapped callback error must be retrievable via errors.Is")
 }
 
 func TestReloadNilConfigSetsError(t *testing.T) {
@@ -457,9 +465,11 @@ func TestReloadNilConfigSetsError(t *testing.T) {
 	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	returnNil = true
-	runner.Reload(t.Context())
+	reloadErr := runner.Reload(t.Context())
 
 	assert.Equal(t, finitestate.StatusError, runner.GetState())
+	require.Error(t, reloadErr,
+		"T3.1 contract: a nil configCallback result must surface via Reload's return")
 }
 
 func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
@@ -485,7 +495,7 @@ func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(t.Context())
+			_ = runner.Reload(t.Context()) //nolint:errcheck // test exercises blocking semantics
 			close(reloadDone)
 		}()
 
@@ -624,7 +634,8 @@ func TestReload(t *testing.T) {
 
 		// setup a failure
 		reloadCalled = true
-		server.Reload(t.Context())
+		require.Error(t, server.Reload(t.Context()),
+			"failed boot must surface as a Reload error per the T3.1 contract")
 
 		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
@@ -694,8 +705,9 @@ func TestReload(t *testing.T) {
 		// Trigger error in config callback
 		errorTriggered = true
 
-		// Call Reload to apply the faulty configuration
-		server.Reload(t.Context())
+		// Call Reload to apply the faulty configuration; the configCallback
+		// failure surfaces as a Reload error per the T3.1 contract.
+		require.Error(t, server.Reload(t.Context()))
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
 		// Wait for state change to propagate
@@ -751,7 +763,7 @@ func TestReload(t *testing.T) {
 		configBefore := server.getConfig()
 
 		// Call Reload - should fail because transition to Reloading isn't valid from New state
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Verify the state didn't change
 		assert.Equal(t, finitestate.StatusNew, server.GetState(), "State should remain New")
@@ -815,7 +827,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call Reload to apply the new configuration
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Wait for reload to complete
 		assert.Eventually(t, func() bool {
@@ -856,7 +868,7 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, initialConfig)
 
 		// Call Reload which should reload config
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Verify the config was loaded (this doesn't test nil case, but ensures reload works)
 		cfg := server.getConfig()
@@ -914,7 +926,7 @@ func TestReload(t *testing.T) {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Setup state monitoring
 		stateCtx, stateCancel := context.WithCancel(t.Context())
