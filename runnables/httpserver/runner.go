@@ -261,7 +261,13 @@ func (r *Runner) drainReloadCh() {
 	}
 }
 
-// Stop signals the HTTP server to shut down and blocks until Run() completes.
+// Stop signals the HTTP server to begin graceful shutdown and blocks until
+// Run() completes. In-flight HTTP requests are given up to the configured
+// Config.DrainTimeout to finish before remaining connections are forcibly
+// closed. Cancelling the context passed to Run() does NOT accelerate this
+// drain — the drain timeout is honored regardless, so active requests are
+// never truncated mid-flight by supervisor cancellation. See stopServer for
+// the rationale.
 func (r *Runner) Stop() {
 	r.logger.Debug("Stopping HTTP server")
 	r.lc.Stop()
@@ -408,11 +414,21 @@ func (r *Runner) getConfig() *Config {
 	return newConfig
 }
 
-// stopServer performs graceful HTTP server shutdown with timeout handling.
-// It uses sync.Once to ensure shutdown occurs only once per server instance.
+// stopServer performs graceful HTTP server shutdown bounded by
+// Config.DrainTimeout. The shutdown context is intentionally derived from
+// context.Background() rather than the parent ctx: the drain window exists
+// to let in-flight HTTP requests complete cleanly, and a cancelled parent
+// ctx would defeat that purpose by truncating active requests. DrainTimeout
+// is the sole upper bound on how long Shutdown waits for connections to drain.
+//
+// Run() calls runCancel() before invoking shutdown(), so on the normal
+// shutdown path ctx is already cancelled here — another reason this function
+// must not derive its timeout from it.
+//
+// sync.Once ensures shutdown runs at most once per server instance.
 func (r *Runner) stopServer(ctx context.Context) error {
 	var shutdownErr error
-	//nolint:contextcheck // We intentionally use context.Background() for shutdown timeout
+	//nolint:contextcheck // intentional: drain must outlive parent ctx so in-flight requests finish; see godoc
 	r.serverCloseOnce.Do(func() {
 		r.serverMutex.RLock()
 		defer r.serverMutex.RUnlock()
