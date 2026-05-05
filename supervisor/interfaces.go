@@ -44,10 +44,19 @@ type Runnable interface {
 type Reloadable interface {
 	// Reload signals the service to reload its configuration. Reload is a
 	// blocking call that returns once the reload has completed (or aborted
-	// via ctx). By contract Reload returns no error: failures should be
-	// surfaced via the runnable's own logging or via Stateable.GetStateChan
-	// (e.g., transitioning to an Error state).
-	Reload(ctx context.Context)
+	// via ctx). A non-nil return reports that the reload did not succeed.
+	//
+	// Implementations that ALSO implement Stateable are encouraged to mirror
+	// failures by transitioning to an Error state, so state-channel
+	// observers see the same outcome as direct error-return callers. Plain
+	// Reloadable implementations have no FSM to mutate; surfacing the error
+	// via the return value (and optionally logging) is sufficient.
+	//
+	// context.Canceled and context.DeadlineExceeded should be treated as
+	// control-flow signals (the caller is aborting), not failures: returning
+	// them is fine, but implementations that maintain an FSM should not
+	// interpret cancellation as an Error-worthy outcome.
+	Reload(ctx context.Context) error
 }
 
 // Stateable represents a service that reports its current state. It is

@@ -454,7 +454,7 @@ func TestPIDZero_ShutdownSender_DuringReload(t *testing.T) {
 		close(runStarted)
 		<-ctx.Done()
 	})
-	runnable.On("Reload", mock.Anything).Return().Once().Run(func(args mock.Arguments) {
+	runnable.On("Reload", mock.Anything).Return(nil).Once().Run(func(args mock.Arguments) {
 		close(reloadStarted)
 		<-releaseReload
 	})

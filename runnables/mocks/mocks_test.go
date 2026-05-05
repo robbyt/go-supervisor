@@ -57,14 +57,14 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 	case *mocks.Runnable:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
-		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("Reload", mock.Anything).Return(nil)
 		mockObj.On("String").Return(displayName)
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
 		require.NoError(t, err)
 		mockObj.Stop()
-		mockObj.Reload(t.Context())
+		require.NoError(t, mockObj.Reload(t.Context()))
 		name := mockObj.String()
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
@@ -72,14 +72,14 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 	case *mocks.MockRunnableWithStateable:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
-		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("Reload", mock.Anything).Return(nil)
 		mockObj.On("String").Return(displayName)
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
 		require.NoError(t, err)
 		mockObj.Stop()
-		mockObj.Reload(t.Context())
+		require.NoError(t, mockObj.Reload(t.Context()))
 		name := mockObj.String()
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
@@ -87,14 +87,14 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 	case *mocks.MockRunnableWithReloadSender:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
-		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("Reload", mock.Anything).Return(nil)
 		mockObj.On("String").Return(displayName)
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
 		require.NoError(t, err)
 		mockObj.Stop()
-		mockObj.Reload(t.Context())
+		require.NoError(t, mockObj.Reload(t.Context()))
 		name := mockObj.String()
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
@@ -102,14 +102,14 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 	case *mocks.MockRunnableWithShutdownSender:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
-		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("Reload", mock.Anything).Return(nil)
 		mockObj.On("String").Return(displayName)
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
 		require.NoError(t, err)
 		mockObj.Stop()
-		mockObj.Reload(t.Context())
+		require.NoError(t, mockObj.Reload(t.Context()))
 		name := mockObj.String()
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
@@ -117,14 +117,14 @@ func testHelperInheritedMethods(t *testing.T, mockRunnable any, displayName stri
 	case *mocks.MockRunnableWithReadiness:
 		mockObj.On("Run", mock.Anything).Return(nil)
 		mockObj.On("Stop").Return()
-		mockObj.On("Reload", mock.Anything).Return()
+		mockObj.On("Reload", mock.Anything).Return(nil)
 		mockObj.On("String").Return(displayName)
 
 		// Call and verify methods
 		err := mockObj.Run(context.Background())
 		require.NoError(t, err)
 		mockObj.Stop()
-		mockObj.Reload(t.Context())
+		require.NoError(t, mockObj.Reload(t.Context()))
 		name := mockObj.String()
 		assert.Equal(t, displayName, name)
 		mockObj.AssertExpectations(t)
@@ -158,9 +158,9 @@ func TestMockRunnable(t *testing.T) {
 
 	t.Run("Reload method", func(t *testing.T) {
 		mockRunnable := mocks.NewMockRunnable()
-		mockRunnable.On("Reload", mock.Anything).Return()
+		mockRunnable.On("Reload", mock.Anything).Return(nil)
 
-		mockRunnable.Reload(t.Context())
+		require.NoError(t, mockRunnable.Reload(t.Context()))
 
 		mockRunnable.AssertExpectations(t)
 	})

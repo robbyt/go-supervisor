@@ -2,6 +2,7 @@ package composite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -44,7 +45,7 @@ type ReloadableWithConfig interface {
 // completed Reloading→Running and a new caller won the gate, the previous
 // caller's defer could fire `TIC(Reloading→Running)` and erroneously release
 // the new caller's gate, derailing the new request's Run loop transition.
-func (r *Runner[T]) Reload(ctx context.Context) {
+func (r *Runner[T]) Reload(ctx context.Context) error {
 	logger := r.logger.WithGroup("Reload")
 
 	// Fast-path: if the caller's ctx is already cancelled, bail before
@@ -54,7 +55,7 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 		logger.Debug("Reload caller ctx done before dispatch", "error", ctx.Err())
-		return
+		return ctx.Err()
 	default:
 	}
 
@@ -65,25 +66,25 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 		// Either another reload is already in flight (FSM in Reloading) or the
 		// runner is in Stopping/Stopped/Booting/Error. Either way, drop this
 		// request — there is no failure of *this* reload to surface, so don't
-		// move the FSM to Error.
+		// move the FSM to Error and return nil.
 		logger.Debug("Cannot reload — runner not in Running state",
 			"current", r.fsm.GetState(), "error", err)
-		return
+		return nil
 	}
 
 	newConfig, err := r.configCallback()
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
 		r.setStateError()
-		return
+		return fmt.Errorf("config callback failed: %w", err)
 	}
 	if newConfig == nil {
 		logger.Error("config callback returned nil")
 		r.setStateError()
-		return
+		return errors.New("config callback returned nil")
 	}
 
-	r.dispatchReload(ctx, newConfig)
+	return r.dispatchReload(ctx, newConfig)
 }
 
 // dispatchReload sends an accepted reload to Run's event loop and waits for
@@ -93,17 +94,24 @@ func (r *Runner[T]) Reload(ctx context.Context) {
 // transitions the FSM back to Running explicitly. Mirrors httpserver's
 // per-branch cleanup so we never leave a catch-all defer racing the next
 // caller's admission gate.
-func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) {
-	req := &reloadReq[T]{cfg: newConfig, done: make(chan struct{})}
+func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) error {
+	// Buffer 1: lets the Run/drain side send-and-go without coordinating
+	// with our receive. The req only ever has one writer (whichever side
+	// runs first) and one reader.
+	req := &reloadReq[T]{cfg: newConfig, result: make(chan error, 1)}
 	select {
 	case r.reloadCh <- req:
-		// Accepted. Wait for Run to finish (or for drainReloadCh to close
-		// done if Run exits before processing).
-		<-req.done
+		// Accepted. Wait for Run's event loop (or drainReloadCh on Run
+		// exit) to send the outcome on req.result. The send happens-before
+		// the receive, so we read whatever Run produced.
+		r.logger.Debug("Waiting for reload req result...")
+		return <-req.result
 	case <-ctx.Done():
 		r.abortDispatch("Reload caller ctx done before dispatch", "error", ctx.Err())
+		return ctx.Err()
 	case <-r.lc.DoneCh():
 		r.abortDispatch("Runner stopped before reload dispatch")
+		return errors.New("runner stopped before reload dispatch")
 	}
 }
 
@@ -164,25 +172,34 @@ func (r *Runner[T]) reloadSkipRestart(ctx context.Context, newConfig *Config[T])
 	r.configMu.Unlock()
 
 	logger.Debug("Reloading configs of existing runnables")
-	// Reload configs of existing runnables
+	// Reload configs of existing runnables. composite is "fail-fast group of
+	// tightly-coupled dependents" — aggregate per-child Reload errors via
+	// errors.Join so the caller (and the FSM via handleReload) sees a single
+	// composite error rather than only the first failure.
 	// Runnables mutex not locked as membership is not changing
+	var errs []error
 	for _, entry := range newConfig.Entries {
 		logger := logger.With("runnable", entry.Runnable.String())
 
 		if reloadableWithConfig, ok := any(entry.Runnable).(ReloadableWithConfig); ok {
-			// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config
+			// If the runnable implements our ReloadableWithConfig interface, use that to pass the new config.
+			// ReloadableWithConfig is no-error by contract; failures are
+			// surfaced via the runnable's own logging or state channel.
 			logger.Debug("Reloading child runnable with config")
 			reloadableWithConfig.ReloadWithConfig(ctx, entry.Config)
 		} else if reloadable, ok := any(entry.Runnable).(supervisor.Reloadable); ok {
 			// Fall back to standard Reloadable interface, assume the configCallback
-			// has somehow updated the runnable's internal state
+			// has somehow updated the runnable's internal state.
 			logger.Debug("Reloading child runnable")
-			reloadable.Reload(ctx)
+			if err := reloadable.Reload(ctx); err != nil {
+				logger.Error("Child runnable reload failed", "error", err)
+				errs = append(errs, fmt.Errorf("%s: %w", entry.Runnable.String(), err))
+			}
 		} else {
 			logger.Warn("Child runnable does not implement Reloadable or ReloadableWithConfig")
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // hasMembershipChanged checks if the set of runnables has changed between configurations

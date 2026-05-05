@@ -91,7 +91,7 @@ func TestReloadContextTreeIsRunCtx(t *testing.T) {
 	// request's per-request context would be already-cancelled at handler
 	// entry.
 	callerCtx, callerCancel := context.WithCancel(context.Background())
-	runner.Reload(callerCtx)
+	require.NoError(t, runner.Reload(callerCtx))
 	require.Equal(t, finitestate.StatusRunning, runner.GetState(),
 		"runner should be back in Running after reload")
 	callerCancel()

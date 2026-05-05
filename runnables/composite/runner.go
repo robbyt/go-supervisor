@@ -46,11 +46,14 @@ type Runner[T runnable] struct {
 // otherwise observe FSM=Reloading and trip on Reloading→Stopped (an invalid
 // transition per transitions.Typical).
 //
-// done is closed by Run after handleReload finishes — including from
-// drainReloadCh on Run exit — so a caller blocked on done always unblocks.
+// result is the result channel: Run sends the reload outcome on it (nil on
+// success, non-nil on failure) — including from drainReloadCh on Run exit,
+// which sends the abandonment sentinel — so a caller blocked on the receive
+// always unblocks with a meaningful value. The channel doubles as both the
+// completion signal and the error carrier; no shared mutable field needed.
 type reloadReq[T runnable] struct {
-	cfg  *Config[T]
-	done chan struct{}
+	cfg    *Config[T]
+	result chan error
 }
 
 // NewRunner creates a new CompositeRunner instance with the provided configuration callback and options.
@@ -188,20 +191,27 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 			stopErr := r.stopAllRunnables()
 			return fmt.Errorf("%w: %w", ErrRunnableFailed, errors.Join(err, stopErr))
 		case req := <-r.reloadCh:
-			r.handleReload(ctx, req)
+			req.result <- r.handleReload(ctx, req.cfg)
 		}
 	}
 }
 
-// handleReload runs an accepted reload request inside Run's goroutine. Reload
-// has already moved the FSM Running→Reloading; this completes the work and
-// transitions the FSM back to Running (or sets Error on failure). The
-// membership-change vs in-place decision is made here, against the runner's
-// current config — keeping that decision on Run's side guarantees it sees a
-// consistent old/new pair.
-func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
-	defer close(req.done)
-
+// handleReload runs an accepted reload inside Run's goroutine. Reload has
+// already moved the FSM Running→Reloading; this completes the work and
+// transitions the FSM back to Running (or sets Error on real failure).
+// The membership-change vs in-place decision is made here, against the
+// runner's current config — keeping that decision on Run's side guarantees
+// it sees a consistent old/new pair. Returns the reload outcome so
+// waitForEvent owns the channel-protocol step (req.result <- err).
+//
+// Cancellation (context.Canceled / DeadlineExceeded) is treated as control
+// flow, not failure: the runner is shutting down or the caller asked to
+// abort. We try to transition back to Running so Run's subsequent
+// Stopping/Stopped sequence stays valid (Reloading→Stopped is illegal per
+// the FSM table, but Running→Stopping→Stopped is legal); if that
+// transition fails the runner is already terminal and we accept whatever
+// state it's in. The cancellation error still propagates to the caller.
+func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
 	oldConfig := r.getConfig()
 	if oldConfig == nil {
 		r.logger.Warn("No current config during reload, treating as empty")
@@ -209,31 +219,43 @@ func (r *Runner[T]) handleReload(ctx context.Context, req *reloadReq[T]) {
 	}
 
 	var err error
-	if hasMembershipChanged(oldConfig, req.cfg) {
-		err = r.reloadWithRestart(ctx, req.cfg)
+	if hasMembershipChanged(oldConfig, cfg) {
+		err = r.reloadWithRestart(ctx, cfg)
 	} else {
-		err = r.reloadSkipRestart(ctx, req.cfg)
+		err = r.reloadSkipRestart(ctx, cfg)
 	}
 
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Debug("Reload aborted by ctx cancellation", "error", err)
+			if transErr := r.fsm.TransitionIfCurrentState(
+				finitestate.StatusReloading, finitestate.StatusRunning,
+			); transErr != nil {
+				r.logger.Debug("Could not transition Reloading→Running after ctx-cancel",
+					"error", transErr)
+			}
+			return err
+		}
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
-		return
+		return err
 	}
 
 	if transErr := r.fsm.Transition(finitestate.StatusRunning); transErr != nil {
 		r.logger.Error("Failed to transition Reloading→Running", "error", transErr)
 		r.setStateError()
+		return transErr
 	}
+	return nil
 }
 
-// drainReloadCh closes done on any reload request still buffered in reloadCh
-// after Run's select loop exits. Without this, a Reload caller blocked on
-// done would only unblock via lc.DoneCh() in its outer select — closing done
-// makes the protocol explicit and unblocks the caller's done branch
-// deterministically.
+// drainReloadCh sends an abandonment error on req.result for any reload
+// request still buffered in reloadCh after Run's select loop exits. Without
+// this, a Reload caller blocked on the receive would only unblock via
+// lc.DoneCh() in its outer select — sending here makes the protocol explicit
+// and unblocks the caller's result branch deterministically.
 //
-// Also transitions the FSM Reloading→Running before closing done. Run is the
+// Also transitions the FSM Reloading→Running before sending. Run is the
 // single FSM mutator during reload, so this best-effort transition (a no-op
 // if FSM isn't Reloading) keeps the runner's subsequent Stopping/Stopped
 // transitions valid: Reloading→Stopped is not a legal transition per the FSM
@@ -247,7 +269,11 @@ func (r *Runner[T]) drainReloadCh() {
 			); err != nil {
 				r.logger.Debug("drainReloadCh: FSM not in Reloading", "error", err)
 			}
-			close(req.done)
+			// Surface the abandonment via req.result so Reload's
+			// <-req.result branch returns a non-nil error per T3.1.
+			// Without this, an accepted-then-drained reload would
+			// silently look like success.
+			req.result <- errors.New("runner stopped before reload was handled")
 		default:
 			return
 		}

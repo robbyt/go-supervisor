@@ -60,9 +60,11 @@ func (m *Runnable) Stop() {
 	m.Called()
 }
 
-// Reload mocks the Reload method of the Reloadable interface.
-func (m *Runnable) Reload(ctx context.Context) {
-	m.Called(ctx)
+// Reload mocks the Reload method of the Reloadable interface. The error
+// return follows the post-T3.1 contract.
+func (m *Runnable) Reload(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
 }
 
 // String returns a string representation of the mock service.

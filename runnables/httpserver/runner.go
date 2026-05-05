@@ -65,12 +65,15 @@ type Runner struct {
 
 // reloadReq carries an accepted reload from Reload(ctx) into Run's event loop
 // so executeReload runs with runCtx (matching the runner's lifetime) rather
-// than the caller's ctx. done is closed by Run after executeReload finishes
-// (success or failure) — including from drainReloadCh on Run exit, so a caller
-// blocked on done always unblocks.
+// than the caller's ctx. result is the result channel: Run sends the reload
+// outcome on it (nil on success, non-nil on failure) — including from
+// drainReloadCh on Run exit, which sends the abandonment sentinel — so a
+// caller blocked on the receive always unblocks with a meaningful value. The
+// channel doubles as both the completion signal and the error carrier; no
+// shared mutable field needed.
 type reloadReq struct {
-	cfg  *Config
-	done chan struct{}
+	cfg    *Config
+	result chan error
 }
 
 // NewRunner creates a new HTTP server runner instance with the provided options.
@@ -196,39 +199,62 @@ func (r *Runner) waitForEvent(ctx context.Context) error {
 			r.setStateError()
 			return fmt.Errorf("%w: %w", ErrHttpServer, err)
 		case req := <-r.reloadCh:
-			r.handleReload(ctx, req)
+			req.result <- r.handleReload(ctx, req.cfg)
 		}
 	}
 }
 
 // handleReload runs an accepted reload request. Reload has already moved the
 // FSM from Running to Reloading, so this only completes the restart and then
-// returns the FSM to Running (or Error on failure).
-func (r *Runner) handleReload(ctx context.Context, req *reloadReq) {
-	defer close(req.done)
-
-	if err := r.executeReload(ctx, req.cfg); err != nil {
+// returns the FSM to Running (or Error on real failure). Returns the reload
+// outcome so the caller (Run's event loop) owns the channel-protocol step
+// (req.result <- err).
+//
+// Cancellation (context.Canceled / DeadlineExceeded) is treated as control
+// flow, not failure: the runner is shutting down or the caller asked to
+// abort. We try to transition back to Running so Run's subsequent
+// Stopping/Stopped sequence stays valid; if that transition fails the
+// runner is already terminal and we accept whatever state it's in. The
+// cancellation error still propagates to the caller.
+func (r *Runner) handleReload(ctx context.Context, cfg *Config) error {
+	if err := r.executeReload(ctx, cfg); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			r.logger.Debug("Reload aborted by ctx cancellation", "error", err)
+			if transErr := r.fsm.TransitionIfCurrentState(
+				finitestate.StatusReloading, finitestate.StatusRunning,
+			); transErr != nil {
+				r.logger.Debug("Could not transition Reloading→Running after ctx-cancel",
+					"error", transErr)
+			}
+			return err
+		}
 		r.logger.Error("Reload failed", "error", err)
 		r.setStateError()
-		return
+		return err
 	}
 
 	if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 		r.logger.Error("Failed to transition from Reloading to Running", "error", err)
 		r.setStateError()
+		return err
 	}
+	return nil
 }
 
-// drainReloadCh closes req.done for any reload request still buffered in
-// reloadCh after Run's select loop exits. Without this, a Reload caller
-// blocked on req.done would only unblock via lc.DoneCh() in its outer
-// select — closing done makes the protocol explicit and unblocks the
-// caller's done-only branch deterministically.
+// drainReloadCh sends an abandonment error on req.result for any reload
+// request still buffered in reloadCh after Run's select loop exits. Without
+// this, a Reload caller blocked on the receive would only unblock via
+// lc.DoneCh() in its outer select — sending here makes the protocol explicit
+// and unblocks the caller's result branch deterministically.
 func (r *Runner) drainReloadCh() {
 	for {
 		select {
 		case req := <-r.reloadCh:
-			close(req.done)
+			// Surface the abandonment via req.result so Reload's
+			// <-req.result branch returns a non-nil error per T3.1.
+			// Without this, an accepted-then-drained reload would
+			// silently look like success.
+			req.result <- errors.New("runner stopped before reload was handled")
 		default:
 			return
 		}

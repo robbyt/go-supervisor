@@ -128,7 +128,7 @@ func TestRapidReload(t *testing.T) {
 	// Perform rapid reloads
 	for range 10 {
 		// Force config change by updating cfgCallback's closure state
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 		// Don't wait between reloads to test rapid changes
 	}
 
@@ -177,12 +177,12 @@ func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
 		require.Equal(t, 1, callbackCalls, "NewRunner should load the initial config")
 		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		require.Equal(t, 2, callbackCalls, "Reload should check whether the config changed")
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("unchanged reload should not dispatch to the Run event loop")
 		default:
 		}
@@ -213,7 +213,10 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(t.Context())
+			// assert (not require) — require.FailNow from a non-test
+			// goroutine is undefined behavior per testing docs; assert
+			// just records the failure.
+			assert.NoError(t, runner.Reload(t.Context()))
 			close(reloadDone)
 		}()
 
@@ -228,7 +231,7 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		select {
 		case req := <-runner.reloadCh:
 			assert.Same(t, updatedCfg, req.cfg)
-			close(req.done)
+			req.result <- nil
 		default:
 			t.Fatal("changed reload should dispatch to the Run event loop")
 		}
@@ -272,7 +275,12 @@ func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
 
 	firstReloadDone := make(chan struct{})
 	go func() {
-		runner.Reload(t.Context())
+		// lc.Started was never called, so canDispatchReload returns false
+		// after configCallback finally returns — the first reload ends in
+		// the runner-stopped abort path. This test cares about FSM
+		// admission serialization (the second Reload below), not whether
+		// the first one succeeds.
+		assert.Error(t, runner.Reload(t.Context()))
 		close(firstReloadDone)
 	}()
 
@@ -286,7 +294,8 @@ func TestReloadFSMAdmissionSerializesConfigCallback(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 	assert.Equal(t, int32(1), reloadCallbackCalls.Load())
 
-	runner.Reload(t.Context())
+	// Reload while FSM is in Reloading: admission gate fails → returns nil.
+	require.NoError(t, runner.Reload(t.Context()))
 	assert.Equal(t, int32(1), reloadCallbackCalls.Load(),
 		"second reload should not run configCallback while FSM is Reloading")
 
@@ -322,15 +331,51 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		runner.Reload(ctx)
+		require.ErrorIs(t, runner.Reload(ctx), context.Canceled)
 
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("pre-canceled caller context should prevent reload dispatch")
 		default:
 		}
 		assert.Same(t, initialCfg, runner.getConfig())
+	})
+}
+
+// TestReloadCanDispatchReturnsFalse_RunnerStopped covers the path where the
+// FSM admission gate succeeds (FSM=Running) but canDispatchReload returns
+// false because the runner has never been Started — lc.DoneCh returns the
+// always-closed sentinel. Reload's post-canDispatchReload select must fire
+// the lc.DoneCh case and surface the "runner stopped" error.
+func TestReloadCanDispatchReturnsFalse_RunnerStopped(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		initialCfg := createReloadTestConfig(t, ":0", "/", time.Second)
+		updatedCfg := createReloadTestConfig(t, ":0", "/", 2*time.Second)
+
+		useUpdated := false
+		runner, err := NewRunner(WithConfigCallback(func() (*Config, error) {
+			if useUpdated {
+				return updatedCfg, nil
+			}
+			return initialCfg, nil
+		}))
+		require.NoError(t, err)
+		// FSM forced to Running so the admission gate succeeds. lc.Started
+		// never called, so lc.DoneCh() returns the pre-closed sentinel
+		// and canDispatchReload returns false.
+		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
+
+		useUpdated = true
+		err = runner.Reload(t.Context())
+		require.Error(t, err,
+			"canDispatchReload returns false → Reload returns 'runner stopped' error")
+		require.Contains(t, err.Error(), "runner stopped")
+		// FSM must be back in Running after the cleanup transition; not
+		// stuck in Reloading and not pushed to Error.
+		require.Equal(t, finitestate.StatusRunning, runner.GetState())
 	})
 }
 
@@ -351,11 +396,14 @@ func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
 		require.NoError(t, err)
 
 		useUpdated = true
-		runner.Reload(t.Context())
+		// Runner FSM is in "New" (never started); admission gate fails and
+		// Reload returns nil — there's no failure of *this* reload to surface.
+		// The point of this test is that no reloadReq gets dispatched.
+		require.NoError(t, runner.Reload(t.Context()))
 
 		select {
 		case req := <-runner.reloadCh:
-			close(req.done)
+			req.result <- nil
 			t.Fatal("reload should not dispatch when no Run loop is active")
 		default:
 		}
@@ -383,14 +431,16 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 		defer done()
 		require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
-		blockingReq := &reloadReq{cfg: initialCfg, done: make(chan struct{})}
+		blockingReq := &reloadReq{cfg: initialCfg, result: make(chan error, 1)}
 		runner.reloadCh <- blockingReq
 
 		useUpdated = true
 		ctx, cancel := context.WithCancel(t.Context())
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(ctx)
+			// Reload returns ctx.Err() when caller ctx fires while parked
+			// on the reloadCh send. assert (not require) for goroutine-safety.
+			assert.ErrorIs(t, runner.Reload(ctx), context.Canceled)
 			close(reloadDone)
 		}()
 
@@ -437,9 +487,13 @@ func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
 	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	failReload = true
-	runner.Reload(t.Context())
+	reloadErr := runner.Reload(t.Context())
 
 	assert.Equal(t, finitestate.StatusError, runner.GetState())
+	require.Error(t, reloadErr,
+		"T3.1 contract: configCallback failure must surface via Reload's return")
+	require.ErrorIs(t, reloadErr, callbackErr,
+		"the wrapped callback error must be retrievable via errors.Is")
 }
 
 func TestReloadNilConfigSetsError(t *testing.T) {
@@ -457,9 +511,11 @@ func TestReloadNilConfigSetsError(t *testing.T) {
 	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))
 
 	returnNil = true
-	runner.Reload(t.Context())
+	reloadErr := runner.Reload(t.Context())
 
 	assert.Equal(t, finitestate.StatusError, runner.GetState())
+	require.Error(t, reloadErr,
+		"T3.1 contract: a nil configCallback result must surface via Reload's return")
 }
 
 func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
@@ -485,7 +541,10 @@ func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
 		useUpdated = true
 		reloadDone := make(chan struct{})
 		go func() {
-			runner.Reload(t.Context())
+			// drainReloadCh runs below and sets req.err = "runner stopped
+			// before reload was handled"; Reload surfaces that as a
+			// non-nil error.
+			assert.Error(t, runner.Reload(t.Context()))
 			close(reloadDone)
 		}()
 
@@ -624,7 +683,8 @@ func TestReload(t *testing.T) {
 
 		// setup a failure
 		reloadCalled = true
-		server.Reload(t.Context())
+		require.Error(t, server.Reload(t.Context()),
+			"failed boot must surface as a Reload error per the T3.1 contract")
 
 		assert.Eventually(t, func() bool {
 			return server.GetState() == finitestate.StatusError
@@ -694,8 +754,9 @@ func TestReload(t *testing.T) {
 		// Trigger error in config callback
 		errorTriggered = true
 
-		// Call Reload to apply the faulty configuration
-		server.Reload(t.Context())
+		// Call Reload to apply the faulty configuration; the configCallback
+		// failure surfaces as a Reload error per the T3.1 contract.
+		require.Error(t, server.Reload(t.Context()))
 		assert.False(t, handlerCalled, "Handler should not be called after failed reload")
 
 		// Wait for state change to propagate
@@ -751,7 +812,7 @@ func TestReload(t *testing.T) {
 		configBefore := server.getConfig()
 
 		// Call Reload - should fail because transition to Reloading isn't valid from New state
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Verify the state didn't change
 		assert.Equal(t, finitestate.StatusNew, server.GetState(), "State should remain New")
@@ -815,7 +876,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Call Reload to apply the new configuration
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Wait for reload to complete
 		assert.Eventually(t, func() bool {
@@ -856,7 +917,7 @@ func TestReload(t *testing.T) {
 		require.NotNil(t, initialConfig)
 
 		// Call Reload which should reload config
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Verify the config was loaded (this doesn't test nil case, but ensures reload works)
 		cfg := server.getConfig()
@@ -914,7 +975,7 @@ func TestReload(t *testing.T) {
 			return server.GetState() == finitestate.StatusRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
-		server.Reload(t.Context())
+		require.NoError(t, server.Reload(t.Context()))
 
 		// Setup state monitoring
 		stateCtx, stateCancel := context.WithCancel(t.Context())

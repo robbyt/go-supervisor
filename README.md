@@ -119,9 +119,13 @@ type Runnable interface {
 }
 
 // Reloadable represents a service that can be reloaded.
-// Reload blocks until the reload completes (or aborts via ctx).
+// Reload blocks until the reload completes (or aborts via ctx). A non-nil
+// return reports failure. Implementations that ALSO implement Stateable
+// are encouraged to mirror failures via an FSM Error transition so
+// state-channel observers see the same outcome; plain Reloadable
+// implementations have no FSM and only need to return the error.
 type Reloadable interface {
-    Reload(ctx context.Context)
+    Reload(ctx context.Context) error
 }
 
 // Stateable represents a service that reports its current state.
@@ -186,15 +190,19 @@ type Config struct {
     Interval time.Duration
 }
 
-func (s *ConfigurableService) Reload(ctx context.Context) {
+func (s *ConfigurableService) Reload(ctx context.Context) error {
     s.mu.Lock()
     defer s.mu.Unlock()
     
     // Load new config from file or environment
-    newConfig := loadConfig()
+    newConfig, err := loadConfig()
+    if err != nil {
+        return err
+    }
     s.config = newConfig
     
     fmt.Printf("%s: Configuration reloaded\n", s.name)
+    return nil
 }
 ```
 

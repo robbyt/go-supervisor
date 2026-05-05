@@ -380,7 +380,7 @@ func TestCompositeRunner_Run(t *testing.T) {
 
 		// Now update the entries and reload
 		useUpdatedEntries.Store(true)
-		runner.Reload(t.Context())
+		require.NoError(t, runner.Reload(t.Context()))
 
 		// Wait for reload to complete by checking if the config pointer has changed
 		var updatedCfg *Config[*mocks.Runnable]
@@ -718,7 +718,7 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 		<-args.Get(0).(context.Context).Done()
 	}).Return(nil)
 	mock1.On("Stop").Maybe()
-	mock1.On("Reload", mock.Anything).Maybe().After(50 * time.Millisecond)
+	mock1.On("Reload", mock.Anything).Return(nil).Maybe().After(50 * time.Millisecond)
 
 	entries := []RunnableEntry[*mocks.Runnable]{
 		{Runnable: mock1},
@@ -740,8 +740,12 @@ func TestCompositeRunner_StopDuringReload(t *testing.T) {
 		return runner.IsReady()
 	}, 1*time.Second, 5*time.Millisecond)
 
-	// Start reload in background (the mock's Reload .After() keeps the FSM in Reloading)
-	go runner.Reload(t.Context())
+	// Start reload in background. The mock's Reload .After(50ms) keeps the
+	// FSM in Reloading long enough for the test to observe it. handleReload
+	// still completes before Run exits in response to Stop, so the Reload
+	// itself returns nil (req.err never gets set to the drained-on-shutdown
+	// sentinel).
+	go func() { assert.NoError(t, runner.Reload(t.Context())) }()
 	require.Eventually(t, func() bool {
 		return runner.GetState() == finitestate.StatusReloading
 	}, 1*time.Second, 1*time.Millisecond)
