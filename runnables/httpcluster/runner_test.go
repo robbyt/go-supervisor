@@ -673,7 +673,7 @@ func TestRunnerExecuteActions(t *testing.T) {
 		mockEntries.On("get", "start1").Return(testEntry)
 
 		// Mock setRuntime to return the same mock (simulating immutable update)
-		mockEntries.On("setRuntime", "start1", mock.Anything, mock.Anything, mock.Anything).
+		mockEntries.On("setRuntime", "start1", mock.Anything, mock.Anything).
 			Return(mockEntries).Maybe()
 
 		// Mock clearRuntime in case the server fails to become ready (can happen in slow environments)
