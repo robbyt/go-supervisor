@@ -46,9 +46,8 @@ func createTestServerEntry(
 	}
 
 	if withRuntime {
-		ctx, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		// Set minimal runtime state for testing
-		entry.ctx = ctx
 		entry.cancel = cancel
 		// Set a non-nil runner to indicate the server is running
 		entry.runner = &httpserver.Runner{}
@@ -385,21 +384,21 @@ func TestEntriesSetRuntime(t *testing.T) {
 			},
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		updated := entries.setRuntime("server1", nil, ctx, cancel)
+		updated := entries.setRuntime("server1", nil, cancel)
 
 		require.NotNil(t, updated)
 		assert.Equal(t, 1, updated.count())
 
 		entry := updated.get("server1")
 		require.NotNil(t, entry)
-		assert.Equal(t, ctx, entry.ctx)
+		assert.NotNil(t, entry.cancel, "cancel should be set")
 		assert.Equal(t, actionStart, entry.action, "Action should be preserved")
 
 		originalEntry := entries.get("server1")
-		assert.Nil(t, originalEntry.ctx, "Original entries should be unchanged")
+		assert.Nil(t, originalEntry.cancel, "Original entries should be unchanged")
 	})
 
 	t.Run("set runtime for non-existing entry", func(t *testing.T) {
@@ -407,10 +406,10 @@ func TestEntriesSetRuntime(t *testing.T) {
 			servers: map[string]*serverEntry{},
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		updated := entries.setRuntime("nonexistent", nil, ctx, cancel)
+		updated := entries.setRuntime("nonexistent", nil, cancel)
 
 		assert.Nil(t, updated)
 	})
@@ -418,13 +417,12 @@ func TestEntriesSetRuntime(t *testing.T) {
 
 func TestEntriesClearRuntime(t *testing.T) {
 	t.Run("clear runtime for existing entry", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		entries := &entries{
 			servers: map[string]*serverEntry{
 				"server1": {
 					id:     "server1",
 					config: createTestHTTPConfig(t, ":8001"),
-					ctx:    ctx,
 					cancel: cancel,
 					action: actionStop,
 				},
@@ -438,12 +436,11 @@ func TestEntriesClearRuntime(t *testing.T) {
 
 		entry := updated.get("server1")
 		require.NotNil(t, entry)
-		assert.Nil(t, entry.ctx)
 		assert.Nil(t, entry.cancel)
 		assert.Equal(t, actionStop, entry.action, "Action should be preserved")
 
 		originalEntry := entries.get("server1")
-		assert.NotNil(t, originalEntry.ctx, "Original entries should be unchanged")
+		assert.NotNil(t, originalEntry.cancel, "Original entries should be unchanged")
 	})
 
 	t.Run("clear runtime for non-existing entry", func(t *testing.T) {
@@ -540,18 +537,18 @@ func TestEntriesImmutability(t *testing.T) {
 			},
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		updated := original.setRuntime("server1", nil, ctx, cancel)
+		updated := original.setRuntime("server1", nil, cancel)
 
 		// Original unchanged
 		originalEntry := original.get("server1")
-		assert.Nil(t, originalEntry.ctx)
+		assert.Nil(t, originalEntry.cancel)
 
 		// Updated has runtime
 		updatedEntry := updated.get("server1")
-		assert.NotNil(t, updatedEntry.ctx)
+		assert.NotNil(t, updatedEntry.cancel)
 	})
 }
 

@@ -24,7 +24,11 @@ type serverEntry struct {
 
 	// Runtime state - nil if server is not running
 	runner httpServerRunner
-	ctx    context.Context
+	// cancel terminates the per-server goroutine. It's set when the server
+	// starts and called from the cluster's stop path to remove this server
+	// without disturbing siblings. The per-server ctx itself is owned by the
+	// goroutine closure (see createAndStartServer); this struct holds only
+	// the cancel handle.
 	cancel context.CancelFunc
 
 	// Pending action for the commit phase
@@ -128,7 +132,6 @@ func (e *entries) commit() entriesManager {
 			id:     entry.id,
 			config: entry.config,
 			runner: entry.runner,
-			ctx:    entry.ctx,
 			cancel: entry.cancel,
 			action: actionNone,
 		}
@@ -143,7 +146,6 @@ func (e *entries) commit() entriesManager {
 func (e *entries) setRuntime(
 	id string,
 	runner httpServerRunner,
-	ctx context.Context,
 	cancel context.CancelFunc,
 ) entriesManager {
 	_, exists := e.servers[id]
@@ -160,7 +162,6 @@ func (e *entries) setRuntime(
 				id:     v.id,
 				config: v.config,
 				runner: runner,
-				ctx:    ctx,
 				cancel: cancel,
 				action: v.action, // Preserve action
 			}

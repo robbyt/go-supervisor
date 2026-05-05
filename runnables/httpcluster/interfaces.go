@@ -31,7 +31,6 @@ type entriesManager interface {
 	setRuntime(
 		id string,
 		runner httpServerRunner,
-		ctx context.Context,
 		cancel context.CancelFunc,
 	) entriesManager
 

@@ -54,10 +54,9 @@ func (m *MockEntriesManager) commit() entriesManager {
 func (m *MockEntriesManager) setRuntime(
 	id string,
 	runner httpServerRunner,
-	ctx context.Context,
 	cancel context.CancelFunc,
 ) entriesManager {
-	args := m.Called(id, runner, ctx, cancel)
+	args := m.Called(id, runner, cancel)
 	if args.Get(0) == nil {
 		return nil
 	}
@@ -674,7 +673,7 @@ func TestRunnerExecuteActions(t *testing.T) {
 		mockEntries.On("get", "start1").Return(testEntry)
 
 		// Mock setRuntime to return the same mock (simulating immutable update)
-		mockEntries.On("setRuntime", "start1", mock.Anything, mock.Anything, mock.Anything).
+		mockEntries.On("setRuntime", "start1", mock.Anything, mock.Anything).
 			Return(mockEntries).Maybe()
 
 		// Mock clearRuntime in case the server fails to become ready (can happen in slow environments)
