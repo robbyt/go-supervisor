@@ -261,7 +261,15 @@ func (r *Runner) drainReloadCh() {
 	}
 }
 
-// Stop signals the HTTP server to shut down and blocks until Run() completes.
+// Stop signals the HTTP server to begin graceful shutdown and blocks until
+// Run() completes. http.Server.Shutdown is invoked with a timeout of
+// Config.DrainTimeout, giving in-flight HTTP requests up to that long to
+// complete before Shutdown returns. This drain window is decoupled from
+// the context passed to Run() — cancelling that context does not shorten
+// the wait. Note that the server's BaseContext is derived from Run's ctx,
+// so request handlers that honor r.Context() will still observe
+// cancellation independently of the drain timeout. See stopServer for the
+// rationale.
 func (r *Runner) Stop() {
 	r.logger.Debug("Stopping HTTP server")
 	r.lc.Stop()
@@ -408,11 +416,22 @@ func (r *Runner) getConfig() *Config {
 	return newConfig
 }
 
-// stopServer performs graceful HTTP server shutdown with timeout handling.
-// It uses sync.Once to ensure shutdown occurs only once per server instance.
+// stopServer invokes http.Server.Shutdown with a timeout of
+// Config.DrainTimeout, giving in-flight requests a bounded window to
+// complete before Shutdown returns. The shutdown context is derived from
+// context.Background() rather than the parent ctx because Run() calls
+// runCancel() before invoking shutdown(), so on the normal shutdown path
+// the parent ctx is already done here — a ctx-derived timeout would fire
+// immediately and Shutdown would return without waiting for the drain.
+//
+// http.Server.Shutdown does not itself terminate in-flight handlers when
+// its ctx fires; it just stops waiting and returns. Active requests
+// continue running on connections that outlive Shutdown.
+//
+// sync.Once ensures shutdown runs at most once per server instance.
 func (r *Runner) stopServer(ctx context.Context) error {
 	var shutdownErr error
-	//nolint:contextcheck // We intentionally use context.Background() for shutdown timeout
+	//nolint:contextcheck // intentional: Run cancels runCtx before shutdown(); a ctx-derived timeout would fire immediately and skip the drain
 	r.serverCloseOnce.Do(func() {
 		r.serverMutex.RLock()
 		defer r.serverMutex.RUnlock()
