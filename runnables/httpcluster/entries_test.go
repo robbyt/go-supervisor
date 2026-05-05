@@ -46,7 +46,7 @@ func createTestServerEntry(
 	}
 
 	if withRuntime {
-		_, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		// Set minimal runtime state for testing
 		entry.cancel = cancel
 		// Set a non-nil runner to indicate the server is running
@@ -384,7 +384,7 @@ func TestEntriesSetRuntime(t *testing.T) {
 			},
 		}
 
-		_, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		updated := entries.setRuntime("server1", nil, cancel)
@@ -406,7 +406,7 @@ func TestEntriesSetRuntime(t *testing.T) {
 			servers: map[string]*serverEntry{},
 		}
 
-		_, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		updated := entries.setRuntime("nonexistent", nil, cancel)
@@ -417,7 +417,7 @@ func TestEntriesSetRuntime(t *testing.T) {
 
 func TestEntriesClearRuntime(t *testing.T) {
 	t.Run("clear runtime for existing entry", func(t *testing.T) {
-		_, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		entries := &entries{
 			servers: map[string]*serverEntry{
 				"server1": {
@@ -537,7 +537,7 @@ func TestEntriesImmutability(t *testing.T) {
 			},
 		}
 
-		_, cancel := context.WithCancel(context.Background())
+		_, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		updated := original.setRuntime("server1", nil, cancel)
