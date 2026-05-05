@@ -414,7 +414,7 @@ func (r *Runner) startServers(
 		logger.Debug("Starting server")
 
 		// Create and start the server
-		runner, serverCtx, serverCancel, err := r.createAndStartServer(ctx, entry)
+		runner, serverCancel, err := r.createAndStartServer(ctx, entry)
 		if err != nil {
 			logger.Error("Failed to create server", "error", err)
 			hadFailure = true
@@ -424,7 +424,7 @@ func (r *Runner) startServers(
 		}
 
 		// Update entries with runtime info
-		if updated := current.setRuntime(id, runner, serverCtx, serverCancel); updated != nil {
+		if updated := current.setRuntime(id, runner, serverCancel); updated != nil {
 			current = updated
 		}
 
@@ -463,7 +463,7 @@ func (r *Runner) startServers(
 func (r *Runner) createAndStartServer(
 	ctx context.Context,
 	entry *serverEntry,
-) (httpServerRunner, context.Context, context.CancelFunc, error) {
+) (httpServerRunner, context.CancelFunc, error) {
 	// Create server context
 	serverCtx, serverCancel := context.WithCancel(ctx)
 
@@ -471,7 +471,7 @@ func (r *Runner) createAndStartServer(
 	runner, err := r.runnerFactory(serverCtx, entry.id, entry.config, r.logger.Handler())
 	if err != nil {
 		serverCancel()
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// Start that Runnable implementation in a goroutine
@@ -496,7 +496,7 @@ func (r *Runner) createAndStartServer(
 		logger.Debug("Instance stopped")
 	}(entry.id, runner, serverCtx, serverCancel)
 
-	return runner, serverCtx, serverCancel, nil
+	return runner, serverCancel, nil
 }
 
 // removeEntryIfMatches drops the entry stored under id only if it still points

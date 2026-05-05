@@ -54,10 +54,9 @@ func (m *MockEntriesManager) commit() entriesManager {
 func (m *MockEntriesManager) setRuntime(
 	id string,
 	runner httpServerRunner,
-	ctx context.Context,
 	cancel context.CancelFunc,
 ) entriesManager {
-	args := m.Called(id, runner, ctx, cancel)
+	args := m.Called(id, runner, cancel)
 	if args.Get(0) == nil {
 		return nil
 	}
