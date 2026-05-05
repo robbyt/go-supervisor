@@ -104,6 +104,7 @@ func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) er
 		// Accepted. Wait for Run's event loop (or drainReloadCh on Run
 		// exit) to send the outcome on req.result. The send happens-before
 		// the receive, so we read whatever Run produced.
+		r.logger.Debug("Waiting for reload req result...")
 		return <-req.result
 	case <-ctx.Done():
 		r.abortDispatch("Reload caller ctx done before dispatch", "error", ctx.Err())
