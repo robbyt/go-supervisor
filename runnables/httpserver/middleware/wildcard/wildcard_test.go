@@ -129,6 +129,26 @@ func TestWildcard_PrefixWithoutTrailingSlash(t *testing.T) {
 	assert.Equal(t, "users", rec.Body.String())
 }
 
+func TestWildcard_DoesNotMutateOriginalRequest(t *testing.T) {
+	t.Parallel()
+	handler := createPathEchoHandler(t)
+	rec, req := setupRequest(t, "GET", "/api/users/123")
+	originalPath := req.URL.Path
+	originalURL := req.URL
+
+	executeHandlerWithWildcard(t, handler, "/api/", rec, req)
+
+	// Handler observed the stripped path (existing contract).
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "users/123", rec.Body.String())
+	// Caller's request pointer is unchanged: neither URL.Path nor the URL
+	// pointer itself was rewritten on the request the caller passed in.
+	assert.Equal(t, originalPath, req.URL.Path,
+		"wildcard must not mutate the caller's request URL.Path")
+	assert.Same(t, originalURL, req.URL,
+		"wildcard must not swap the caller's URL pointer")
+}
+
 func TestWildcard_RequestProcessorAbort(t *testing.T) {
 	t.Parallel()
 	var nextCalled bool
