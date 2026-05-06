@@ -45,10 +45,11 @@ func TestRunServer(t *testing.T) {
 	}()
 
 	statusURL := "http://localhost" + addr + "/status"
+	client := &http.Client{Timeout: time.Second}
 
 	// Wait for the server to be ready by checking if it responds to requests
 	assert.Eventually(t, func() bool {
-		resp, err := http.Get(statusURL)
+		resp, err := client.Get(statusURL)
 		if err != nil {
 			return false
 		}
@@ -57,7 +58,7 @@ func TestRunServer(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "Server should become ready")
 
 	// Make a request to the server
-	resp, err := http.Get(statusURL)
+	resp, err := client.Get(statusURL)
 	require.NoError(t, err, "Failed to make GET request")
 
 	body, err := io.ReadAll(resp.Body)
