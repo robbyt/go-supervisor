@@ -315,3 +315,27 @@ func TestRequestProcessor_SetWriter(t *testing.T) {
 	// Verify new writer is set
 	assert.Same(t, newRW, rp.Writer(), "should have new writer after SetWriter")
 }
+
+func TestRequestProcessor_SetRequest(t *testing.T) {
+	originalReq := httptest.NewRequest("GET", "/api/users/123", nil)
+	rw := newResponseWriter(httptest.NewRecorder())
+
+	rp := &RequestProcessor{
+		writer:  rw,
+		request: originalReq,
+	}
+
+	// Verify original request
+	assert.Same(t, originalReq, rp.Request(), "should initially have original request")
+
+	// Swap in a clone with a transformed path, leaving the caller's pointer untouched
+	cloned := originalReq.Clone(originalReq.Context())
+	cloned.URL.Path = "/users/123"
+	rp.SetRequest(cloned)
+
+	// Verify the new request is held and is a different pointer than the original
+	assert.Same(t, cloned, rp.Request(), "should have new request after SetRequest")
+	assert.NotSame(t, originalReq, rp.Request(), "SetRequest should not retain original pointer")
+	assert.Equal(t, "/api/users/123", originalReq.URL.Path,
+		"original request must remain unchanged")
+}
