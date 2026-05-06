@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -705,6 +706,57 @@ func TestNewConfig(t *testing.T) {
 			expectedStr: "",
 		},
 		{
+			name: "MultipleDuplicates",
+			// Three duplicated paths in one slice; errors.Join should report
+			// each once (not "first dup, then return"). /unique appears once
+			// and must NOT be reported.
+			addr: ":8080",
+			routes: func() Routes {
+				h := func(w http.ResponseWriter, r *http.Request) {}
+				mk := func(name, path string) Route {
+					r, err := NewRouteFromHandlerFunc(name, path, h)
+					if err != nil {
+						panic(err)
+					}
+					return *r
+				}
+				return Routes{
+					mk("v1", "/a"),
+					mk("v2", "/a"),
+					mk("v3", "/a"),
+					mk("v4", "/b"),
+					mk("v5", "/b"),
+					mk("v6", "/unique"),
+				}
+			}(),
+			opts:        nil,
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "ConflictingPatterns",
+			// Go 1.22+ http.ServeMux: "/a/{x}/b" and "/a/y/{z}" both match
+			// "/a/y/b" with neither more specific. ServeMux panics on the
+			// second registration; validateRoutePatterns turns that into an
+			// error here.
+			addr: ":8080",
+			routes: func() Routes {
+				h := func(w http.ResponseWriter, r *http.Request) {}
+				r1, err := NewRouteFromHandlerFunc("v1", "/a/{x}/b", h)
+				if err != nil {
+					panic(err)
+				}
+				r2, err := NewRouteFromHandlerFunc("v2", "/a/y/{z}", h)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*r1, *r2}
+			}(),
+			opts:        nil,
+			expectError: true,
+			expectedStr: "",
+		},
+		{
 			name: "NegativeReadTimeout",
 			addr: ":8080",
 			routes: func() Routes {
@@ -898,4 +950,40 @@ func TestWithConfigCopy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNewConfig_MultipleDuplicatesAccumulate verifies that NewConfig surfaces
+// every duplicated route path via errors.Join, not just the first one. This
+// gives users a complete picture in a single failed-config message instead of
+// forcing them to fix one typo, retry, fix the next, retry, etc.
+func TestNewConfig_MultipleDuplicatesAccumulate(t *testing.T) {
+	t.Parallel()
+	h := func(w http.ResponseWriter, r *http.Request) {}
+	mk := func(name, path string) Route {
+		r, err := NewRouteFromHandlerFunc(name, path, h)
+		require.NoError(t, err)
+		return *r
+	}
+	routes := Routes{
+		mk("v1", "/a"),
+		mk("v2", "/a"),
+		mk("v3", "/a"),
+		mk("v4", "/b"),
+		mk("v5", "/b"),
+		mk("v6", "/unique"),
+	}
+
+	config, err := NewConfig(":8080", routes)
+	require.Error(t, err)
+	assert.Nil(t, config)
+
+	msg := err.Error()
+	assert.Contains(t, msg, `"/a"`, "joined error should mention /a")
+	assert.Contains(t, msg, `"/b"`, "joined error should mention /b")
+	assert.NotContains(t, msg, `"/unique"`, "non-duplicated path must not be reported")
+	// Each duplicated path appears exactly once regardless of copy count.
+	assert.Equal(t, 1, strings.Count(msg, `"/a"`),
+		"duplicated path /a should be reported once even with 3 copies")
+	assert.Equal(t, 1, strings.Count(msg, `"/b"`),
+		"duplicated path /b should be reported once even with 2 copies")
 }

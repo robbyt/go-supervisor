@@ -126,23 +126,33 @@ func WithConfigCopy(src *Config) ConfigOption {
 	}
 }
 
-// NewConfig creates a new Config with the address and routes
-// plus any optional configuration via functional options
-func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error) {
-	if len(routes) == 0 {
-		return nil, errors.New("routes cannot be empty")
-	}
-	if addr == "" {
-		return nil, errors.New("addr cannot be empty")
-	}
-	seen := make(map[string]struct{}, len(routes))
-	for _, r := range routes {
-		if _, dup := seen[r.Path]; dup {
-			return nil, fmt.Errorf("duplicate route path: %q", r.Path)
+// validateRoutePatterns surfaces http.ServeMux pattern conflicts at
+// construction time by pre-registering each route against a throwaway mux.
+// ServeMux.Handle panics on identical patterns and (Go 1.22+) on conflicting
+// patterns where neither is more specific (e.g. "/a/{x}/b" vs "/a/y/{z}");
+// running the same registration here lets us recover that panic and return
+// it as a normal error instead of letting the server crash at start.
+func validateRoutePatterns(routes Routes) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("invalid or conflicting route patterns: %v", r)
 		}
-		seen[r.Path] = struct{}{}
+	}()
+	mux := http.NewServeMux()
+	noopHandler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	for _, route := range routes {
+		mux.Handle(route.Path, noopHandler)
 	}
+	return nil
+}
 
+// NewConfig creates a new Config with the address and routes
+// plus any optional configuration via functional options.
+//
+// All validation runs after the supplied ConfigOptions have been applied,
+// so options that mutate Routes/ListenAddr/timeouts are still bound by the
+// same checks as the caller's positional arguments.
+func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error) {
 	// Use constants for default values
 	c := &Config{
 		ListenAddr:    addr,
@@ -160,6 +170,31 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 		opt(c)
 	}
 
+	if len(c.Routes) == 0 {
+		return nil, errors.New("routes cannot be empty")
+	}
+	if c.ListenAddr == "" {
+		return nil, errors.New("addr cannot be empty")
+	}
+	// Byte-for-byte duplicates: report every duplicated path, not just the first,
+	// so a config with several typos surfaces them all at once. Each duplicated
+	// path is reported once regardless of how many copies appear.
+	seen := make(map[string]int, len(c.Routes))
+	var dupErrs []error
+	for _, r := range c.Routes {
+		seen[r.Path]++
+		if seen[r.Path] == 2 {
+			dupErrs = append(dupErrs, fmt.Errorf("duplicate route path: %q", r.Path))
+		}
+	}
+	if len(dupErrs) > 0 {
+		return nil, errors.Join(dupErrs...)
+	}
+	// Go 1.22+ http.ServeMux also panics on overlapping non-identical patterns
+	// (e.g. "/a/{x}/b" vs "/a/y/{z}"); validateRoutePatterns catches that class.
+	if err := validateRoutePatterns(c.Routes); err != nil {
+		return nil, err
+	}
 	if c.DrainTimeout < 0 {
 		return nil, fmt.Errorf("DrainTimeout must be >= 0, got %s", c.DrainTimeout)
 	}
