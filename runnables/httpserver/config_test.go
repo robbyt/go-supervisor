@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -593,100 +594,114 @@ func TestFunctionalOptions(t *testing.T) {
 	}
 }
 
-// TestNewConfig tests that the NewConfig function creates a Config with the expected values
+// TestNewConfig tests that the NewConfig function creates a Config with the
+// expected values, and rejects every documented invalid input. Each case is
+// its own sub-test so the failure mode of one does not obscure the others.
 func TestNewConfig(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		addr        string
-		routes      Routes
-		opts        []ConfigOption
-		expectError bool
-		expectedStr string
-	}{
-		{
-			name: "ValidConfig",
-			addr: ":8080",
-			routes: func() Routes {
-				route, err := NewRouteFromHandlerFunc(
-					"v1",
-					"/test",
-					func(w http.ResponseWriter, r *http.Request) {},
-				)
-				if err != nil {
-					panic(err)
-				}
-				return Routes{*route}
-			}(),
-			opts:        []ConfigOption{WithDrainTimeout(30 * time.Second)},
-			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=30s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
-		},
-		{
-			name:        "EmptyRoutes",
-			addr:        ":8080",
-			routes:      Routes{},
-			opts:        nil,
-			expectError: true,
-			expectedStr: "",
-		},
-		{
-			name: "ZeroDrainTimeout",
-			addr: ":8080",
-			routes: func() Routes {
-				route, err := NewRouteFromHandlerFunc(
-					"v1",
-					"/test",
-					func(w http.ResponseWriter, r *http.Request) {},
-				)
-				if err != nil {
-					panic(err)
-				}
-				return Routes{*route}
-			}(),
-			opts:        []ConfigOption{WithDrainTimeout(0)},
-			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=0s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
-		},
-		{
-			name: "NegativeDrainTimeout",
-			addr: ":8080",
-			routes: func() Routes {
-				route, err := NewRouteFromHandlerFunc(
-					"v1",
-					"/test",
-					func(w http.ResponseWriter, r *http.Request) {},
-				)
-				if err != nil {
-					panic(err)
-				}
-				return Routes{*route}
-			}(),
-			opts:        []ConfigOption{WithDrainTimeout(-10 * time.Second)},
-			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=-10s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
-		},
+	noopHandler := func(w http.ResponseWriter, r *http.Request) {}
+	mkRoute := func(t *testing.T, name, path string) Route {
+		t.Helper()
+		r, err := NewRouteFromHandlerFunc(name, path, noopHandler)
+		require.NoError(t, err)
+		return *r
+	}
+	singleRoute := func(t *testing.T) Routes {
+		t.Helper()
+		return Routes{mkRoute(t, "v1", "/test")}
 	}
 
-	for _, tt := range tests {
-		tt := tt // capture range variable
-		t.Run(tt.name, func(t *testing.T) {
-			config, err := NewConfig(tt.addr, tt.routes, tt.opts...)
-			if tt.expectError {
-				require.Error(t, err)
-				assert.Nil(t, config)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, config)
-				assert.Equal(t, tt.addr, config.ListenAddr)
-				// DrainTimeout is now set via options
-				assert.Equal(t, tt.routes, config.Routes)
-				// Test Config.String()
-				assert.Equal(t, tt.expectedStr, config.String())
-			}
+	t.Run("ValidConfig", func(t *testing.T) {
+		t.Parallel()
+		routes := singleRoute(t)
+		cfg, err := NewConfig(":8080", routes, WithDrainTimeout(30*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, ":8080", cfg.ListenAddr)
+		assert.Equal(t, routes, cfg.Routes)
+		assert.Equal(t,
+			"Config<addr=:8080, drainTimeout=30s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
+			cfg.String(),
+		)
+	})
+
+	t.Run("ZeroDrainTimeout", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", singleRoute(t), WithDrainTimeout(0))
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t,
+			"Config<addr=:8080, drainTimeout=0s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
+			cfg.String(),
+		)
+	})
+
+	t.Run("EmptyRoutes", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", Routes{})
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("EmptyAddr", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig("", singleRoute(t))
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("NegativeDrainTimeout", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", singleRoute(t), WithDrainTimeout(-10*time.Second))
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("NegativeReadTimeout", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", singleRoute(t), WithReadTimeout(-1*time.Second))
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("NegativeWriteTimeout", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", singleRoute(t), WithWriteTimeout(-1*time.Second))
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("NegativeIdleTimeout", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", singleRoute(t), WithIdleTimeout(-1*time.Second))
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("DuplicatePaths", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := NewConfig(":8080", Routes{
+			mkRoute(t, "v1", "/test"),
+			mkRoute(t, "v2", "/test"),
 		})
-	}
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
+
+	t.Run("ConflictingPatterns", func(t *testing.T) {
+		t.Parallel()
+		// Go 1.22+ http.ServeMux: "/a/{x}/b" and "/a/y/{z}" both match
+		// "/a/y/b" with neither more specific. ServeMux panics on the
+		// second registration; validateRoutePatterns surfaces it as an
+		// error here.
+		cfg, err := NewConfig(":8080", Routes{
+			mkRoute(t, "v1", "/a/{x}/b"),
+			mkRoute(t, "v2", "/a/y/{z}"),
+		})
+		require.Error(t, err)
+		assert.Nil(t, cfg)
+	})
 }
 
 // TestWithConfigCopy tests that the WithConfigCopy option correctly copies settings
@@ -807,4 +822,40 @@ func TestWithConfigCopy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNewConfig_MultipleDuplicatesAccumulate verifies that NewConfig surfaces
+// every duplicated route path via errors.Join, not just the first one. This
+// gives users a complete picture in a single failed-config message instead of
+// forcing them to fix one typo, retry, fix the next, retry, etc.
+func TestNewConfig_MultipleDuplicatesAccumulate(t *testing.T) {
+	t.Parallel()
+	h := func(w http.ResponseWriter, r *http.Request) {}
+	mk := func(name, path string) Route {
+		r, err := NewRouteFromHandlerFunc(name, path, h)
+		require.NoError(t, err)
+		return *r
+	}
+	routes := Routes{
+		mk("v1", "/a"),
+		mk("v2", "/a"),
+		mk("v3", "/a"),
+		mk("v4", "/b"),
+		mk("v5", "/b"),
+		mk("v6", "/unique"),
+	}
+
+	config, err := NewConfig(":8080", routes)
+	require.Error(t, err)
+	assert.Nil(t, config)
+
+	msg := err.Error()
+	assert.Contains(t, msg, `"/a"`, "joined error should mention /a")
+	assert.Contains(t, msg, `"/b"`, "joined error should mention /b")
+	assert.NotContains(t, msg, `"/unique"`, "non-duplicated path must not be reported")
+	// Each duplicated path appears exactly once regardless of copy count.
+	assert.Equal(t, 1, strings.Count(msg, `"/a"`),
+		"duplicated path /a should be reported once even with 3 copies")
+	assert.Equal(t, 1, strings.Count(msg, `"/b"`),
+		"duplicated path /b should be reported once even with 2 copies")
 }
