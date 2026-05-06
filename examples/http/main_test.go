@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/supervisor"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +33,8 @@ func TestRunServer(t *testing.T) {
 	require.NoError(t, err, "Failed to build routes")
 	require.NotEmpty(t, routes, "Routes should not be empty")
 
-	sv, err := RunServer(ctx, logHandler, routes)
+	addr := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	sv, err := RunServer(ctx, logHandler, addr, routes)
 	require.NoError(t, err, "RunServer should not return an error")
 	require.NotNil(t, sv, "Supervisor should not be nil")
 
@@ -41,9 +44,12 @@ func TestRunServer(t *testing.T) {
 		errCh <- sv.Run()
 	}()
 
+	statusURL := "http://localhost" + addr + "/status"
+	client := &http.Client{Timeout: time.Second}
+
 	// Wait for the server to be ready by checking if it responds to requests
 	assert.Eventually(t, func() bool {
-		resp, err := http.Get("http://localhost:8080/status")
+		resp, err := client.Get(statusURL)
 		if err != nil {
 			return false
 		}
@@ -52,7 +58,7 @@ func TestRunServer(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "Server should become ready")
 
 	// Make a request to the server
-	resp, err := http.Get("http://localhost:8080/status")
+	resp, err := client.Get(statusURL)
 	require.NoError(t, err, "Failed to make GET request")
 
 	body, err := io.ReadAll(resp.Body)

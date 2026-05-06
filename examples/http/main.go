@@ -91,11 +91,12 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 func RunServer(
 	ctx context.Context,
 	logHandler slog.Handler,
+	addr string,
 	routes []httpserver.Route,
 ) (*supervisor.PIDZero, error) {
 	// Create a config callback function that will be used by the runner
 	configCallback := func() (*httpserver.Config, error) {
-		return httpserver.NewConfig(ListenOn, routes, httpserver.WithDrainTimeout(DrainTimeout))
+		return httpserver.NewConfig(addr, routes, httpserver.WithDrainTimeout(DrainTimeout))
 	}
 
 	// Create the HTTP server runner
@@ -136,7 +137,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	sv, err := RunServer(ctx, handler, routes)
+	sv, err := RunServer(ctx, handler, ListenOn, routes)
 	if err != nil {
 		slog.Error("Failed to setup server", "error", err)
 		os.Exit(1)
