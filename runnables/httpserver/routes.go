@@ -101,7 +101,7 @@ func (r Routes) Equal(other Routes) bool {
 	}
 	slices.Sort(newNames)
 
-	if fmt.Sprintf("%v", oldNames) != fmt.Sprintf("%v", newNames) {
+	if !slices.Equal(oldNames, newNames) {
 		return false
 	}
 
