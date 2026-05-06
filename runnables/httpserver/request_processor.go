@@ -63,3 +63,11 @@ func (rp *RequestProcessor) Request() *http.Request {
 func (rp *RequestProcessor) SetWriter(w ResponseWriter) {
 	rp.writer = w
 }
+
+// SetRequest replaces the *http.Request for the chain.
+// Middleware that needs to transform the request (e.g., strip a path prefix)
+// should clone the original via r.Clone(ctx), mutate the clone, and call
+// SetRequest with it — leaving the caller's request pointer untouched.
+func (rp *RequestProcessor) SetRequest(r *http.Request) {
+	rp.request = r
+}
