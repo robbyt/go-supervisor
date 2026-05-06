@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
-	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/internal/mocks"
+	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
