@@ -704,7 +704,6 @@ func TestNewConfig(t *testing.T) {
 	})
 }
 
-
 // TestWithConfigCopy tests that the WithConfigCopy option correctly copies settings
 func TestWithConfigCopy(t *testing.T) {
 	t.Parallel()
