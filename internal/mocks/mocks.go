@@ -12,7 +12,7 @@
 //
 //		"github.com/stretchr/testify/mock"
 //
-//		"github.com/robbyt/go-supervisor/runnables/mocks"
+//		"github.com/robbyt/go-supervisor/internal/mocks"
 //		"github.com/robbyt/go-supervisor/supervisor"
 //	)
 //

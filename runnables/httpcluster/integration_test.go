@@ -9,7 +9,7 @@ import (
 
 	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
-	"github.com/robbyt/go-supervisor/runnables/mocks"
+	"github.com/robbyt/go-supervisor/internal/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
