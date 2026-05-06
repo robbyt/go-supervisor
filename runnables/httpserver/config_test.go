@@ -664,8 +664,99 @@ func TestNewConfig(t *testing.T) {
 				return Routes{*route}
 			}(),
 			opts:        []ConfigOption{WithDrainTimeout(-10 * time.Second)},
-			expectError: false,
-			expectedStr: "Config<addr=:8080, drainTimeout=-10s, routes=Routes<Name: v1, Path: /test>, timeouts=[read=15s,write=15s,idle=1m0s]>",
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "EmptyAddr",
+			addr: "",
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
+			opts:        nil,
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "DuplicatePaths",
+			addr: ":8080",
+			routes: func() Routes {
+				h := func(w http.ResponseWriter, r *http.Request) {}
+				r1, err := NewRouteFromHandlerFunc("v1", "/test", h)
+				if err != nil {
+					panic(err)
+				}
+				r2, err := NewRouteFromHandlerFunc("v2", "/test", h)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*r1, *r2}
+			}(),
+			opts:        nil,
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "NegativeReadTimeout",
+			addr: ":8080",
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
+			opts:        []ConfigOption{WithReadTimeout(-1 * time.Second)},
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "NegativeWriteTimeout",
+			addr: ":8080",
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
+			opts:        []ConfigOption{WithWriteTimeout(-1 * time.Second)},
+			expectError: true,
+			expectedStr: "",
+		},
+		{
+			name: "NegativeIdleTimeout",
+			addr: ":8080",
+			routes: func() Routes {
+				route, err := NewRouteFromHandlerFunc(
+					"v1",
+					"/test",
+					func(w http.ResponseWriter, r *http.Request) {},
+				)
+				if err != nil {
+					panic(err)
+				}
+				return Routes{*route}
+			}(),
+			opts:        []ConfigOption{WithIdleTimeout(-1 * time.Second)},
+			expectError: true,
+			expectedStr: "",
 		},
 	}
 

@@ -132,6 +132,16 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 	if len(routes) == 0 {
 		return nil, errors.New("routes cannot be empty")
 	}
+	if addr == "" {
+		return nil, errors.New("addr cannot be empty")
+	}
+	seen := make(map[string]struct{}, len(routes))
+	for _, r := range routes {
+		if _, dup := seen[r.Path]; dup {
+			return nil, fmt.Errorf("duplicate route path: %q", r.Path)
+		}
+		seen[r.Path] = struct{}{}
+	}
 
 	// Use constants for default values
 	c := &Config{
@@ -148,6 +158,19 @@ func NewConfig(addr string, routes Routes, opts ...ConfigOption) (*Config, error
 	// Apply overrides from the functional options
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	if c.DrainTimeout < 0 {
+		return nil, fmt.Errorf("DrainTimeout must be >= 0, got %s", c.DrainTimeout)
+	}
+	if c.ReadTimeout < 0 {
+		return nil, fmt.Errorf("ReadTimeout must be >= 0, got %s", c.ReadTimeout)
+	}
+	if c.WriteTimeout < 0 {
+		return nil, fmt.Errorf("WriteTimeout must be >= 0, got %s", c.WriteTimeout)
+	}
+	if c.IdleTimeout < 0 {
+		return nil, fmt.Errorf("IdleTimeout must be >= 0, got %s", c.IdleTimeout)
 	}
 
 	return c, nil
