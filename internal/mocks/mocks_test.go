@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robbyt/go-supervisor/runnables/mocks"
+	"github.com/robbyt/go-supervisor/internal/mocks"
 	"github.com/robbyt/go-supervisor/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
