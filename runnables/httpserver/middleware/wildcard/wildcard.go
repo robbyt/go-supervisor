@@ -80,7 +80,7 @@ func New(prefix string) httpserver.HandlerFunc {
 			return
 		}
 		cloned := req.Clone(req.Context())
-		cloned.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
+		cloned.URL.Path = strings.TrimPrefix(cloned.URL.Path, prefix)
 		rp.SetRequest(cloned)
 		rp.Next()
 	}
