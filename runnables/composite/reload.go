@@ -141,6 +141,17 @@ func (r *Runner[T]) reloadWithRestart(ctx context.Context, newConfig *Config[T])
 	if err := r.stopAllRunnables(); err != nil {
 		return fmt.Errorf("%w: failed to stop existing runnables during membership change", err)
 	}
+
+	// stopAllRunnables observed gen.done, so any late forward from an
+	// old-generation child has settled. Drain a forwarded error so it does
+	// not leak into the new generation's waitForEvent loop and trigger a
+	// spurious shutdown of freshly booted runnables.
+	select {
+	case stale := <-r.serverErrors:
+		logger.Debug("Discarded old-generation error during reload", "error", stale)
+	default:
+	}
+
 	// Now update the stored config after stopping old runnables
 	// Lock the config mutex for writing
 	logger.Debug("Updating config after stopping existing runnables")
