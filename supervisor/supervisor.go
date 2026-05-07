@@ -183,13 +183,13 @@ func New(opts ...Option) (*PIDZero, error) {
 	}
 
 	p := &PIDZero{
-		runnables:        []Runnable{},
-		signalChan:       make(chan os.Signal, 1), // OS signals must be buffered
-		errorChan:        make(chan error, 1),     // will be adjusted later
-		ctx:              ctx,
-		cancel:           cancel,
-		subscribeSignals: defaultSignals,
-		reloadListener:   make(chan struct{}),
+		runnables:                   []Runnable{},
+		signalChan:                  make(chan os.Signal, 1), // OS signals must be buffered
+		errorChan:                   make(chan error, 1),     // will be adjusted later
+		ctx:                         ctx,
+		cancel:                      cancel,
+		subscribeSignals:            defaultSignals,
+		reloadListener:              make(chan struct{}),
 		startupTimeout:              DefaultStartupTimeout,
 		startupInitial:              DefaultStartupInitial,
 		shutdownTimeout:             DefaultShutdownTimeout,
