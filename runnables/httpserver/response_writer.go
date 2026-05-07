@@ -93,3 +93,11 @@ func (rw *responseWriter) Written() bool {
 func (rw *responseWriter) Size() int {
 	return rw.size
 }
+
+// Flush implements http.Flusher when the underlying writer supports it,
+// pushing any pending response data to the client. No-op otherwise.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
