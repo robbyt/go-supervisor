@@ -86,6 +86,35 @@ func TestRecoveryMiddleware(t *testing.T) {
 		assert.Contains(t, logOutput, "error=\"test panic\"")
 		assert.Contains(t, logOutput, "path=/test")
 		assert.Contains(t, logOutput, "method=GET")
+		assert.Contains(t, logOutput, "headers_written=false")
+	})
+
+	t.Run("preserves partial response when panic happens after WriteHeader", func(t *testing.T) {
+		logBuffer, logHandler := setupLogBuffer(t, slog.LevelError)
+		rec, req := setupRequest(t, "GET", "/partial")
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("partial body"))
+			require.NoError(t, err)
+			panic("panic after writing")
+		}
+
+		executeHandlerWithRecovery(t, handler, logHandler, rec, req)
+
+		// Status and body must NOT be overwritten by Internal Server Error;
+		// http.Error would silently fail to set the status (already committed)
+		// and would append "Internal Server Error\n" to the partial body.
+		assert.Equal(t, http.StatusOK, rec.Code,
+			"committed status must be preserved")
+		assert.Equal(t, "partial body", rec.Body.String(),
+			"partial body must not be appended with Internal Server Error")
+		assert.True(t, rec.Flushed,
+			"recovery should Flush() so the client doesn't hang")
+
+		logOutput := logBuffer.String()
+		assert.Contains(t, logOutput, "HTTP handler panic recovered")
+		assert.Contains(t, logOutput, "error=\"panic after writing\"")
+		assert.Contains(t, logOutput, "headers_written=true")
 	})
 
 	t.Run("recovers from panic silently with nil handler", func(t *testing.T) {

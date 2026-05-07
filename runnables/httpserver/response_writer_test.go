@@ -311,6 +311,28 @@ func TestResponseWriter_PartialWrite(t *testing.T) {
 	assert.Equal(t, 5, rw.Size(), "size should match actual bytes written, not requested")
 }
 
+func TestResponseWriter_Flush(t *testing.T) {
+	t.Run("delegates to wrapped Flusher", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		rw := newResponseWriter(recorder)
+
+		require.Implements(t, (*http.Flusher)(nil), rw,
+			"wrapper should satisfy http.Flusher")
+		rw.(http.Flusher).Flush()
+		assert.True(t, recorder.Flushed,
+			"underlying recorder should observe Flush call")
+	})
+
+	t.Run("no-op when wrapped writer is not a Flusher", func(t *testing.T) {
+		rw := newResponseWriter(&failingResponseWriter{})
+
+		require.Implements(t, (*http.Flusher)(nil), rw)
+		assert.NotPanics(t, func() {
+			rw.(http.Flusher).Flush()
+		}, "Flush should be a safe no-op when wrapped writer lacks Flush")
+	})
+}
+
 // Helper types for testing error conditions
 
 type failingResponseWriter struct {
