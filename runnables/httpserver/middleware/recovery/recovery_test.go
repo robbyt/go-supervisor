@@ -95,7 +95,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("partial body"))
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			panic("panic after writing")
 		}
 
