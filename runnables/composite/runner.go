@@ -120,7 +120,7 @@ func (r *Runner[T]) String() string {
 	return fmt.Sprintf("CompositeRunner{name: %s, entries: %d}", cfg.Name, len(cfg.Entries))
 }
 
-// Run starts all child runnables in order (first to last) and monitors for completion or errors.
+// Run starts all child runnables concurrently and monitors for completion or errors.
 // This method blocks until all child runnables are stopped or an error occurs.
 func (r *Runner[T]) Run(ctx context.Context) error {
 	// Defer order matters: drainReloadCh runs LAST so it catches any reload
@@ -292,7 +292,8 @@ func (r *Runner[T]) drainReloadCh() {
 	}
 }
 
-// boot starts all child runnables in the order they're defined. Each boot
+// boot launches a goroutine per child entry; the goroutines run concurrently
+// and the per-generation childGen tracks them via wg/cancel. Each boot
 // allocates a fresh childGen so old-generation goroutines cannot interfere
 // with the new generation's error forwarding.
 func (r *Runner[T]) boot(ctx context.Context) error {
@@ -371,9 +372,9 @@ func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 	}
 }
 
-// stopAllRunnables stops all child runnables in reverse order (last to first)
-// and waits for the current generation's child goroutines to exit before
-// returning, so reloadWithRestart's hand-off to a fresh generation is clean.
+// stopAllRunnables stops all child runnables concurrently and waits for the
+// current generation's child goroutines to exit before returning, so
+// reloadWithRestart's hand-off to a fresh generation is clean.
 func (r *Runner[T]) stopAllRunnables() error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
@@ -387,7 +388,8 @@ func (r *Runner[T]) stopAllRunnables() error {
 	var wg sync.WaitGroup
 	wg.Add(len(cfg.Entries))
 
-	// Stop each runnable in reverse order
+	// Launch a Stop goroutine for each runnable; the Stop calls run
+	// concurrently and complete in non-deterministic order.
 	for i := len(cfg.Entries) - 1; i >= 0; i-- {
 		entry := cfg.Entries[i]
 		r.logger.Debug("Stopping child runnable", "index", i, "runnable", entry.Runnable)

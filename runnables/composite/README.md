@@ -150,8 +150,8 @@ if states["database"] == "running" {
 
 The Composite Runner coordinates the lifecycle of all contained runnables:
 
-- Starts runnables in the order they are defined (async)
-- Stops runnables in reverse order
+- Starts runnables concurrently
+- Stops runnables concurrently
 - Propagates errors from any child runnable
 - Handles clean shutdown when context is canceled
 - Manages state transitions (New → Booting → Running → Stopping → Stopped)
