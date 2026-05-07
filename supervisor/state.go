@@ -180,9 +180,6 @@ func (p *PIDZero) broadcastState() {
 // is a safety net that prevents a misbehaving Stateable from blocking supervisor
 // shutdown indefinitely. Hitting the bound logs a Warn and returns. A bound of 0
 // disables the deadline (waits indefinitely).
-// startStateMonitor initiates background goroutines to monitor state changes for each
-// Stateable runnable. It blocks until the context is done, coordinating state updates
-// from all state-emitting services.
 func (p *PIDZero) startStateMonitor() {
 	p.logger.Debug("Starting state monitor...")
 
