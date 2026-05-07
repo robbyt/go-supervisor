@@ -23,22 +23,14 @@ type fsm interface {
 	SetState(state string) error
 }
 
-// childGen owns the goroutine pool and first-error forward for a single
-// boot()-to-stopAllRunnables generation. Each membership-change Reload
-// allocates a fresh childGen; the runner-level r.serverErrors is a stable
-// cap=1 channel that the current gen's first-failing child forwards to via
-// gen.once. Stale-gen errors from prior boots cannot leak into a new
-// generation: reloadWithRestart drains r.serverErrors after stopAllRunnables
-// observes gen.done.
-//
-// cancel terminates this generation's per-child context tree so children
-// blocked in Run(ctx) unblock when stopAllRunnables tears the gen down,
-// regardless of whether the runnable's Stop() implementation itself returns
-// from Run.
+// childGen owns the goroutine pool for a single boot()-to-stopAllRunnables
+// generation. Each membership-change Reload allocates a fresh childGen so
+// the next boot does not race with stale producers from the prior one:
+// stopAllRunnables cancels the gen's context (so children blocked in
+// Run(ctx) can return) and waits on gen.wg before letting reloadWithRestart
+// drain any forwarded error from r.serverErrors.
 type childGen struct {
 	wg     sync.WaitGroup     // child Run goroutines
-	once   sync.Once          // gates the single forward to r.serverErrors
-	done   chan struct{}      // closed after wg.Wait
 	cancel context.CancelFunc // cancels this generation's context
 }
 
@@ -320,7 +312,7 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	}
 
 	genCtx, genCancel := context.WithCancel(ctx)
-	gen := &childGen{done: make(chan struct{}), cancel: genCancel}
+	gen := &childGen{cancel: genCancel}
 	r.currentGen.Store(gen)
 
 	logger.Debug("Starting child runnables...", "count", len(cfg.Entries))
@@ -333,30 +325,20 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 		idx, entry := i, e
 		gen.wg.Go(func() {
 			startWg.Done()
-			r.startRunnable(genCtx, gen, entry.Runnable, idx)
+			r.startRunnable(genCtx, entry.Runnable, idx)
 		})
 	}
 	startWg.Wait()
-
-	// Monitor closes gen.done after every child Run goroutine exits, so
-	// stopAllRunnables can deterministically observe full teardown of this
-	// generation before returning.
-	go func() {
-		gen.wg.Wait()
-		close(gen.done)
-	}()
 
 	logger.Debug("All child runnables launched")
 	return nil
 }
 
 // startRunnable is a blocking call that starts a child runnable. The first
-// non-cancel error from any child in the generation is forwarded once to
-// r.serverErrors via gen.once; subsequent errors from siblings are logged
-// at Error level but not propagated (Run exits on the first error anyway).
-func (r *Runner[T]) startRunnable(
-	ctx context.Context, gen *childGen, subRunnable T, idx int,
-) {
+// non-cancel error to land in the cap=1 r.serverErrors wins; concurrent
+// siblings hit the default branch and log Warn (Run exits on the first
+// error anyway, so siblings would be ignored regardless).
+func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 	logger := r.logger.WithGroup("child").With("index", idx, "runnable", subRunnable)
 	logger.Debug("Executing Run()")
 	ctx, cancel := context.WithCancel(ctx)
@@ -375,22 +357,17 @@ func (r *Runner[T]) startRunnable(
 	}
 
 	logger.Error("Returned unexpected error", "error", err)
-	wrapped := fmt.Errorf("child runnable failed %d: %w", idx, err)
-	gen.once.Do(func() {
-		select {
-		case r.serverErrors <- wrapped:
-		default:
-			// r.serverErrors holds a stale forward not yet drained, OR the
-			// consumer has already exited. Either way, dropping is safe:
-			// the consumer reads at most one error per Run, and stale
-			// forwards from prior generations are drained in
-			// reloadWithRestart.
-			logger.Warn(
-				"Failed to forward error to serverErrors channel (is it full or closed?)",
-				"error", err,
-			)
-		}
-	})
+	select {
+	case r.serverErrors <- fmt.Errorf("child runnable failed %d: %w", idx, err):
+	default:
+		// Channel already holds an unread error from a sibling (cap=1) or a
+		// stale forward from a prior generation; the consumer reads at most
+		// one error per Run, and reloadWithRestart drains stale forwards.
+		logger.Warn(
+			"Failed to forward error to serverErrors channel (full or closed)",
+			"error", err,
+		)
+	}
 }
 
 // stopAllRunnables stops all child runnables in reverse order (last to first)
@@ -424,13 +401,13 @@ func (r *Runner[T]) stopAllRunnables() error {
 	wg.Wait()
 
 	// Cancel the current generation's context as a backstop and wait for its
-	// child Run goroutines to exit, so any late forward via gen.once has
-	// settled before the next boot allocates a new generation. The cancel is
-	// required for runnables whose Stop() does not itself unblock Run().
-	// Safe even if no boot has run yet (gen is nil).
+	// child Run goroutines to exit, so any late forward to r.serverErrors
+	// has settled before the next boot allocates a new generation. The
+	// cancel is required for runnables whose Stop() does not itself unblock
+	// Run(). Safe even if no boot has run yet (gen is nil).
 	if gen := r.currentGen.Load(); gen != nil {
 		gen.cancel()
-		<-gen.done
+		gen.wg.Wait()
 	}
 	return nil
 }
