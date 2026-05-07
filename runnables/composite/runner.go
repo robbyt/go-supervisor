@@ -388,7 +388,7 @@ func (r *Runner[T]) stopAllRunnables() error {
 	var wg sync.WaitGroup
 	wg.Add(len(cfg.Entries))
 
-	// Launch a Stop goroutine for each runnable; the Stop calls run
+	// Launch a Stop goroutine for each runnable; the Stop calls execute
 	// concurrently and complete in non-deterministic order.
 	for i := len(cfg.Entries) - 1; i >= 0; i-- {
 		entry := cfg.Entries[i]
