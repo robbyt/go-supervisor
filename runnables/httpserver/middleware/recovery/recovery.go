@@ -38,7 +38,9 @@ func New(handler slog.Handler) httpserver.HandlerFunc {
 
 				if headersWritten {
 					// Status is committed; preserve the partial response and
-					// flush any buffered body so the client doesn't hang.
+					// best-effort flush any buffered body so the client doesn't
+					// hang. The wrapper's Flush is a no-op when the underlying
+					// writer doesn't implement http.Flusher.
 					if f, ok := writer.(http.Flusher); ok {
 						f.Flush()
 					}

@@ -91,7 +91,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 
 	t.Run("preserves partial response when panic happens after WriteHeader", func(t *testing.T) {
 		logBuffer, logHandler := setupLogBuffer(t, slog.LevelError)
-		rec, req := setupRequest(t, "GET", "/partial")
+		rec, req := setupRequest(t, "GET", "/test")
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("partial body"))
