@@ -876,7 +876,8 @@ func TestCompositeRunner_MultipleChildFailures(t *testing.T) {
 			<-started
 		}
 
-		assert.Equal(t, 3, cap(runner.serverErrors), "capacity should match entry count after boot")
+		assert.Equal(t, 1, cap(runner.serverErrors),
+			"capacity stays at 1 across boot under per-generation lifecycle")
 
 		// Advance virtual clock past 20ms sleep in callbacks so children return errors
 		time.Sleep(30 * time.Millisecond)

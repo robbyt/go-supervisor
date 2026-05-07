@@ -2218,3 +2218,212 @@ func TestComposite_Reload_CtxCancelDoesNotForceError(t *testing.T) {
 
 	child.AssertExpectations(t)
 }
+
+// TestReload_AddEntry_NewChildErrorPropagates verifies that an error from a
+// runnable added via Reload propagates through Run's return value. Audit
+// item #8: pre-fix, the still-undersized serverErrors channel could drop
+// errors from post-reload entries; the per-generation lifecycle ensures the
+// new child's non-blocking forward into the stable cap=1 r.serverErrors
+// reaches Run's waitForEvent.
+func TestReload_AddEntry_NewChildErrorPropagates(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		newChildErr := errors.New("new child boom")
+
+		healthy := mocks.NewMockRunnable()
+		healthy.On("String").Return("healthy").Maybe()
+		healthy.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		healthy.On("Stop").Return().Maybe()
+
+		failer := mocks.NewMockRunnable()
+		failer.On("String").Return("failer").Maybe()
+		failer.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			time.Sleep(10 * time.Millisecond)
+		}).Return(newChildErr).Once()
+		failer.On("Stop").Return().Maybe()
+
+		initial := []RunnableEntry[*mocks.Runnable]{{Runnable: healthy}}
+		updated := []RunnableEntry[*mocks.Runnable]{
+			{Runnable: healthy},
+			{Runnable: failer},
+		}
+
+		useUpdated := false
+		cb := func() (*Config[*mocks.Runnable], error) {
+			if useUpdated {
+				return NewConfig("test", updated)
+			}
+			return NewConfig("test", initial)
+		}
+		runner, err := NewRunner(cb)
+		require.NoError(t, err)
+
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(t.Context()) }()
+
+		synctest.Wait()
+		require.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+		useUpdated = true
+		require.NoError(t, runner.Reload(t.Context()))
+
+		// Advance virtual clock past the failer's 10ms in-Run sleep.
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+
+		select {
+		case err := <-runErr:
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrRunnableFailed,
+				"Run should fail with ErrRunnableFailed from the new entry")
+			require.ErrorIs(t, err, newChildErr,
+				"the new child's error should be wrapped in the Run return")
+		default:
+			t.Fatal("Run should have returned after the new entry failed")
+		}
+
+		healthy.AssertExpectations(t)
+		failer.AssertExpectations(t)
+	})
+}
+
+// TestReload_OldGenErrorDoesNotKillNewGen verifies that an old-generation
+// child returning a non-cancel error during reload-shutdown does not leak
+// into the new generation's waitForEvent loop. The drain in
+// reloadWithRestart discards the stale forward and the new gen runs cleanly.
+func TestReload_OldGenErrorDoesNotKillNewGen(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		oldErr := errors.New("old gen boom on shutdown")
+
+		// oldChild blocks until its context is canceled, then returns a
+		// non-cancel error — simulating a runnable that reports a real
+		// failure as part of its shutdown path. startRunnable will not
+		// filter this; the non-blocking send in startRunnable forwards it
+		// into r.serverErrors, where reloadWithRestart's drain discards it.
+		oldChild := mocks.NewMockRunnable()
+		oldChild.On("String").Return("old").Maybe()
+		oldChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(oldErr).Once()
+		oldChild.On("Stop").Return().Maybe()
+
+		newChild := mocks.NewMockRunnable()
+		newChild.On("String").Return("new").Maybe()
+		newChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+			<-args.Get(0).(context.Context).Done()
+		}).Return(context.Canceled).Maybe()
+		newChild.On("Stop").Return().Maybe()
+
+		initial := []RunnableEntry[*mocks.Runnable]{{Runnable: oldChild}}
+		updated := []RunnableEntry[*mocks.Runnable]{{Runnable: newChild}}
+
+		useUpdated := false
+		cb := func() (*Config[*mocks.Runnable], error) {
+			if useUpdated {
+				return NewConfig("test", updated)
+			}
+			return NewConfig("test", initial)
+		}
+		runner, err := NewRunner(cb)
+		require.NoError(t, err)
+
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(t.Context()) }()
+
+		synctest.Wait()
+		require.Equal(t, finitestate.StatusRunning, runner.GetState())
+
+		useUpdated = true
+		require.NoError(t, runner.Reload(t.Context()))
+		synctest.Wait()
+
+		require.Equal(t, finitestate.StatusRunning, runner.GetState(),
+			"new gen should be Running; old-gen error must be drained")
+
+		select {
+		case err := <-runErr:
+			t.Fatalf("Run unexpectedly returned with error: %v", err)
+		default:
+		}
+
+		runner.Stop()
+		synctest.Wait()
+
+		require.NoError(t, <-runErr, "Run should exit cleanly on Stop")
+		require.Equal(t, finitestate.StatusStopped, runner.GetState())
+
+		oldChild.AssertExpectations(t)
+		newChild.AssertExpectations(t)
+	})
+}
+
+// TestSingleGen_ConcurrentFailures_OnlyFirstCaptured verifies that when
+// multiple children fail simultaneously within a generation, exactly one
+// error reaches Run's return value: the cap=1 r.serverErrors coalesces the
+// race so only one non-blocking send succeeds. Sibling errors log at Error
+// (and Warn on send-fail) but are not propagated — the consumer reads at
+// most one error per Run.
+func TestSingleGen_ConcurrentFailures_OnlyFirstCaptured(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		err1 := errors.New("child 1 boom")
+		err2 := errors.New("child 2 boom")
+		err3 := errors.New("child 3 boom")
+
+		mk := func(name string, fErr error) *mocks.Runnable {
+			m := mocks.NewMockRunnable()
+			m.On("String").Return(name).Maybe()
+			m.On("Run", mock.Anything).Run(func(args mock.Arguments) {
+				time.Sleep(10 * time.Millisecond)
+			}).Return(fErr)
+			m.On("Stop").Return().Maybe()
+			return m
+		}
+
+		c1 := mk("c1", err1)
+		c2 := mk("c2", err2)
+		c3 := mk("c3", err3)
+
+		entries := []RunnableEntry[*mocks.Runnable]{
+			{Runnable: c1}, {Runnable: c2}, {Runnable: c3},
+		}
+		cb := func() (*Config[*mocks.Runnable], error) {
+			return NewConfig("test", entries)
+		}
+		runner, err := NewRunner(cb)
+		require.NoError(t, err)
+
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(t.Context()) }()
+
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+
+		select {
+		case err := <-runErr:
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrRunnableFailed)
+			matches := 0
+			if errors.Is(err, err1) {
+				matches++
+			}
+			if errors.Is(err, err2) {
+				matches++
+			}
+			if errors.Is(err, err3) {
+				matches++
+			}
+			require.Equal(t, 1, matches,
+				"exactly one child error must propagate, got: %v", err)
+		default:
+			t.Fatal("Run should have returned after concurrent failures")
+		}
+
+		c1.AssertExpectations(t)
+		c2.AssertExpectations(t)
+		c3.AssertExpectations(t)
+	})
+}
