@@ -2223,7 +2223,8 @@ func TestComposite_Reload_CtxCancelDoesNotForceError(t *testing.T) {
 // runnable added via Reload propagates through Run's return value. Audit
 // item #8: pre-fix, the still-undersized serverErrors channel could drop
 // errors from post-reload entries; the per-generation lifecycle ensures the
-// new child's gen.once.Do forwards to the stable r.serverErrors.
+// new child's non-blocking forward into the stable cap=1 r.serverErrors
+// reaches Run's waitForEvent.
 func TestReload_AddEntry_NewChildErrorPropagates(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -2282,6 +2283,9 @@ func TestReload_AddEntry_NewChildErrorPropagates(t *testing.T) {
 		default:
 			t.Fatal("Run should have returned after the new entry failed")
 		}
+
+		healthy.AssertExpectations(t)
+		failer.AssertExpectations(t)
 	})
 }
 
@@ -2297,7 +2301,8 @@ func TestReload_OldGenErrorDoesNotKillNewGen(t *testing.T) {
 		// oldChild blocks until its context is canceled, then returns a
 		// non-cancel error — simulating a runnable that reports a real
 		// failure as part of its shutdown path. startRunnable will not
-		// filter this; gen.once.Do will forward it to r.serverErrors.
+		// filter this; the non-blocking send in startRunnable forwards it
+		// into r.serverErrors, where reloadWithRestart's drain discards it.
 		oldChild := mocks.NewMockRunnable()
 		oldChild.On("String").Return("old").Maybe()
 		oldChild.On("Run", mock.Anything).Run(func(args mock.Arguments) {
@@ -2357,9 +2362,10 @@ func TestReload_OldGenErrorDoesNotKillNewGen(t *testing.T) {
 
 // TestSingleGen_ConcurrentFailures_OnlyFirstCaptured verifies that when
 // multiple children fail simultaneously within a generation, exactly one
-// error is forwarded to Run's return value via gen.once; sibling errors are
-// logged at Error level but not propagated. The consumer reads at most one
-// error per Run.
+// error reaches Run's return value: the cap=1 r.serverErrors coalesces the
+// race so only one non-blocking send succeeds. Sibling errors log at Error
+// (and Warn on send-fail) but are not propagated — the consumer reads at
+// most one error per Run.
 func TestSingleGen_ConcurrentFailures_OnlyFirstCaptured(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -2415,5 +2421,9 @@ func TestSingleGen_ConcurrentFailures_OnlyFirstCaptured(t *testing.T) {
 		default:
 			t.Fatal("Run should have returned after concurrent failures")
 		}
+
+		c1.AssertExpectations(t)
+		c2.AssertExpectations(t)
+		c3.AssertExpectations(t)
 	})
 }

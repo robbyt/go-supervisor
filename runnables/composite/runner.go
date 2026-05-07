@@ -334,10 +334,11 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	return nil
 }
 
-// startRunnable is a blocking call that starts a child runnable. The first
-// non-cancel error to land in the cap=1 r.serverErrors wins; concurrent
-// siblings hit the default branch and log Warn (Run exits on the first
-// error anyway, so siblings would be ignored regardless).
+// startRunnable is a blocking call that starts a child runnable. Every
+// non-cancel error logs at Error; the first to land in the cap=1
+// r.serverErrors wins, and concurrent siblings additionally log Warn when
+// the channel is already full (Run exits on the first error anyway, so
+// siblings would be ignored regardless).
 func (r *Runner[T]) startRunnable(ctx context.Context, subRunnable T, idx int) {
 	logger := r.logger.WithGroup("child").With("index", idx, "runnable", subRunnable)
 	logger.Debug("Executing Run()")
