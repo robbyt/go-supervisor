@@ -19,7 +19,17 @@ package supervisor
 import (
 	"context"
 	"sync"
+	"time"
 )
+
+// stateMonitorShutdownTimeout caps how long startStateMonitor waits for its
+// per-runnable monitoring goroutines to exit after the supervisor context
+// is canceled. Hitting this bound logs a Warn and returns; the leaked
+// goroutines are bounded by the broader Go runtime lifetime. 5s matches
+// internal/finitestate.Machine.GetStateChan's per-broadcast timeout for
+// symmetry. Declared as var (not const) so tests can substitute a smaller
+// value via t.Cleanup; production callers must not modify it.
+var stateMonitorShutdownTimeout = 5 * time.Second
 
 // StateMap is a map of runnable string representation to its current state
 type StateMap map[string]string
@@ -171,6 +181,12 @@ func (p *PIDZero) broadcastState() {
 // State deduplication works by comparing incoming states against the previously recorded state.
 // Only when a state differs from the previous one is it stored and broadcast, preventing
 // unnecessary broadcasts and reducing system load when runnables emit frequent duplicate states.
+//
+// Shutdown: when the supervisor context is canceled, startStateMonitor waits up to
+// stateMonitorShutdownTimeout (5s) for its per-runnable goroutines to exit. Healthy
+// goroutines exit promptly because their inner select listens on ctx.Done(); the bound
+// is a safety net that prevents a misbehaving Stateable from blocking supervisor
+// shutdown indefinitely. Hitting the bound logs a Warn and returns.
 // startStateMonitor initiates background goroutines to monitor state changes for each
 // Stateable runnable. It blocks until the context is done, coordinating state updates
 // from all state-emitting services.
@@ -247,9 +263,35 @@ func (p *PIDZero) startStateMonitor() {
 		}
 	}
 
-	// Block here until context is done, then wait for all monitoring goroutines to finish
+	// Block here until context is done, then bounded-wait for all monitoring
+	// goroutines to finish. The bound prevents a misbehaving Stateable from
+	// blocking supervisor shutdown indefinitely; see stateMonitorShutdownTimeout.
 	<-p.ctx.Done()
 	p.logger.Debug("State monitor received context done signal, waiting for monitors to exit...")
-	stateWg.Wait()
-	p.logger.Debug("State monitor complete.")
+	p.boundedWaitOnStateGoroutines(&stateWg)
+}
+
+// boundedWaitOnStateGoroutines waits up to stateMonitorShutdownTimeout for
+// wg to reach zero. Hitting the bound logs a Warn and returns; the leaked
+// goroutines remain bound by the broader Go runtime lifetime. Extracted
+// from startStateMonitor for direct testing of the timer.C branch under
+// testing/synctest.
+func (p *PIDZero) boundedWaitOnStateGoroutines(wg *sync.WaitGroup) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	timer := time.NewTimer(stateMonitorShutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		p.logger.Debug("State monitor complete.")
+	case <-timer.C:
+		p.logger.Warn(
+			"State monitor shutdown deadline exceeded; leaking monitor goroutines",
+			"timeout", stateMonitorShutdownTimeout,
+		)
+	}
 }
