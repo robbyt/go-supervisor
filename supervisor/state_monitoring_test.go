@@ -127,18 +127,21 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 func TestBoundedWaitOnStateGoroutines(t *testing.T) {
 	t.Parallel()
 
+	const testTimeout = 50 * time.Millisecond
+
 	t.Run("returns within bound when wg drains in time", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			original := stateMonitorShutdownTimeout
-			stateMonitorShutdownTimeout = 50 * time.Millisecond
-			t.Cleanup(func() { stateMonitorShutdownTimeout = original })
-
 			logBuffer := &bytes.Buffer{}
 			logHandler := slog.NewTextHandler(logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})
 
 			stub := mocks.NewMockRunnable()
 			stub.On("String").Return("stub").Maybe()
-			pid0, err := New(WithContext(t.Context()), WithRunnables(stub), WithLogHandler(logHandler))
+			pid0, err := New(
+				WithContext(t.Context()),
+				WithRunnables(stub),
+				WithLogHandler(logHandler),
+				WithStateMonitorShutdownTimeout(testTimeout),
+			)
 			require.NoError(t, err)
 
 			var wg sync.WaitGroup
@@ -152,7 +155,7 @@ func TestBoundedWaitOnStateGoroutines(t *testing.T) {
 			pid0.boundedWaitOnStateGoroutines(&wg)
 			elapsed := time.Since(start)
 
-			assert.Less(t, elapsed, stateMonitorShutdownTimeout,
+			assert.Less(t, elapsed, testTimeout,
 				"should exit on done branch, not timer")
 			assert.Contains(t, logBuffer.String(), "State monitor complete.")
 			assert.NotContains(t, logBuffer.String(), "deadline exceeded")
@@ -161,16 +164,17 @@ func TestBoundedWaitOnStateGoroutines(t *testing.T) {
 
 	t.Run("times out and warns when wg blocks past bound", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			original := stateMonitorShutdownTimeout
-			stateMonitorShutdownTimeout = 50 * time.Millisecond
-			t.Cleanup(func() { stateMonitorShutdownTimeout = original })
-
 			logBuffer := &bytes.Buffer{}
 			logHandler := slog.NewTextHandler(logBuffer, &slog.HandlerOptions{Level: slog.LevelWarn})
 
 			stub := mocks.NewMockRunnable()
 			stub.On("String").Return("stub").Maybe()
-			pid0, err := New(WithContext(t.Context()), WithRunnables(stub), WithLogHandler(logHandler))
+			pid0, err := New(
+				WithContext(t.Context()),
+				WithRunnables(stub),
+				WithLogHandler(logHandler),
+				WithStateMonitorShutdownTimeout(testTimeout),
+			)
 			require.NoError(t, err)
 
 			var wg sync.WaitGroup
@@ -190,7 +194,7 @@ func TestBoundedWaitOnStateGoroutines(t *testing.T) {
 			pid0.boundedWaitOnStateGoroutines(&wg)
 			elapsed := time.Since(start)
 
-			assert.Equal(t, stateMonitorShutdownTimeout, elapsed,
+			assert.Equal(t, testTimeout, elapsed,
 				"should exit exactly when the timer fires")
 			assert.Contains(t, logBuffer.String(),
 				"State monitor shutdown deadline exceeded")
