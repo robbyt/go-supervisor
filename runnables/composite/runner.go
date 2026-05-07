@@ -390,8 +390,7 @@ func (r *Runner[T]) stopAllRunnables() error {
 
 	// Launch a Stop goroutine for each runnable; the Stop calls execute
 	// concurrently and complete in non-deterministic order.
-	for i := len(cfg.Entries) - 1; i >= 0; i-- {
-		entry := cfg.Entries[i]
+	for i, entry := range cfg.Entries {
 		r.logger.Debug("Stopping child runnable", "index", i, "runnable", entry.Runnable)
 
 		go func(run T) {
