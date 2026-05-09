@@ -19,6 +19,7 @@ package supervisor
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // StateMap is a map of runnable string representation to its current state
@@ -171,85 +172,144 @@ func (p *PIDZero) broadcastState() {
 // State deduplication works by comparing incoming states against the previously recorded state.
 // Only when a state differs from the previous one is it stored and broadcast, preventing
 // unnecessary broadcasts and reducing system load when runnables emit frequent duplicate states.
-// startStateMonitor initiates background goroutines to monitor state changes for each
-// Stateable runnable. It blocks until the context is done, coordinating state updates
-// from all state-emitting services.
+//
+// Shutdown: when the supervisor context is canceled, startStateMonitor waits up to
+// p.stateMonitorShutdownTimeout (default 5s, configurable via
+// WithStateMonitorShutdownTimeout) for its per-runnable goroutines to exit. Healthy
+// goroutines exit promptly because their inner select listens on ctx.Done(); the bound
+// is a safety net that prevents a misbehaving Stateable from blocking supervisor
+// shutdown indefinitely. Hitting the bound logs a Warn and returns. A bound of 0
+// disables the deadline (waits indefinitely).
 func (p *PIDZero) startStateMonitor() {
 	p.logger.Debug("Starting state monitor...")
 
-	// Create a WaitGroup to track state monitoring goroutines
-	var stateWg sync.WaitGroup
-
-	// Start a goroutine for each Stateable runnable
+	var wg sync.WaitGroup
 	for _, run := range p.runnables {
 		if stateable, ok := run.(Stateable); ok {
-			stateWg.Add(1)
-			go func(r Runnable, s Stateable) {
-				defer stateWg.Done()
-				stateChan := s.GetStateChan(p.ctx)
-
-				// Read the first state and discard it - it's the initial state
-				// that we've already captured and stored manually in startRunnable
-				select {
-				case <-p.ctx.Done():
-					return
-				case state, ok := <-stateChan:
-					if !ok {
-						return
-					}
-					// First state discarded to avoid duplicate broadcast
-					p.logger.Debug("Discarded initial state", "runnable", r, "state", state)
-				}
-
-				// Keep track of the last state to avoid duplicate broadcasts
-				var lastState string
-				if currentState, ok := p.stateMap.Load(r); ok {
-					lastState = currentState.(string)
-				}
-
-				// Process state changes until context is done
-				for {
-					select {
-					case <-p.ctx.Done():
-						return
-					case state, ok := <-stateChan:
-						if !ok {
-							return
-						}
-
-						if state == lastState {
-							p.logger.Debug(
-								"Received duplicate state (ignoring)",
-								"runnable", r,
-								"state", state)
-							continue
-						}
-
-						prev, loaded := p.stateMap.Swap(r, state)
-						if !loaded {
-							// The state map entry for this runnable was expected to be created in startRunnable
-							p.logger.Warn(
-								"Unexpected State map entry created",
-								"runnable", r,
-								"state", state)
-						} else {
-							p.logger.Debug(
-								"State map entry updated",
-								"runnable", r,
-								"oldState", prev,
-								"state", state)
-						}
-						lastState = state  // enable local state deduplication
-						p.broadcastState() // Broadcast state change to all subscribers
-					}
-				}
-			}(run, stateable)
+			wg.Add(1)
+			go p.monitorStateable(run, stateable, &wg)
 		}
 	}
 
-	// Block here until context is done, then wait for all monitoring goroutines to finish
 	<-p.ctx.Done()
 	p.logger.Debug("State monitor received context done signal, waiting for monitors to exit...")
-	stateWg.Wait()
-	p.logger.Debug("State monitor complete.")
+	p.boundedWaitOnStateGoroutines(&wg)
+}
+
+// monitorStateable consumes state updates from a single Stateable runnable
+// and forwards changes to stateMap and subscribers. Identical consecutive
+// states are deduplicated. Exits when the supervisor context is canceled
+// or the state channel closes.
+func (p *PIDZero) monitorStateable(r Runnable, s Stateable, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	stateChan := s.GetStateChan(p.ctx)
+	if !p.discardInitialState(r, stateChan) {
+		return
+	}
+
+	lastState := p.loadCachedState(r)
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case state, ok := <-stateChan:
+			if !ok {
+				return
+			}
+			if state == lastState {
+				p.logger.Debug(
+					"Received duplicate state (ignoring)",
+					"runnable", r,
+					"state", state)
+				continue
+			}
+			p.recordStateChange(r, state)
+			lastState = state
+			p.broadcastState()
+		}
+	}
+}
+
+// discardInitialState reads and drops the first value from stateChan. The
+// initial state is already seeded in stateMap by startRunnable, so re-broadcasting
+// it would produce a duplicate. Returns false if the supervisor context was
+// canceled or the channel closed before the first state arrived.
+func (p *PIDZero) discardInitialState(r Runnable, stateChan <-chan string) bool {
+	select {
+	case <-p.ctx.Done():
+		return false
+	case state, ok := <-stateChan:
+		if !ok {
+			return false
+		}
+		p.logger.Debug("Discarded initial state", "runnable", r, "state", state)
+		return true
+	}
+}
+
+// loadCachedState returns the cached state for r from stateMap. Returns ""
+// if no entry exists or the stored value is the wrong type. The entry is
+// expected to have been seeded by startRunnable.
+func (p *PIDZero) loadCachedState(r Runnable) string {
+	cur, ok := p.stateMap.Load(r)
+	if !ok {
+		return ""
+	}
+	s, ok := cur.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+// recordStateChange swaps the runnable's state into stateMap and logs the
+// transition. Logs Warn if no prior entry existed (startRunnable should
+// always have seeded one).
+func (p *PIDZero) recordStateChange(r Runnable, state string) {
+	prev, loaded := p.stateMap.Swap(r, state)
+	if !loaded {
+		p.logger.Warn(
+			"Unexpected State map entry created",
+			"runnable", r,
+			"state", state)
+		return
+	}
+	p.logger.Debug(
+		"State map entry updated",
+		"runnable", r,
+		"oldState", prev,
+		"state", state)
+}
+
+// boundedWaitOnStateGoroutines waits up to p.stateMonitorShutdownTimeout
+// for wg to reach zero. Hitting the bound logs a Warn and returns; the
+// leaked goroutines remain bound by the broader Go runtime lifetime. A
+// timeout of 0 disables the deadline (waits indefinitely). Extracted from
+// startStateMonitor for direct testing of the timer.C branch under
+// testing/synctest.
+func (p *PIDZero) boundedWaitOnStateGoroutines(wg *sync.WaitGroup) {
+	if p.stateMonitorShutdownTimeout == 0 {
+		wg.Wait()
+		p.logger.Debug("State monitor complete.")
+		return
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	timer := time.NewTimer(p.stateMonitorShutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		p.logger.Debug("State monitor complete.")
+	case <-timer.C:
+		p.logger.Warn(
+			"State monitor shutdown deadline exceeded; leaking monitor goroutines",
+			"timeout", p.stateMonitorShutdownTimeout,
+		)
+	}
 }

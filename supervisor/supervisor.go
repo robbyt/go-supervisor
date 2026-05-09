@@ -38,6 +38,13 @@ const (
 	// remaining budget, its goroutine is abandoned (logged) and shutdown
 	// continues. A timeout of 0 disables the deadline.
 	DefaultShutdownTimeout = 2 * time.Minute
+
+	// DefaultStateMonitorShutdownTimeout caps how long startStateMonitor waits
+	// for its per-runnable monitoring goroutines to exit after the supervisor
+	// context is canceled. Hitting this bound logs a Warn and returns; the
+	// leaked goroutines remain bounded by the broader Go runtime lifetime.
+	// The default matches go-fsm's per-broadcast timeout for symmetry.
+	DefaultStateMonitorShutdownTimeout = 5 * time.Second
 )
 
 // PIDZero manages multiple "runnables" and handles OS signals for HUP or graceful shutdown.
@@ -56,9 +63,10 @@ type PIDZero struct {
 	stateSubscribers   sync.Map
 	subscriberMutex    sync.Mutex
 
-	startupTimeout  time.Duration
-	startupInitial  time.Duration
-	shutdownTimeout time.Duration
+	startupTimeout              time.Duration
+	startupInitial              time.Duration
+	shutdownTimeout             time.Duration
+	stateMonitorShutdownTimeout time.Duration
 
 	logger *slog.Logger
 }
@@ -143,6 +151,23 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithStateMonitorShutdownTimeout caps how long startStateMonitor waits
+// for its per-runnable monitoring goroutines to exit after the supervisor
+// context is canceled. If a Stateable runnable's monitoring goroutine
+// fails to exit promptly (for example because it is wedged inside
+// broadcastState or has a misbehaving GetStateChan implementation), the
+// state monitor abandons it and logs a Warn so supervisor shutdown is
+// not blocked indefinitely. A timeout of 0 disables the deadline (waits
+// indefinitely); negative values are ignored and leave the current
+// setting in place.
+func WithStateMonitorShutdownTimeout(timeout time.Duration) Option {
+	return func(p *PIDZero) {
+		if timeout >= 0 {
+			p.stateMonitorShutdownTimeout = timeout
+		}
+	}
+}
+
 // New creates a new PIDZero instance with the provided options.
 func New(opts ...Option) (*PIDZero, error) {
 	// Load the default logger and append the Supervisor group
@@ -158,17 +183,18 @@ func New(opts ...Option) (*PIDZero, error) {
 	}
 
 	p := &PIDZero{
-		runnables:        []Runnable{},
-		signalChan:       make(chan os.Signal, 1), // OS signals must be buffered
-		errorChan:        make(chan error, 1),     // will be adjusted later
-		ctx:              ctx,
-		cancel:           cancel,
-		subscribeSignals: defaultSignals,
-		reloadListener:   make(chan struct{}),
-		startupTimeout:   DefaultStartupTimeout,
-		startupInitial:   DefaultStartupInitial,
-		shutdownTimeout:  DefaultShutdownTimeout,
-		logger:           logger,
+		runnables:                   []Runnable{},
+		signalChan:                  make(chan os.Signal, 1), // OS signals must be buffered
+		errorChan:                   make(chan error, 1),     // will be adjusted later
+		ctx:                         ctx,
+		cancel:                      cancel,
+		subscribeSignals:            defaultSignals,
+		reloadListener:              make(chan struct{}),
+		startupTimeout:              DefaultStartupTimeout,
+		startupInitial:              DefaultStartupInitial,
+		shutdownTimeout:             DefaultShutdownTimeout,
+		stateMonitorShutdownTimeout: DefaultStateMonitorShutdownTimeout,
+		logger:                      logger,
 	}
 
 	// Apply options
