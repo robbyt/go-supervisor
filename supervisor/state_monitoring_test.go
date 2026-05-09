@@ -206,3 +206,104 @@ func TestBoundedWaitOnStateGoroutines(t *testing.T) {
 		})
 	})
 }
+
+// TestMonitorStateable_CtxCancelExits verifies that a per-runnable monitor
+// goroutine, parked inside the inner select waiting for the next state,
+// exits cleanly when the supervisor context is canceled. synctest.Wait
+// confirms the goroutine is durably blocked in the select before cancel
+// fires, so the test exercises the ctx.Done branch deterministically.
+func TestMonitorStateable_CtxCancelExits(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+
+		s := mocks.NewMockRunnableWithStateable()
+		s.On("String").Return("svc").Maybe()
+		stateChan := make(chan string, 5)
+		s.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+
+		pid0, err := New(WithContext(ctx), WithRunnables(s))
+		require.NoError(t, err)
+
+		// First state is consumed and discarded by discardInitialState.
+		stateChan <- "initial"
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go pid0.monitorStateable(s, s, &wg)
+
+		// Wait until the monitor has consumed "initial" and is parked in
+		// the inner select. With synctest this is durably blocked.
+		synctest.Wait()
+
+		cancel()
+		wg.Wait() // unblocks when monitorStateable returns and runs its defer
+
+		s.AssertExpectations(t)
+	})
+}
+
+// TestMonitorStateable_ChannelCloseExits verifies that the monitor goroutine
+// exits cleanly when its state channel is closed (the case where a Stateable
+// shuts itself down without going through supervisor ctx cancellation).
+func TestMonitorStateable_ChannelCloseExits(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		s := mocks.NewMockRunnableWithStateable()
+		s.On("String").Return("svc").Maybe()
+		stateChan := make(chan string, 5)
+		s.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+
+		pid0, err := New(WithContext(ctx), WithRunnables(s))
+		require.NoError(t, err)
+
+		stateChan <- "initial"
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go pid0.monitorStateable(s, s, &wg)
+		synctest.Wait()
+
+		close(stateChan)
+		wg.Wait()
+
+		s.AssertExpectations(t)
+	})
+}
+
+// TestDiscardInitialState_CtxCancelsDuringWait verifies the helper returns
+// false when the supervisor context cancels while it's parked waiting for
+// the first state. synctest pins the helper inside the select, then the
+// outer goroutine cancels ctx and observes a deterministic return.
+func TestDiscardInitialState_CtxCancelsDuringWait(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+
+		stub := mocks.NewMockRunnable()
+		stub.On("String").Return("stub").Maybe()
+		pid0, err := New(WithContext(ctx), WithRunnables(stub))
+		require.NoError(t, err)
+
+		stateChan := make(chan string) // never sends
+		r := mocks.NewMockRunnableWithStateable()
+		r.On("String").Return("r").Maybe()
+
+		var consumed bool
+		done := make(chan struct{})
+		go func() {
+			consumed = pid0.discardInitialState(r, stateChan)
+			close(done)
+		}()
+
+		synctest.Wait() // helper goroutine durably blocked in select
+
+		cancel()
+		<-done
+
+		assert.False(t, consumed, "should return false when ctx cancels before first state")
+	})
+}
