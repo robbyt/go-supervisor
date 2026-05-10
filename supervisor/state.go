@@ -48,8 +48,16 @@ func (p *PIDZero) GetCurrentStates() map[Runnable]string {
 // GetStateMap returns each Stateable runnable's current state, keyed by the
 // runnable's String() representation. The result is a best-effort, per-runnable
 // live read: runnables are iterated sequentially and GetState() is called on
-// each, so entries may reflect slightly different moments in time. There is
-// no cached layer; each call queries the runnables directly.
+// each, so entries may reflect slightly different moments in time.
+//
+// Atomicity contract: each individual entry is atomic (a single GetState() call),
+// but cross-runnable coherence is NOT guaranteed. If two runnables transition
+// concurrently, callers may observe the new value of one and the old value of
+// the other. Callers needing a coherent multi-runnable view should call
+// GetStateMap once and treat the result as approximate; calling it twice and
+// diffing the results is unreliable.
+//
+// There is no cached layer; each call queries the runnables directly.
 func (p *PIDZero) GetStateMap() StateMap {
 	out := make(StateMap)
 	for _, r := range p.runnables {
@@ -64,6 +72,15 @@ func (p *PIDZero) GetStateMap() StateMap {
 // the current state immediately (if possible), and will also receive future state changes
 // when any runnable's state is updated. A callback function is returned that should be called
 // to remove the channel from the list of subscribers when it is no longer needed.
+//
+// GetStateMap is called inside subscriberMutex on purpose, asymmetric with
+// broadcastState's split. The mutex serializes registration with broadcasts
+// so a new subscriber cannot miss the first transition that fires between
+// "snapshot computed" and "channel registered" — they either get the
+// pre-broadcast snapshot AND every subsequent broadcast, or they wait for the
+// in-flight broadcast to complete and then receive a fresh snapshot. A slow
+// GetState() implementation will stall this method; runnables should keep
+// GetState() fast and non-blocking.
 func (p *PIDZero) AddStateSubscriber(ch chan StateMap) func() {
 	p.subscriberMutex.Lock()
 	defer p.subscriberMutex.Unlock()
