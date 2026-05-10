@@ -45,10 +45,11 @@ func (p *PIDZero) GetCurrentStates() map[Runnable]string {
 	return states
 }
 
-// GetStateMap returns a snapshot of each Stateable runnable's current state,
-// keyed by the runnable's String() representation. Each call performs a live
-// GetState() read per runnable; there is no cached layer, so the returned
-// values reflect each runnable's state at the moment of the call.
+// GetStateMap returns each Stateable runnable's current state, keyed by the
+// runnable's String() representation. The result is a best-effort, per-runnable
+// live read: runnables are iterated sequentially and GetState() is called on
+// each, so entries may reflect slightly different moments in time. There is
+// no cached layer; each call queries the runnables directly.
 func (p *PIDZero) GetStateMap() StateMap {
 	out := make(StateMap)
 	for _, r := range p.runnables {
@@ -115,16 +116,19 @@ func (p *PIDZero) unsubscribeState(ch chan StateMap) {
 	p.stateSubscribers.Delete(ch)
 }
 
-// broadcastState sends a fresh state snapshot to all subscribers.
+// broadcastState sends a fresh state snapshot to all subscribers. The snapshot
+// is built before acquiring subscriberMutex so a slow GetState() implementation
+// in one runnable doesn't stall subscribe/unsubscribe operations on other
+// goroutines; the mutex is held only for the iteration over subscribers.
 func (p *PIDZero) broadcastState() {
-	p.subscriberMutex.Lock()
-	defer p.subscriberMutex.Unlock()
-
 	stateMap := p.GetStateMap()
 	if len(stateMap) == 0 {
 		p.logger.Debug("No state to broadcast; no Stateable runnables")
 		return
 	}
+
+	p.subscriberMutex.Lock()
+	defer p.subscriberMutex.Unlock()
 
 	p.stateSubscribers.Range(func(key, value any) bool {
 		ch, ok := key.(chan StateMap)
