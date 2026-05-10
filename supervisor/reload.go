@@ -121,4 +121,3 @@ func (p *PIDZero) logStateIfStateable(r Runnable, msg string) {
 		p.logger.Debug(msg, "runnable", r, "state", stateable.GetState())
 	}
 }
-
