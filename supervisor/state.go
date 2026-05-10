@@ -18,6 +18,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -106,11 +107,11 @@ func (p *PIDZero) AddStateSubscriber(ch chan StateMap) func() {
 }
 
 // SubscribeStateChanges returns a channel that receives a StateMap whenever
-// any runnable's state changes. The channel is closed when the context is done.
-func (p *PIDZero) SubscribeStateChanges(ctx context.Context) <-chan StateMap {
+// any runnable's state changes. The channel is closed when ctx is done.
+// Returns an error if ctx is nil; otherwise the returned error is always nil.
+func (p *PIDZero) SubscribeStateChanges(ctx context.Context) (<-chan StateMap, error) {
 	if ctx == nil {
-		p.logger.Error("Context is nil; cannot create state channel")
-		return nil
+		return nil, errors.New("ctx must not be nil")
 	}
 
 	ch := make(chan StateMap, 10)
@@ -125,7 +126,7 @@ func (p *PIDZero) SubscribeStateChanges(ctx context.Context) <-chan StateMap {
 		close(ch)
 	}()
 
-	return ch
+	return ch, nil
 }
 
 // unsubscribeState removes a channel from the internal list of broadcast targets.

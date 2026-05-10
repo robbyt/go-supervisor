@@ -95,7 +95,8 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 
 		subCtx, subCancel := context.WithCancel(t.Context())
 		defer subCancel()
-		stateMapChan := pid0.SubscribeStateChanges(subCtx)
+		stateMapChan, err := pid0.SubscribeStateChanges(subCtx)
+		require.NoError(t, err)
 
 		pid0.wg.Go(pid0.startStateMonitor)
 		synctest.Wait()
@@ -118,6 +119,22 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 
 		mockService.AssertExpectations(t)
 	})
+}
+
+// TestPIDZero_SubscribeStateChanges_NilContext verifies that passing a nil
+// context returns an error and a nil channel rather than the previous
+// caller-trap of returning a nil channel that blocks forever.
+func TestPIDZero_SubscribeStateChanges_NilContext(t *testing.T) {
+	t.Parallel()
+
+	stub := mocks.NewMockRunnable()
+	stub.On("String").Return("stub").Maybe()
+	pid0, err := New(WithRunnables(stub))
+	require.NoError(t, err)
+
+	ch, err := pid0.SubscribeStateChanges(nil)
+	require.Error(t, err)
+	assert.Nil(t, ch)
 }
 
 // TestBoundedWaitOnStateGoroutines verifies that the bounded-wait helper
