@@ -29,13 +29,15 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 		mockStateable.On("String").Return("stateable-runnable")
 		stateChan := make(chan string, 5)
 		mockStateable.On("GetStateChan", mock.Anything).Return(stateChan).Once()
+		// GetState is called once per snapshot: AddStateSubscriber initial
+		// send, then once per broadcast. Sequenced to mirror the values
+		// pushed on stateChan.
+		mockStateable.On("GetState").Return("initial").Once()
+		mockStateable.On("GetState").Return("running").Once()
+		mockStateable.On("GetState").Return("stopping")
 
 		pid0, err := New(WithContext(ctx), WithRunnables(mockStateable))
 		require.NoError(t, err)
-
-		// startRunnable seeds the initial state during a real Run(); seed
-		// it here directly since we're driving startStateMonitor in isolation.
-		pid0.stateMap.Store(mockStateable, "initial")
 
 		stateUpdates := make(chan StateMap, 5)
 		unsubscribe := pid0.AddStateSubscriber(stateUpdates)
@@ -44,8 +46,10 @@ func TestPIDZero_StartStateMonitor(t *testing.T) {
 		pid0.wg.Go(pid0.startStateMonitor)
 		synctest.Wait()
 
-		// The first state on the channel is discarded by the monitor (it's
-		// already captured in stateMap by startRunnable in production).
+		// The first value is consumed by consumeInitialState as the dedup
+		// baseline (not broadcast — subscribers already received an initial
+		// snapshot via AddStateSubscriber). Subsequent values are real
+		// transitions and trigger broadcasts.
 		stateChan <- "initial"
 		stateChan <- "running"
 		stateChan <- "stopping"
@@ -83,11 +87,11 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 		stateChan := make(chan string, 2)
 		mockService.On("GetStateChan", mock.Anything).Return(stateChan).Once()
 		mockService.On("String").Return("mock-service")
+		mockService.On("GetState").Return("initial").Once()
+		mockService.On("GetState").Return("running")
 
 		pid0, err := New(WithContext(ctx), WithRunnables(mockService))
 		require.NoError(t, err)
-
-		pid0.stateMap.Store(mockService, "initial")
 
 		subCtx, subCancel := context.WithCancel(t.Context())
 		defer subCancel()
@@ -96,12 +100,8 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 		pid0.wg.Go(pid0.startStateMonitor)
 		synctest.Wait()
 
-		stateChan <- "initial"
-		stateChan <- "running"
-
-		pid0.stateMap.Store(mockService, "running")
-		pid0.broadcastState()
-
+		stateChan <- "initial" // consumed by consumeInitialState
+		stateChan <- "running" // monitor broadcasts via GetStateMap → GetState
 		synctest.Wait()
 
 		var foundRunning bool
@@ -225,7 +225,7 @@ func TestMonitorStateable_CtxCancelExits(t *testing.T) {
 		pid0, err := New(WithContext(ctx), WithRunnables(s))
 		require.NoError(t, err)
 
-		// First state is consumed and discarded by discardInitialState.
+		// First state is read by consumeInitialState as the dedup baseline.
 		stateChan <- "initial"
 
 		var wg sync.WaitGroup
@@ -274,11 +274,11 @@ func TestMonitorStateable_ChannelCloseExits(t *testing.T) {
 	})
 }
 
-// TestDiscardInitialState_CtxCancelsDuringWait verifies the helper returns
-// false when the supervisor context cancels while it's parked waiting for
+// TestConsumeInitialState_CtxCancelsDuringWait verifies the helper returns
+// ok=false when the supervisor context cancels while it's parked waiting for
 // the first state. synctest pins the helper inside the select, then the
 // outer goroutine cancels ctx and observes a deterministic return.
-func TestDiscardInitialState_CtxCancelsDuringWait(t *testing.T) {
+func TestConsumeInitialState_CtxCancelsDuringWait(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -292,10 +292,13 @@ func TestDiscardInitialState_CtxCancelsDuringWait(t *testing.T) {
 		r := mocks.NewMockRunnableWithStateable()
 		r.On("String").Return("r").Maybe()
 
-		var consumed bool
+		var (
+			state string
+			ok    bool
+		)
 		done := make(chan struct{})
 		go func() {
-			consumed = pid0.discardInitialState(r, stateChan)
+			state, ok = pid0.consumeInitialState(r, stateChan)
 			close(done)
 		}()
 
@@ -304,6 +307,7 @@ func TestDiscardInitialState_CtxCancelsDuringWait(t *testing.T) {
 		cancel()
 		<-done
 
-		assert.False(t, consumed, "should return false when ctx cancels before first state")
+		assert.False(t, ok, "should return ok=false when ctx cancels before first state")
+		assert.Empty(t, state, "should return empty state when ctx cancels before first state")
 	})
 }

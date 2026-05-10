@@ -24,6 +24,13 @@ func TestStateDeduplication(t *testing.T) {
 		runnable := mocks.NewMockRunnableWithStateable()
 		runnable.On("String").Return("test-runnable")
 		runnable.On("GetStateChan", mock.Anything).Return(stateChan)
+		// One GetState per snapshot: AddStateSubscriber + one per transition
+		// broadcast (running, stopped, error). Duplicates are deduplicated
+		// upstream and never reach broadcastState.
+		runnable.On("GetState").Return("initial").Once()
+		runnable.On("GetState").Return("running").Once()
+		runnable.On("GetState").Return("stopped").Once()
+		runnable.On("GetState").Return("error").Once()
 
 		pidZero, err := New(WithContext(ctx), WithRunnables(runnable))
 		require.NoError(t, err)
@@ -52,18 +59,17 @@ func TestStateDeduplication(t *testing.T) {
 			}
 		}()
 
-		pidZero.stateMap.Store(runnable, "initial")
 		pidZero.wg.Go(pidZero.startStateMonitor)
 
 		// Test sequence:
-		// 1. Send "initial" - should be discarded (already captured in startRunnable)
+		// 1. Send "initial" - consumed by consumeInitialState as dedup baseline
 		// 2. Send "running" once - should trigger broadcast
 		// 3. Send "running" twice more - should be ignored as duplicates
 		// 4. Send "stopped" - should trigger broadcast
 		// 5. Send "stopped" again - should be ignored as duplicate
 		// 6. Send "error" - should trigger broadcast
 
-		t.Log("Sending 'initial' to be discarded")
+		t.Log("Sending 'initial' as dedup baseline")
 		stateChan <- "initial"
 
 		t.Log("Sending 'running' state")

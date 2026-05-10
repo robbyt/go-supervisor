@@ -299,60 +299,6 @@ func TestPIDZero_Shutdown(t *testing.T) {
 		runnable.AssertExpectations(t)
 	})
 
-	t.Run("abandoned stop does not cache post state", func(t *testing.T) {
-		releaseStop := make(chan struct{})
-		t.Cleanup(func() {
-			close(releaseStop)
-		})
-
-		runnable := mocks.NewMockRunnableWithStateable()
-		runnable.On("String").Return("stateable-runnable").Maybe()
-		runnable.On("GetState").Return("running").Once()
-		runnable.On("Stop").Run(func(args mock.Arguments) {
-			<-releaseStop
-		})
-
-		pidZero := newTestPIDZero(t,
-			WithRunnables(runnable),
-			WithShutdownTimeout(50*time.Millisecond),
-		)
-		pidZero.stateMap.Store(runnable, "cached-running")
-
-		shutdownDone := make(chan struct{})
-		go func() {
-			pidZero.Shutdown()
-			close(shutdownDone)
-		}()
-
-		eventuallyClosed(t, shutdownDone, "Shutdown did not complete after abandoning Stop()")
-
-		cachedState, ok := pidZero.stateMap.Load(runnable)
-		require.True(t, ok)
-		assert.Equal(t, "cached-running", cachedState)
-		runnable.AssertExpectations(t)
-	})
-
-	t.Run("completed stop caches post state", func(t *testing.T) {
-		runnable := mocks.NewMockRunnableWithStateable()
-		runnable.On("String").Return("stateable-runnable").Maybe()
-		runnable.On("GetState").Return("running").Once()
-		runnable.On("GetState").Return("stopped").Once()
-		runnable.On("Stop").Once()
-
-		pidZero := newTestPIDZero(t,
-			WithRunnables(runnable),
-			WithShutdownTimeout(time.Second),
-		)
-		pidZero.stateMap.Store(runnable, "cached-running")
-
-		pidZero.Shutdown()
-
-		cachedState, ok := pidZero.stateMap.Load(runnable)
-		require.True(t, ok)
-		assert.Equal(t, "stopped", cachedState)
-		runnable.AssertExpectations(t)
-	})
-
 	t.Run("stop runnable bounded completes before deadline", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			runnable := mocks.NewMockRunnable()

@@ -45,28 +45,18 @@ func (p *PIDZero) GetCurrentStates() map[Runnable]string {
 	return states
 }
 
-// GetStateMap returns a map of runnable string representation to its current state.
-// It uses cached state values from stateMap for consistency with the state monitoring system.
+// GetStateMap returns a snapshot of each Stateable runnable's current state,
+// keyed by the runnable's String() representation. Each call performs a live
+// GetState() read per runnable; there is no cached layer, so the returned
+// values reflect each runnable's state at the moment of the call.
 func (p *PIDZero) GetStateMap() StateMap {
-	stateMap := make(StateMap)
-
-	// Use the stateMap as the source of truth for consistent state reporting
-	p.stateMap.Range(func(key, value any) bool {
-		r, ok := key.(Runnable)
-		if !ok {
-			p.logger.Warn("stateMap key is not a Runnable; skipping", "key", key)
-			return true
+	out := make(StateMap)
+	for _, r := range p.runnables {
+		if s, ok := r.(Stateable); ok {
+			out[r.String()] = s.GetState()
 		}
-		state, ok := value.(string)
-		if !ok {
-			p.logger.Warn("stateMap value is not a string; skipping", "runnable", r, "value", value)
-			return true
-		}
-		stateMap[r.String()] = state
-		return true
-	})
-
-	return stateMap
+	}
+	return out
 }
 
 // AddStateSubscriber adds a channel to the internal list of broadcast targets. It will receive
@@ -125,15 +115,14 @@ func (p *PIDZero) unsubscribeState(ch chan StateMap) {
 	p.stateSubscribers.Delete(ch)
 }
 
-// broadcastState sends the current state map to all subscribers.
+// broadcastState sends a fresh state snapshot to all subscribers.
 func (p *PIDZero) broadcastState() {
-	// Lock the entire broadcast to prevent race conditions
 	p.subscriberMutex.Lock()
 	defer p.subscriberMutex.Unlock()
 
 	stateMap := p.GetStateMap()
 	if len(stateMap) == 0 {
-		p.logger.Debug("No state to broadcast; stateMap is empty")
+		p.logger.Debug("No state to broadcast; no Stateable runnables")
 		return
 	}
 
@@ -153,25 +142,17 @@ func (p *PIDZero) broadcastState() {
 	})
 }
 
-// startStateMonitor initiates background goroutines to monitor state changes for each
-// Stateable runnable. Each runnable that implements the Stateable interface will
-// spawn a goroutine that will:
+// startStateMonitor spawns one goroutine per Stateable runnable to forward
+// state transitions to subscribers. Each goroutine subscribes to the runnable's
+// state channel via GetStateChan, captures the initial state pushed on
+// subscription as the dedup baseline (without broadcasting it — subscribers
+// already receive the initial snapshot from AddStateSubscriber), and then
+// broadcasts each subsequent transition that differs from the previous one.
 //
-// 1. Obtains a state channel from the runnable via the GetStateChan() method
-// 2. Discards the current/initial state from the channel (as it's already captured in startRunnable)
-// 3. Begins monitoring for new states, deduplicating identical consecutive states
-// 4. Updates the internal stateMap when states change
-// 5. Broadcasts state changes to all subscribers
-//
-// The many purposes of the stateMap:
-//   - Provides a thread-safe cache of the latest state for each runnable
-//   - Enables state change deduplication (avoiding duplicate broadcasts of identical states)
-//   - Represents the supervisor's "truth" for the state of current runnables
-//   - Allows state querying without directly accessing runnables (e.g. for APIs or UIs)
-//
-// State deduplication works by comparing incoming states against the previously recorded state.
-// Only when a state differs from the previous one is it stored and broadcast, preventing
-// unnecessary broadcasts and reducing system load when runnables emit frequent duplicate states.
+// State queries (GetStateMap, GetCurrentState, GetCurrentStates) read live
+// from each runnable's GetState(); the supervisor does not cache state. The
+// monitor exists solely to push transitions to subscribers, not to maintain
+// a state cache.
 //
 // Shutdown: when the supervisor context is canceled, startStateMonitor waits up to
 // p.stateMonitorShutdownTimeout (default 5s, configurable via
@@ -197,18 +178,18 @@ func (p *PIDZero) startStateMonitor() {
 }
 
 // monitorStateable consumes state updates from a single Stateable runnable
-// and forwards changes to stateMap and subscribers. Identical consecutive
-// states are deduplicated. Exits when the supervisor context is canceled
-// or the state channel closes.
+// and forwards transitions to subscribers. Identical consecutive states are
+// deduplicated. Exits when the supervisor context is canceled or the state
+// channel closes.
 func (p *PIDZero) monitorStateable(r Runnable, s Stateable, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	stateChan := s.GetStateChan(p.ctx)
-	if !p.discardInitialState(r, stateChan) {
+	lastState, ok := p.consumeInitialState(r, stateChan)
+	if !ok {
 		return
 	}
 
-	lastState := p.loadCachedState(r)
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -224,62 +205,33 @@ func (p *PIDZero) monitorStateable(r Runnable, s Stateable, wg *sync.WaitGroup) 
 					"state", state)
 				continue
 			}
-			p.recordStateChange(r, state)
+			p.logger.Debug("State changed",
+				"runnable", r,
+				"oldState", lastState,
+				"state", state)
 			lastState = state
 			p.broadcastState()
 		}
 	}
 }
 
-// discardInitialState reads and drops the first value from stateChan. The
-// initial state is already seeded in stateMap by startRunnable, so re-broadcasting
-// it would produce a duplicate. Returns false if the supervisor context was
-// canceled or the channel closed before the first state arrived.
-func (p *PIDZero) discardInitialState(r Runnable, stateChan <-chan string) bool {
+// consumeInitialState reads the first value pushed on stateChan after subscription.
+// Stateable FSMs emit their current state on subscribe, so this captures the
+// runnable's starting state to use as the dedup baseline. The value is NOT
+// broadcast — subscribers receive the initial state via AddStateSubscriber's own
+// snapshot send. Returns ("", false) if the supervisor context cancels or the
+// channel closes before the first state arrives.
+func (p *PIDZero) consumeInitialState(r Runnable, stateChan <-chan string) (string, bool) {
 	select {
 	case <-p.ctx.Done():
-		return false
+		return "", false
 	case state, ok := <-stateChan:
 		if !ok {
-			return false
+			return "", false
 		}
-		p.logger.Debug("Discarded initial state", "runnable", r, "state", state)
-		return true
+		p.logger.Debug("Captured initial state", "runnable", r, "state", state)
+		return state, true
 	}
-}
-
-// loadCachedState returns the cached state for r from stateMap. Returns ""
-// if no entry exists or the stored value is the wrong type. The entry is
-// expected to have been seeded by startRunnable.
-func (p *PIDZero) loadCachedState(r Runnable) string {
-	cur, ok := p.stateMap.Load(r)
-	if !ok {
-		return ""
-	}
-	s, ok := cur.(string)
-	if !ok {
-		return ""
-	}
-	return s
-}
-
-// recordStateChange swaps the runnable's state into stateMap and logs the
-// transition. Logs Warn if no prior entry existed (startRunnable should
-// always have seeded one).
-func (p *PIDZero) recordStateChange(r Runnable, state string) {
-	prev, loaded := p.stateMap.Swap(r, state)
-	if !loaded {
-		p.logger.Warn(
-			"Unexpected State map entry created",
-			"runnable", r,
-			"state", state)
-		return
-	}
-	p.logger.Debug(
-		"State map entry updated",
-		"runnable", r,
-		"oldState", prev,
-		"state", state)
 }
 
 // boundedWaitOnStateGoroutines waits up to p.stateMonitorShutdownTimeout

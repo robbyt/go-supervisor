@@ -102,7 +102,7 @@ func (p *PIDZero) reloadAllRunnables() int {
 // its own FSM to Error so state-channel observers see the failure too.
 func (p *PIDZero) reloadOne(r Runnable, reloader Reloadable) bool {
 	p.logStateIfStateable(r, "Pre-reload state")
-	defer p.recordPostReloadState(r)
+	defer p.logStateIfStateable(r, "Post-reload state")
 
 	p.logger.Debug("Reloading", "runnable", r)
 	if err := reloader.Reload(p.ctx); err != nil {
@@ -122,15 +122,3 @@ func (p *PIDZero) logStateIfStateable(r Runnable, msg string) {
 	}
 }
 
-// recordPostReloadState caches the post-reload state in stateMap and logs it.
-// Combined into one helper so the reload-one path doesn't need to type-assert
-// Stateable twice.
-func (p *PIDZero) recordPostReloadState(r Runnable) {
-	stateable, ok := r.(Stateable)
-	if !ok {
-		return
-	}
-	postState := stateable.GetState()
-	p.stateMap.Store(r, postState)
-	p.logger.Debug("Post-reload state", "runnable", r, "state", postState)
-}
