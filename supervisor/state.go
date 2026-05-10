@@ -87,9 +87,12 @@ func (p *PIDZero) AddStateSubscriber(ch chan StateMap) func() {
 
 	p.stateSubscribers.Store(ch, struct{}{})
 
-	// Try to send initial state
+	// Build the snapshot before the select. Per Go spec, expressions in
+	// select case clauses are evaluated on entering the select regardless
+	// of which branch fires; extracting the call makes that explicit.
+	initial := p.GetStateMap()
 	select {
-	case ch <- p.GetStateMap():
+	case ch <- initial:
 		p.logger.Debug("Sent initial state to subscriber")
 	default:
 		p.logger.Warn(
@@ -137,7 +140,21 @@ func (p *PIDZero) unsubscribeState(ch chan StateMap) {
 // is built before acquiring subscriberMutex so a slow GetState() implementation
 // in one runnable doesn't stall subscribe/unsubscribe operations on other
 // goroutines; the mutex is held only for the iteration over subscribers.
+//
+// Fast-path: if there are no subscribers, return without computing the
+// snapshot. broadcastState is called on every Stateable transition; skipping
+// the GetState() pass when nobody is listening avoids wasted work in the
+// common case where state monitoring is enabled but nothing has subscribed.
 func (p *PIDZero) broadcastState() {
+	var hasSubscriber bool
+	p.stateSubscribers.Range(func(_, _ any) bool {
+		hasSubscriber = true
+		return false // stop on first
+	})
+	if !hasSubscriber {
+		return
+	}
+
 	stateMap := p.GetStateMap()
 	if len(stateMap) == 0 {
 		p.logger.Debug("No state to broadcast; no Stateable runnables")

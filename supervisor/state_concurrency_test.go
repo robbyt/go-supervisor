@@ -184,3 +184,28 @@ func TestGetStateMap_ReflectsLiveGetStateValues(t *testing.T) {
 
 	s.AssertExpectations(t)
 }
+
+// TestBroadcastState_NoSubscribersFastPath verifies the perf optimization
+// that broadcastState skips the GetStateMap snapshot when no subscribers
+// are registered. The mock's GetState expectation has zero matching calls,
+// so any invocation would fail AssertExpectations.
+func TestBroadcastState_NoSubscribersFastPath(t *testing.T) {
+	t.Parallel()
+
+	s := mocks.NewMockRunnableWithStateable()
+	s.On("String").Return("svc").Maybe()
+	s.On("GetStateChan", mock.Anything).Return(make(chan string, 1)).Maybe()
+	// GetState intentionally NOT expected — broadcastState must short-circuit
+	// before computing the snapshot when the subscriber list is empty.
+
+	pid0, err := New(WithRunnables(s))
+	require.NoError(t, err)
+
+	// No AddStateSubscriber calls. broadcastState should return immediately.
+	pid0.broadcastState()
+	pid0.broadcastState()
+	pid0.broadcastState()
+
+	s.AssertExpectations(t)
+	s.AssertNotCalled(t, "GetState")
+}
