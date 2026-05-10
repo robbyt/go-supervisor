@@ -59,7 +59,6 @@ type PIDZero struct {
 	shutdownOnce       sync.Once
 	subscribeSignals   []os.Signal
 	reloadListener     chan struct{}
-	stateMap           sync.Map
 	stateSubscribers   sync.Map
 	subscriberMutex    sync.Mutex
 
@@ -404,10 +403,8 @@ func (p *PIDZero) Shutdown() {
 
 			if stopped {
 				if stateable, ok := r.(Stateable); ok {
-					finalState := stateable.GetState()
-					p.stateMap.Store(r, finalState)
 					p.logger.Debug("Post-shutdown state",
-						"runnable", r, "state", finalState)
+						"runnable", r, "state", stateable.GetState())
 				}
 				p.logger.Debug("Runnable stopped",
 					"runnable", r, "duration", time.Since(runnableStart))
@@ -513,11 +510,8 @@ func (p *PIDZero) listenForSignals() {
 
 // startRunnable starts a service and sends any errors to the error channel
 func (p *PIDZero) startRunnable(r Runnable) error {
-	// Log the initial state if available
 	if stateable, ok := r.(Stateable); ok {
-		initialState := stateable.GetState()
-		p.stateMap.Store(r, initialState)
-		p.logger.Debug("Initial state", "runnable", r, "state", initialState)
+		p.logger.Debug("Initial state", "runnable", r, "state", stateable.GetState())
 	}
 
 	// Create a child context for this runnable to prevent cross-cancellation issues
