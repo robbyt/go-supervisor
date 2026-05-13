@@ -132,7 +132,10 @@ func TestPIDZero_SubscribeStateChanges_NilContext(t *testing.T) {
 	pid0, err := New(WithRunnables(stub))
 	require.NoError(t, err)
 
-	ch, err := pid0.SubscribeStateChanges(nil)
+	// Intentionally pass nil to verify the error path; staticcheck SA1012
+	// flags this as an antipattern, but exercising the guard is the test's
+	// purpose.
+	ch, err := pid0.SubscribeStateChanges(nil) //nolint:staticcheck // SA1012: testing nil-ctx error path
 	require.Error(t, err)
 	assert.Nil(t, ch)
 }
