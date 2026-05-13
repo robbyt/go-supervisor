@@ -122,7 +122,7 @@ func TestPIDZero_SubscribeStateChanges(t *testing.T) {
 }
 
 // TestPIDZero_SubscribeStateChanges_NilContext verifies that passing a nil
-// context returns an error and a nil channel rather than the previous
+// context returns ErrNilContext and a nil channel rather than the previous
 // caller-trap of returning a nil channel that blocks forever.
 func TestPIDZero_SubscribeStateChanges_NilContext(t *testing.T) {
 	t.Parallel()
@@ -136,8 +136,39 @@ func TestPIDZero_SubscribeStateChanges_NilContext(t *testing.T) {
 	// flags this as an antipattern, but exercising the guard is the test's
 	// purpose.
 	ch, err := pid0.SubscribeStateChanges(nil) //nolint:staticcheck // SA1012: testing nil-ctx error path
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNilContext)
 	assert.Nil(t, ch)
+}
+
+// TestPIDZero_SubscribeStateChanges_SupervisorCtxCancel verifies that the
+// subscription channel closes when the supervisor's own context is canceled,
+// even if the caller passed a context that never cancels. Without this
+// behavior, a caller using context.Background() would leak the cleanup
+// goroutine and the subscriber entry past supervisor shutdown.
+func TestPIDZero_SubscribeStateChanges_SupervisorCtxCancel(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		supCtx, supCancel := context.WithCancel(t.Context())
+		defer supCancel()
+
+		stub := mocks.NewMockRunnable()
+		stub.On("String").Return("stub").Maybe()
+		pid0, err := New(WithContext(supCtx), WithRunnables(stub))
+		require.NoError(t, err)
+
+		// Caller's ctx never cancels; only the supervisor's ctx will.
+		ch, err := pid0.SubscribeStateChanges(context.Background())
+		require.NoError(t, err)
+
+		// Drain the initial-state snapshot delivered by AddStateSubscriber.
+		<-ch
+
+		supCancel()
+		synctest.Wait()
+
+		_, ok := <-ch
+		assert.False(t, ok, "channel must close when supervisor ctx is canceled")
+	})
 }
 
 // TestBoundedWaitOnStateGoroutines verifies that the bounded-wait helper
