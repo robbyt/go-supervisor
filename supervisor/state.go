@@ -18,6 +18,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -105,27 +106,37 @@ func (p *PIDZero) AddStateSubscriber(ch chan StateMap) func() {
 	}
 }
 
+// ErrNilContext is returned by SubscribeStateChanges when the caller
+// passes a nil context. Test with errors.Is.
+var ErrNilContext = errors.New("context must not be nil")
+
 // SubscribeStateChanges returns a channel that receives a StateMap whenever
-// any runnable's state changes. The channel is closed when the context is done.
-func (p *PIDZero) SubscribeStateChanges(ctx context.Context) <-chan StateMap {
+// any runnable's state changes. The channel is closed when EITHER ctx is done
+// OR the supervisor's own context is canceled, whichever fires first — so
+// subscriptions cannot outlive the supervisor even if the caller passes a
+// non-canceling context like context.Background().
+//
+// Returns ErrNilContext if ctx is nil; the returned error is otherwise nil.
+func (p *PIDZero) SubscribeStateChanges(ctx context.Context) (<-chan StateMap, error) {
 	if ctx == nil {
-		p.logger.Error("Context is nil; cannot create state channel")
-		return nil
+		return nil, ErrNilContext
 	}
 
 	ch := make(chan StateMap, 10)
 	unsubCallback := p.AddStateSubscriber(ch)
 
 	go func() {
-		// Block here until the context is done
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-p.ctx.Done():
+		}
 
 		// Unsubscribe and close the channel
 		unsubCallback()
 		close(ch)
 	}()
 
-	return ch
+	return ch, nil
 }
 
 // unsubscribeState removes a channel from the internal list of broadcast targets.
