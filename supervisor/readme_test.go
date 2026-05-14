@@ -45,5 +45,7 @@ func Example_testingFakeRunnable() {
 		started: make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
-	_, _ = supervisor.New(supervisor.WithRunnables(r))
+	if _, err := supervisor.New(supervisor.WithRunnables(r)); err != nil {
+		panic(err)
+	}
 }
