@@ -85,14 +85,12 @@ import (
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 )
 
 middlewares := []httpserver.HandlerFunc{
     recovery.New(lgr),        // Catches panics - must wrap everything
     headers.Security(),       // Security headers - always applied
     logger.New(lgr),          // Logs what actually gets processed
-    metrics.New(),            // Measures performance
     headers.JSON(),           // Sets content type - easily overridden
 }
 ```
@@ -144,6 +142,39 @@ func AuthMiddleware(requiredRole string) httpserver.HandlerFunc {
     }
 }
 ```
+
+#### Example: Metrics Middleware
+
+There is no built-in metrics middleware — observability backends vary
+(Prometheus, OpenTelemetry, Datadog, statsd, slog, etc.) and the middleware
+contract is just `httpserver.HandlerFunc`, so a 10-line closure is all you
+need. Capture timing in the request phase, record what you care about in the
+response phase, and plug in whatever backend you use:
+
+```go
+// Recorder is whatever your metrics backend exposes — a Prometheus
+// CounterVec/HistogramVec pair, an OTEL meter, a Datadog client, etc.
+type Recorder interface {
+    Observe(method, path string, status int, duration time.Duration)
+}
+
+func MetricsMiddleware(rec Recorder) httpserver.HandlerFunc {
+    return func(rp *httpserver.RequestProcessor) {
+        start := time.Now()
+        rp.Next()
+        rec.Observe(
+            rp.Request().Method,
+            rp.Request().URL.Path,
+            rp.Writer().Status(),
+            time.Since(start),
+        )
+    }
+}
+```
+
+Add it to a route's middleware stack the same way as any other middleware. The
+`Recorder` interface is just an illustration — your closure can call whatever
+API your backend provides directly.
 
 #### Available Methods
 

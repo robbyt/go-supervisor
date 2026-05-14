@@ -17,8 +17,8 @@
 //   - Can be overridden by handlers if needed
 //
 // 3. Middleware Execution Order:
-//   - Request flow: recovery -> security -> logging -> metrics -> headers -> handler
-//   - Response flow: handler -> headers -> metrics -> logging -> security -> recovery
+//   - Request flow: recovery -> security -> logging -> headers -> handler
+//   - Response flow: handler -> headers -> logging -> security -> recovery
 //   - Order is critical: recovery must be outermost, headers should be innermost
 //
 // This separation ensures each middleware has a single responsibility and they
@@ -37,7 +37,6 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	headersMw "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
@@ -56,7 +55,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	recoveryMw := recovery.New(logHandler.WithGroup("recovery"))
 	securityMw := headersMw.Security()
 	loggingMw := logger.New(logHandler.WithGroup("example"))
-	metricsMw := metrics.New()
 
 	// Sets JSON response headers
 	jsonHeadersMw := headersMw.JSON()
@@ -71,8 +69,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		recoveryMw,     // 2. Handle panics - recovery responses will be transformed to JSON
 		securityMw,     // 3. Add security headers early - ensures they're always set
 		loggingMw,      // 4. Log requests - captures what's actually being processed
-		metricsMw,      // 5. Collect metrics - measures logged requests
-		jsonHeadersMw,  // 6. Set JSON headers last - prevents handler override
+		jsonHeadersMw,  // 5. Set JSON headers last - prevents handler override
 	}
 
 	// CORS middleware for API endpoints
@@ -85,8 +82,7 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 		commonMw[2], // securityMw
 		corsMw,      // different from commonMw - CORS for API endpoints
 		commonMw[3], // loggingMw
-		commonMw[4], // metricsMw
-		commonMw[5], // jsonHeadersMw
+		commonMw[4], // jsonHeadersMw
 	}
 
 	// Index handler and route creation - plain text will be converted to JSON

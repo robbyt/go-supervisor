@@ -33,7 +33,6 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/state"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
@@ -220,13 +219,6 @@ func TestBuiltinMiddlewareCompliance(t *testing.T) {
 	t.Run("logger middleware", func(t *testing.T) {
 		loggerMiddleware := logger.New(nil) // nil handler for silent logging
 		test := NewMiddlewareComplianceTest(t, "logger", loggerMiddleware)
-		test.RunAllTests()
-	})
-
-	// Test metrics middleware
-	t.Run("metrics middleware", func(t *testing.T) {
-		metricsMiddleware := metrics.New()
-		test := NewMiddlewareComplianceTest(t, "metrics", metricsMiddleware)
 		test.RunAllTests()
 	})
 

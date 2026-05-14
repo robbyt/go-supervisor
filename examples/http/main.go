@@ -10,7 +10,6 @@ import (
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/wildcard"
 	"github.com/robbyt/go-supervisor/supervisor"
@@ -42,13 +41,11 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	// Create middleware for the routes using the new middleware system
 	loggingMw := logger.New(logHandler.WithGroup("http"))
 	recoveryMw := recovery.New(logHandler.WithGroup("recovery"))
-	metricsMw := metrics.New()
 
 	// Common middleware stack for all routes (using new HandlerFunc pattern)
 	commonMw := []httpserver.HandlerFunc{
 		recoveryMw,
 		loggingMw,
-		metricsMw,
 	}
 
 	// Create routes with common middleware attached to each
