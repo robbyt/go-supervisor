@@ -218,11 +218,11 @@ Each runnable has its own documentation in its directory (e.g., `runnables/https
 
 ## Testing
 
-Code that uses go-supervisor is most easily tested by implementing the
-relevant interfaces against a fake. The interfaces are small (`Runnable`
-is 3 methods, `Reloadable` is 1, `Stateable` is 2), so a hand-rolled fake
-is usually clearer than a mocking framework. A minimal `Runnable` fake
-that lets a test observe lifecycle transitions:
+To test code that uses go-supervisor, write a fake that implements the
+relevant interfaces. The interfaces are small (`Runnable` is 3 methods,
+`Reloadable` is 1, `Stateable` is 2), so hand-roll the fake rather than
+reach for a mocking framework. The minimal `Runnable` fake below lets
+your test observe lifecycle transitions:
 
 ```go
 type fakeRunnable struct {
@@ -242,17 +242,18 @@ func (f *fakeRunnable) Run(ctx context.Context) error {
 func (f *fakeRunnable) Stop() { close(f.stopped) }
 ```
 
-Register it with `supervisor.New(supervisor.WithRunnables(r))`, run the
-supervisor in a goroutine, and assert on `started`/`stopped` with a
-`select` + timeout. The same pattern extends to `Reloadable` (add a
-`Reload` method) and `Stateable` (return a state string and a state
-channel).
+To drive it: register the fake with `supervisor.New(supervisor.WithRunnables(r))`,
+call `super.Run()` in a goroutine, and assert on `r.started` and
+`r.stopped` with a `select` + timeout. To exercise reload paths, add a
+`Reload(ctx context.Context) error` method. To exercise state
+observability, add `GetState() string` and
+`GetStateChan(context.Context) <-chan string`.
 
-Contributors working on go-supervisor itself can find ready-made
-testify/mock implementations under `internal/mocks/`. These are *not*
-importable by downstream code (Go's `internal/` rule), which is
-intentional — external code should depend only on the public
-interfaces, not on the project's internal test doubles.
+If you are contributing to go-supervisor itself, use the testify/mock
+implementations under `internal/mocks/`. They are deliberately not
+importable from downstream code (Go's `internal/` rule) — your
+application code should depend on the public interfaces, not on this
+project's internal test doubles.
 
 ## License
 
