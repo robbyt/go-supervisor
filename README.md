@@ -216,6 +216,45 @@ The package includes the following runnable implementations:
 
 Each runnable has its own documentation in its directory (e.g., `runnables/httpserver/README.md`).
 
+## Testing
+
+To test code that uses go-supervisor, write a fake that implements the
+relevant interfaces. The interfaces are small (`Runnable` is 3 methods,
+`Reloadable` is 1, `Stateable` is 2), so hand-roll the fake rather than
+reach for a mocking framework. The minimal `Runnable` fake below lets
+your test observe lifecycle transitions:
+
+```go
+type fakeRunnable struct {
+    name    string
+    started chan struct{}
+    stopped chan struct{}
+}
+
+func (f *fakeRunnable) String() string { return f.name }
+
+func (f *fakeRunnable) Run(ctx context.Context) error {
+    close(f.started)
+    <-ctx.Done()
+    return nil
+}
+
+func (f *fakeRunnable) Stop() { close(f.stopped) }
+```
+
+To drive it: register the fake with `supervisor.New(supervisor.WithRunnables(r))`,
+call `super.Run()` in a goroutine, and assert on `r.started` and
+`r.stopped` with a `select` + timeout. To exercise reload paths, add a
+`Reload(ctx context.Context) error` method. To exercise state
+observability, add `GetState() string` and
+`GetStateChan(context.Context) <-chan string`.
+
+If you are contributing to go-supervisor itself, use the testify/mock
+implementations under `internal/mocks/`. They are deliberately not
+importable from downstream code (Go's `internal/` rule) — your
+application code should depend on the public interfaces, not on this
+project's internal test doubles.
+
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
