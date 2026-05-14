@@ -40,7 +40,6 @@ The example demonstrates why middleware order matters:
 1. **Recovery** - Must be first to catch panics
 2. **Security** - Set security headers early
 3. **Logging** - Log all requests
-4. **Metrics** - Collect request metrics
-5. **Headers** - Set response headers before handler
+4. **Headers** - Set response headers before handler
 
 See the code comments in `main.go`.

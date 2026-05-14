@@ -40,4 +40,4 @@ The server will start on port 8080. Visit http://localhost:8080 to see instructi
 2. **Channel-based Updates**: Configuration updates are sent through a channel
 3. **Supervisor Integration**: The cluster is managed by go-supervisor for signal handling
 4. **State Monitoring**: The example logs all state changes
-5. **Middleware**: Each server uses logging, recovery, and metrics middleware
+5. **Middleware**: Each server uses logging and recovery middleware

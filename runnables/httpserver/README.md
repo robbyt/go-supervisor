@@ -85,14 +85,12 @@ import (
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
     "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-    "github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 )
 
 middlewares := []httpserver.HandlerFunc{
     recovery.New(lgr),        // Catches panics - must wrap everything
     headers.Security(),       // Security headers - always applied
     logger.New(lgr),          // Logs what actually gets processed
-    metrics.New(),            // Measures performance
     headers.JSON(),           // Sets content type - easily overridden
 }
 ```
