@@ -37,7 +37,6 @@ import (
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/headers"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/logger"
-	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/metrics"
 	"github.com/robbyt/go-supervisor/runnables/httpserver/middleware/recovery"
 	"github.com/robbyt/go-supervisor/supervisor"
 )
@@ -69,7 +68,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	// Create base middleware stack
 	recoveryMw := recovery.New(logHandler.WithGroup("recovery"))
 	loggingMw := logger.New(logHandler.WithGroup("headers_example"))
-	metricsMw := metrics.New()
 
 	// Create comprehensive headers middleware that demonstrates both
 	// request and response header manipulation
@@ -101,7 +99,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	commonMw := []httpserver.HandlerFunc{
 		recoveryMw,
 		loggingMw,
-		metricsMw,
 		headersMw, // Headers middleware processes both request and response
 	}
 
@@ -189,7 +186,6 @@ func buildRoutes(logHandler slog.Handler) ([]httpserver.Route, error) {
 	specialMw := []httpserver.HandlerFunc{
 		recoveryMw,
 		loggingMw,
-		metricsMw,
 		differentHeadersMw, // Different headers middleware
 	}
 
