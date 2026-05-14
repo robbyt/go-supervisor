@@ -3,9 +3,12 @@
 // Middleware" (or add a new one), update or add the matching Example
 // function below so `go test` will catch typos and signature drift.
 //
-// Each Example function is named after the README subsection it mirrors;
-// no Output comment is needed because we only care that the snippets
-// compile against the current httpserver API.
+// Examples follow Go's godoc convention `ExampleHandlerFunc_<suffix>`,
+// where the suffix maps to the README subsection: `timing` for
+// "Two-Phase Execution", `auth` for "When to Abort", `metrics` for
+// "Example: Metrics Middleware". No Output comment is needed because
+// we only care that the snippets compile against the current httpserver
+// API.
 package httpserver_test
 
 import (
