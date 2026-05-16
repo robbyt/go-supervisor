@@ -1,13 +1,12 @@
 package httpcluster
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
@@ -25,7 +24,8 @@ import (
 // The test forces senders to park by using a slow runner factory: while the
 // event loop is in createAndStartServer the unbuffered siphon has no reader,
 // so any concurrent send blocks until either the reader returns to the select
-// or the drain consumes the value.
+// or the drain consumes the value. Under synctest the slow factory's sleep
+// is synthetic and the test runs in zero real time.
 func TestShutdownDrainsConfigSiphon(t *testing.T) {
 	t.Parallel()
 
@@ -49,73 +49,75 @@ func TestShutdownDrainsConfigSiphon(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				// Slow factory keeps the reader busy in createAndStartServer
+				// long enough for subsequent senders to be parked on the
+				// unbuffered siphon when shutdown is triggered. The sleep
+				// is synthetic under synctest and advances automatically.
+				factory := func(ctx context.Context, _ string, _ *httpserver.Config, _ slog.Handler) (httpServerRunner, error) {
+					time.Sleep(50 * time.Millisecond)
+					m := mocks.NewMockRunnableWithStateable()
+					m.On("Run", mock.Anything).Run(func(mock.Arguments) {
+						<-ctx.Done()
+					}).Return(nil)
+					m.On("Stop").Return().Maybe()
+					m.On("GetState").Return(finitestate.StatusRunning)
+					m.On("IsReady").Return(true)
+					stateChan := make(chan string, 1)
+					stateChan <- finitestate.StatusRunning
+					m.On("GetStateChan", mock.Anything).Return(stateChan)
+					return m, nil
+				}
 
-			// Slow factory keeps the reader busy in createAndStartServer
-			// long enough for subsequent senders to be parked on the
-			// unbuffered siphon when shutdown is triggered.
-			factory := func(ctx context.Context, _ string, _ *httpserver.Config, _ slog.Handler) (httpServerRunner, error) {
-				time.Sleep(50 * time.Millisecond)
-				m := mocks.NewMockRunnableWithStateable()
-				m.On("Run", mock.Anything).Run(func(mock.Arguments) {
-					<-ctx.Done()
-				}).Return(nil)
-				m.On("Stop").Return().Maybe()
-				m.On("GetState").Return(finitestate.StatusRunning)
-				m.On("IsReady").Return(true)
-				stateChan := make(chan string, 1)
-				stateChan <- finitestate.StatusRunning
-				m.On("GetStateChan", mock.Anything).Return(stateChan)
-				return m, nil
-			}
+				runner, err := NewRunner(WithRunnerFactory(factory))
+				require.NoError(t, err)
 
-			runner, err := NewRunner(WithRunnerFactory(factory))
-			require.NoError(t, err)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				runErr := make(chan error, 1)
+				go func() { runErr <- runner.Run(ctx) }()
 
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			runErr := make(chan error, 1)
-			go func() { runErr <- runner.Run(ctx) }()
-			require.Eventually(t, runner.IsReady, time.Second, 10*time.Millisecond)
+				// Settle initialization so IsReady is observable.
+				synctest.Wait()
+				require.True(t, runner.IsReady())
 
-			// Many senders each pushing a unique server config, so the reader
-			// has real work (factory call) per receive and the senders pile up.
-			const numSenders = 20
-			var senderWg sync.WaitGroup
-			senderWg.Add(numSenders)
-			siphon := runner.GetConfigSiphon()
-			for i := range numSenders {
-				go func() {
-					defer senderWg.Done()
-					addr := fmt.Sprintf(":%d", 18000+i)
-					siphon <- map[string]*httpserver.Config{
-						fmt.Sprintf("server%d", i): createTestHTTPConfig(t, addr),
-					}
-				}()
-			}
+				// Many senders each pushing a unique server config. The
+				// reader is in the slow factory; all but one are parked
+				// on the unbuffered siphon when shutdown begins.
+				const numSenders = 20
+				var senderWg sync.WaitGroup
+				senderWg.Add(numSenders)
+				siphon := runner.GetConfigSiphon()
+				for i := range numSenders {
+					go func() {
+						defer senderWg.Done()
+						addr := fmt.Sprintf(":%d", 18000+i)
+						siphon <- map[string]*httpserver.Config{
+							fmt.Sprintf("server%d", i): createTestHTTPConfig(t, addr),
+						}
+					}()
+				}
 
-			// Give the reader time to consume one or two configs and start
-			// the slow factory, parking the remaining senders.
-			time.Sleep(30 * time.Millisecond)
+				tt.shutdown(runner, cancel)
 
-			tt.shutdown(runner, cancel)
+				// Block on Run's return. While the test goroutine is
+				// durably blocked here, synctest advances time so the
+				// reader's factory sleep completes, the shutdown path
+				// runs, and the drain consumes the parked senders.
+				<-runErr
 
-			select {
-			case <-runErr:
-			case <-time.After(5 * time.Second):
-				t.Fatal("Run() did not return after shutdown")
-			}
-
-			done := make(chan struct{})
-			go func() {
+				// All senders must have completed. Without the drain
+				// (bug), these stay parked and synctest reports a
+				// deadlock when the bubble exits.
 				senderWg.Wait()
-				close(done)
-			}()
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("Siphon senders blocked after shutdown; drain did not unblock them")
-			}
+
+				// The drain does not observe ctx — it exits when its
+				// inactivity timer (100ms synthetic) fires. Synthetic
+				// sleep past it so the drain returns cleanly before the
+				// bubble checks for lingering goroutines. (Real elapsed
+				// time inside the bubble is zero.)
+				time.Sleep(150 * time.Millisecond)
+			})
 		})
 	}
 }
@@ -128,39 +130,39 @@ func TestShutdownDrainsConfigSiphon(t *testing.T) {
 // resetting the inactivity timer on every iteration until the hard deadline.
 // The fix is to inspect the receive's ok value and return when the channel
 // is closed.
+//
+// Under synctest, a spinning drain is detectable: it is never durably blocked
+// (the receive returns immediately every iteration), so time cannot advance
+// and the bubble cannot drain. synctest.Test reports the lingering goroutine
+// when the test function returns.
 func TestDrainExitsWhenSiphonClosed(t *testing.T) {
 	t.Parallel()
 
-	customSiphon := make(chan map[string]*httpserver.Config)
-	runner, err := NewRunner(WithCustomSiphonChannel(customSiphon))
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		customSiphon := make(chan map[string]*httpserver.Config)
+		runner, err := NewRunner(WithCustomSiphonChannel(customSiphon))
+		require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	runErr := make(chan error, 1)
-	go func() { runErr <- runner.Run(ctx) }()
-	require.Eventually(t, runner.IsReady, time.Second, 10*time.Millisecond)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(ctx) }()
+		synctest.Wait()
+		require.True(t, runner.IsReady())
 
-	// Trigger ctx-cancel shutdown (which spawns the drain) and then close
-	// the siphon from outside. Order matters: the drain must already be
-	// running when the close arrives, otherwise the main loop's !ok branch
-	// handles shutdown and the drain never spawns.
-	cancel()
-	close(customSiphon)
+		// Cancel first so the reader picks runCtx.Done and spawns the
+		// drain; settle so the drain is alive before the close arrives.
+		cancel()
+		synctest.Wait()
 
-	select {
-	case <-runErr:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run() did not return")
-	}
+		// Now close the siphon. A drain that ignored ok would spin on
+		// the closed receive forever.
+		close(customSiphon)
 
-	// After shutdown the drain goroutine must have exited. We grep all
-	// goroutine stacks for the drain's function name; a spinning drain
-	// would still be alive here until the 5s hard deadline.
-	require.Eventually(t, func() bool {
-		buf := make([]byte, 64*1024)
-		n := runtime.Stack(buf, true)
-		return !bytes.Contains(buf[:n], []byte("drainConfigSiphon"))
-	}, 500*time.Millisecond, 10*time.Millisecond,
-		"drainConfigSiphon goroutine still alive after siphon close — drain is spinning")
+		// Block on Run's return so synctest can advance time. With the
+		// fix the drain observes !ok and exits; with the bug the drain
+		// stays runnable and synctest will surface a deadlock when the
+		// bubble cleanup runs.
+		<-runErr
+	})
 }
