@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -164,5 +165,85 @@ func TestDrainExitsWhenSiphonClosed(t *testing.T) {
 		// stays runnable and synctest will surface a deadlock when the
 		// bubble cleanup runs.
 		<-runErr
+	})
+}
+
+// TestDrainExitsOnShutdownTimeout verifies the hard-deadline exit path: when
+// a caller keeps publishing to the siphon faster than the drain's internal
+// inactivity window, quiescence can never fire and the drain must rely on
+// WithShutdownTimeout as its safety bound. Without that bound, a misbehaving
+// publisher could keep the drain goroutine alive indefinitely.
+//
+// The test publishes every 50ms (well below the 100ms quiescence window) so
+// the drain's inactivity timer is reset on every receive. The only exit path
+// left is the shutdownTimeout. After it elapses, the drain returns and the
+// publisher's next send parks forever — which the test asserts by observing
+// that the publisher's success counter stops growing across additional
+// synthetic time.
+func TestDrainExitsOnShutdownTimeout(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		customSiphon := make(chan map[string]*httpserver.Config)
+		runner, err := NewRunner(
+			WithCustomSiphonChannel(customSiphon),
+			WithShutdownTimeout(500*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		runErr := make(chan error, 1)
+		go func() { runErr <- runner.Run(ctx) }()
+		synctest.Wait()
+		require.True(t, runner.IsReady())
+
+		// Trigger shutdown: cancel and let Run return. The drain is now
+		// the only consumer on the siphon and is running on its own
+		// 500ms deadline.
+		cancel()
+		<-runErr
+
+		// Continuous publisher: 50ms interval < 100ms quiescence, so
+		// the drain's inactivity timer is reset on every receive and
+		// can never fire. Only shutdownTimeout can release the drain.
+		stop := make(chan struct{})
+		var sent atomic.Int64
+		go func() {
+			cfg := map[string]*httpserver.Config{
+				"keepalive": createTestHTTPConfig(t, ":18999"),
+			}
+			for {
+				select {
+				case <-stop:
+					return
+				case customSiphon <- cfg:
+					sent.Add(1)
+					time.Sleep(50 * time.Millisecond)
+				}
+			}
+		}()
+
+		// Advance well past the deadline. If the drain were missing or
+		// unbounded, it would still be receiving and sent would keep
+		// climbing. If the deadline fires, the drain exits and the
+		// publisher's next send parks; sent freezes.
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		frozen := sent.Load()
+		require.Greater(t, frozen, int64(0),
+			"publisher must have delivered values to the drain before the deadline")
+
+		// More synthetic time: with the drain gone, the count cannot
+		// change. If it does, the drain is still consuming and the
+		// deadline did not bound it.
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.Equal(t, frozen, sent.Load(),
+			"drain must exit on shutdownTimeout; publisher should be parked on send")
+
+		// Release the publisher so the synctest bubble has no lingering
+		// goroutines when it exits.
+		close(stop)
 	})
 }
