@@ -231,7 +231,7 @@ func TestDrainExitsOnShutdownTimeout(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		frozen := sent.Load()
-		require.Greater(t, frozen, int64(0),
+		require.Positive(t, frozen,
 			"publisher must have delivered values to the drain before the deadline")
 
 		// More synthetic time: with the drain gone, the count cannot
