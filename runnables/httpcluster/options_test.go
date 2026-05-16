@@ -3,6 +3,7 @@ package httpcluster
 import (
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/robbyt/go-supervisor/runnables/httpserver"
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,34 @@ func TestWithStateChanBufferSize(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "state channel buffer size cannot be negative")
 		assert.Contains(t, err.Error(), "-1")
+	})
+}
+
+func TestWithShutdownTimeout(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default is 5 seconds", func(t *testing.T) {
+		runner, err := NewRunner()
+		require.NoError(t, err)
+		assert.Equal(t, defaultShutdownTimeout, runner.shutdownTimeout)
+	})
+
+	t.Run("positive value is honored", func(t *testing.T) {
+		runner, err := NewRunner(WithShutdownTimeout(2 * time.Second))
+		require.NoError(t, err)
+		assert.Equal(t, 2*time.Second, runner.shutdownTimeout)
+	})
+
+	t.Run("zero disables the bound", func(t *testing.T) {
+		runner, err := NewRunner(WithShutdownTimeout(0))
+		require.NoError(t, err)
+		assert.Equal(t, time.Duration(0), runner.shutdownTimeout)
+	})
+
+	t.Run("negative value returns error", func(t *testing.T) {
+		_, err := NewRunner(WithShutdownTimeout(-1 * time.Second))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shutdown timeout cannot be negative")
 	})
 }
 
