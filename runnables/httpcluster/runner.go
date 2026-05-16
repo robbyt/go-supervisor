@@ -237,7 +237,14 @@ func (r *Runner) drainConfigSiphon() {
 		defer hardDeadline.Stop()
 		for {
 			select {
-			case <-r.configSiphon:
+			case _, ok := <-r.configSiphon:
+				if !ok {
+					// Siphon closed by its owner (WithCustomSiphonChannel
+					// callers can do this). Receives would otherwise return
+					// immediately forever, resetting the inactivity timer on
+					// every iteration and spinning until the hard deadline.
+					return
+				}
 				if !inactivity.Stop() {
 					select {
 					case <-inactivity.C:

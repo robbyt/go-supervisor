@@ -1,9 +1,11 @@
 package httpcluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -116,4 +118,49 @@ func TestShutdownDrainsConfigSiphon(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDrainExitsWhenSiphonClosed verifies that the shutdown drain exits when
+// the siphon channel is closed by its owner. WithCustomSiphonChannel lets
+// callers own the channel; if a caller cancels the supervisor's context and
+// also closes the siphon, the drain (spawned by the ctx-cancel case) would
+// hot-loop on a receive that always returns immediately — pegging CPU and
+// resetting the inactivity timer on every iteration until the hard deadline.
+// The fix is to inspect the receive's ok value and return when the channel
+// is closed.
+func TestDrainExitsWhenSiphonClosed(t *testing.T) {
+	t.Parallel()
+
+	customSiphon := make(chan map[string]*httpserver.Config)
+	runner, err := NewRunner(WithCustomSiphonChannel(customSiphon))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() { runErr <- runner.Run(ctx) }()
+	require.Eventually(t, runner.IsReady, time.Second, 10*time.Millisecond)
+
+	// Trigger ctx-cancel shutdown (which spawns the drain) and then close
+	// the siphon from outside. Order matters: the drain must already be
+	// running when the close arrives, otherwise the main loop's !ok branch
+	// handles shutdown and the drain never spawns.
+	cancel()
+	close(customSiphon)
+
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return")
+	}
+
+	// After shutdown the drain goroutine must have exited. We grep all
+	// goroutine stacks for the drain's function name; a spinning drain
+	// would still be alive here until the 5s hard deadline.
+	require.Eventually(t, func() bool {
+		buf := make([]byte, 64*1024)
+		n := runtime.Stack(buf, true)
+		return !bytes.Contains(buf[:n], []byte("drainConfigSiphon"))
+	}, 500*time.Millisecond, 10*time.Millisecond,
+		"drainConfigSiphon goroutine still alive after siphon close — drain is spinning")
 }
