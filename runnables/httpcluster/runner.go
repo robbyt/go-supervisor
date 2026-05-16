@@ -192,11 +192,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
+			r.drainConfigSiphon()
 			return r.shutdown(runCtx)
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
+			r.drainConfigSiphon()
 			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
@@ -212,6 +214,44 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// drainConfigSiphon spawns a background goroutine that consumes and discards
+// values from r.configSiphon. It is invoked when shutdown begins to unpark
+// any external goroutines parked in a send on the publicly-exposed siphon
+// channel while the main event loop tears down. The drain runs in the
+// background — it does not block Run() from returning — and exits once the
+// channel has been quiet for the inactivity window or once a hard deadline
+// has elapsed. Callers should still stop publishing on the siphon after the
+// supervisor reports shutdown; the drain only covers the race window where a
+// send was already in flight when shutdown began.
+func (r *Runner) drainConfigSiphon() {
+	const (
+		quiescence = 100 * time.Millisecond
+		maxDrain   = 5 * time.Second
+	)
+	go func() {
+		inactivity := time.NewTimer(quiescence)
+		defer inactivity.Stop()
+		hardDeadline := time.NewTimer(maxDrain)
+		defer hardDeadline.Stop()
+		for {
+			select {
+			case <-r.configSiphon:
+				if !inactivity.Stop() {
+					select {
+					case <-inactivity.C:
+					default:
+					}
+				}
+				inactivity.Reset(quiescence)
+			case <-inactivity.C:
+				return
+			case <-hardDeadline.C:
+				return
+			}
+		}
+	}()
 }
 
 // Stop signals the cluster to stop all servers and shut down.
