@@ -227,15 +227,18 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 // transition fails the runner is already terminal and we accept whatever
 // state it's in. The cancellation error still propagates to the caller.
 func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
-	oldConfig, err := r.getConfig()
-	if err != nil {
-		r.logger.Warn("Failed to load current config during reload, treating as empty", "error", err)
-		oldConfig = &Config[T]{}
-	} else if oldConfig == nil {
-		r.logger.Warn("No current config during reload, treating as empty")
+	// Use the cached value directly: the new cfg is already in hand,
+	// and triggering the user-provided callback in the middle of a
+	// reload would be a surprising side effect. If no config has been
+	// loaded yet (cold-start reload), treat membership as empty so the
+	// reload proceeds as a fresh boot.
+	oldConfig := r.currentConfig.Load()
+	if oldConfig == nil {
+		r.logger.Debug("No cached config during reload, treating as empty")
 		oldConfig = &Config[T]{}
 	}
 
+	var err error
 	if hasMembershipChanged(oldConfig, cfg) {
 		err = r.reloadWithRestart(ctx, cfg)
 	} else {
@@ -310,9 +313,9 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrConfigMissing, err)
 	}
-	if cfg == nil {
-		return fmt.Errorf("%w: configuration is unavailable", ErrConfigMissing)
-	}
+	// cfg is guaranteed non-nil when err == nil per getConfig's
+	// contract — the (nil, nil) return path collapses to
+	// ErrConfigCallbackNil handled above.
 
 	// If there are no entries, log and return without error
 	if len(cfg.Entries) == 0 {

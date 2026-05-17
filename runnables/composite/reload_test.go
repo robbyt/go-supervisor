@@ -615,7 +615,12 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 
 		// Call Reload - should handle the callback error and surface it
 		// via the new error return per the T3.1 contract.
-		require.Error(t, runner.Reload(t.Context()))
+		reloadErr := runner.Reload(t.Context())
+		require.Error(t, reloadErr)
+		require.ErrorIs(t, reloadErr, ErrConfigCallback,
+			"the package sentinel must be reachable via errors.Is")
+		require.ErrorIs(t, reloadErr, expectedErr,
+			"the caller's underlying error must be preserved in the chain")
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -650,7 +655,10 @@ func TestCompositeRunner_Reload_Errors(t *testing.T) {
 		runner.fsm = mockFSM
 
 		// Call Reload - nil config surfaces via the new error return.
-		require.Error(t, runner.Reload(t.Context()))
+		reloadErr := runner.Reload(t.Context())
+		require.Error(t, reloadErr)
+		require.ErrorIs(t, reloadErr, ErrConfigCallbackNil,
+			"the nil-from-callback sentinel must be reachable via errors.Is")
 
 		// Verify FSM methods were called as expected
 		mockFSM.AssertExpectations(t)
@@ -2222,6 +2230,11 @@ func TestComposite_Reload_CtxCancelDoesNotForceError(t *testing.T) {
 
 	runner, err := NewRunner(func() (*Config[*mocks.Runnable], error) { return cfg, nil })
 	require.NoError(t, err)
+	// Populate currentConfig directly so handleReload's membership check
+	// sees a non-empty old config and chooses reloadSkipRestart.
+	// Production callers reach this state via boot(); the test skips
+	// boot to exercise handleReload in isolation.
+	runner.setConfig(cfg)
 	// Force FSM into Reloading directly so handleReload can run without
 	// going through dispatch.
 	require.NoError(t, runner.fsm.SetState(finitestate.StatusRunning))

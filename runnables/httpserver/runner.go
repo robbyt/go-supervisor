@@ -325,9 +325,9 @@ func (r *Runner) boot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRetrieveConfig, err)
 	}
-	if originalCfg == nil {
-		return ErrRetrieveConfig
-	}
+	// originalCfg is guaranteed non-nil when err == nil per getConfig's
+	// contract — the (nil, nil) return path collapses to
+	// ErrConfigCallbackNil handled above.
 
 	serverCfg, err := NewConfig(
 		originalCfg.ListenAddr,
