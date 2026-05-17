@@ -190,34 +190,24 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to running state: %w", err)
 	}
 
-	// Main event loop
+	// Main event loop. All three shutdown triggers fall out of the loop
+	// via labeled break so the shutdown ctx is created once, in one place.
+loop:
 	for {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			shutdownCtx, cancel := r.newShutdownContext(ctx)
-			defer cancel()
-			drainDone := r.drainConfigSiphon(shutdownCtx)
-			err := r.shutdown(shutdownCtx)
-			<-drainDone
-			return err
+			break loop
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
-			shutdownCtx, cancel := r.newShutdownContext(ctx)
-			defer cancel()
-			drainDone := r.drainConfigSiphon(shutdownCtx)
-			err := r.shutdown(shutdownCtx)
-			<-drainDone
-			return err
+			break loop
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Debug("Config siphon closed, initiating shutdown")
-				shutdownCtx, cancel := r.newShutdownContext(ctx)
-				defer cancel()
-				return r.shutdown(shutdownCtx)
+				break loop
 			}
 
 			logger.Debug("Received configuration update", "serverCount", len(newConfigs))
@@ -227,6 +217,16 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+
+	// The drain is safe to run unconditionally: in the siphon-closed
+	// branch its receive returns ok=false immediately and the drain
+	// exits in one iteration.
+	shutdownCtx, cancel := r.newShutdownContext(ctx)
+	defer cancel()
+	drainDone := r.drainConfigSiphon(shutdownCtx)
+	err := r.shutdown(shutdownCtx)
+	<-drainDone
+	return err
 }
 
 // newShutdownContext returns the context that bounds the runner's shutdown
