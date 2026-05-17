@@ -210,3 +210,70 @@ func TestGetConfig_ConcurrentAccess(t *testing.T) {
 		assert.Same(t, configs[0], configs[i])
 	}
 }
+
+// TestGetConfig_SerializesCallback exercises the cold path that
+// TestGetConfig_ConcurrentAccess deliberately avoids: r.config is nil when
+// multiple goroutines call getConfig concurrently. Without double-checked
+// locking around the callback, every concurrent caller sees nil and runs
+// the callback — a non-idempotent callback (counter, file read, side-
+// effecting init) would misbehave. With the lock, exactly one caller per
+// nil-window runs the callback; the others recheck under the lock, find
+// non-nil, and return the freshly-stored config.
+//
+// The sleep inside the callback widens the race window so the pre-fix
+// behavior (callbackCount climbs with each concurrent caller) is
+// deterministic to reproduce.
+func TestGetConfig_SerializesCallback(t *testing.T) {
+	t.Parallel()
+
+	var callbackCount atomic.Int64
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+
+	cfgCallback := func() (*Config, error) {
+		// Hold the callback open long enough that every concurrent
+		// caller is guaranteed to enter getConfig before the first one
+		// stores a non-nil result.
+		time.Sleep(50 * time.Millisecond)
+		callbackCount.Add(1)
+		return NewConfig(port, Routes{*route}, WithDrainTimeout(1*time.Second))
+	}
+
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// NewRunner eagerly loaded config once during construction.
+	require.Equal(t, int64(1), callbackCount.Load())
+
+	// Force the nil path: reset r.config so concurrent callers all see
+	// nil and race the callback. Same-package test so we reach into the
+	// private field directly.
+	runner.config.Store(nil)
+
+	const goroutines = 10
+	configs := make([]*Config, goroutines)
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Go(func() {
+			configs[i] = runner.getConfig()
+		})
+	}
+	wg.Wait()
+
+	// Without double-checked locking, every concurrent caller would
+	// have run the callback (callbackCount jumps by `goroutines`). With
+	// the lock, exactly one caller runs it per nil-window.
+	assert.Equal(t, int64(2), callbackCount.Load(),
+		"callback must run at most once per nil-window")
+
+	// All callers must observe the same config pointer.
+	for i := range configs {
+		assert.Same(t, configs[0], configs[i])
+	}
+}
