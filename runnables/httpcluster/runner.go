@@ -196,15 +196,21 @@ func (r *Runner) Run(ctx context.Context) error {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
 			shutdownCtx, cancel := r.newShutdownContext(ctx)
-			r.drainConfigSiphon(shutdownCtx, cancel)
-			return r.shutdown(shutdownCtx)
+			defer cancel()
+			drainDone := r.drainConfigSiphon(shutdownCtx)
+			err := r.shutdown(shutdownCtx)
+			<-drainDone
+			return err
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
 			shutdownCtx, cancel := r.newShutdownContext(ctx)
-			r.drainConfigSiphon(shutdownCtx, cancel)
-			return r.shutdown(shutdownCtx)
+			defer cancel()
+			drainDone := r.drainConfigSiphon(shutdownCtx)
+			err := r.shutdown(shutdownCtx)
+			<-drainDone
+			return err
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
@@ -233,14 +239,14 @@ func (r *Runner) Run(ctx context.Context) error {
 // context.WithoutCancel: in two of the three shutdown branches the parent
 // is already done (runCtx.Done fired, or Stop() just called runCancel), so
 // deriving the cancellation chain would yield an already-cancelled context
-// and the drain/shutdown would have no time to run. Values propagate via
-// WithoutCancel so loggers and trace IDs attached to Run's input ctx still
+// and the drain/shutdown would have no time to run. Values still propagate
+// via WithoutCancel so loggers and trace IDs attached to Run's input ctx
 // reach shutdown sub-tasks.
 //
-// The returned cancel must be invoked to release the timer; the drain owns
-// it in drain-spawning paths, and a defer-call covers the no-drain
-// (siphon-closed) path. A shutdownTimeout of zero disables the deadline;
-// the ctx then cancels only when its CancelFunc is invoked.
+// The caller owns the returned cancel and is expected to defer it; the
+// drain just observes the context and exits when its Done fires. A
+// shutdownTimeout of zero disables the deadline; the ctx then cancels only
+// when its CancelFunc is invoked.
 func (r *Runner) newShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {
 	base := context.WithoutCancel(parent)
 	if r.shutdownTimeout > 0 {
@@ -249,21 +255,22 @@ func (r *Runner) newShutdownContext(parent context.Context) (context.Context, co
 	return context.WithCancel(base)
 }
 
-// drainConfigSiphon spawns a background goroutine that consumes and discards
-// values from r.configSiphon. It is invoked when shutdown begins to unpark
-// any external goroutines parked in a send on the publicly-exposed siphon
-// channel while the main event loop tears down. The drain runs in the
-// background — it does not block Run() from returning — and exits once the
-// channel has been quiet for the inactivity window, the channel is closed,
-// or the parent shutdown context is done (whichever comes first). The drain
-// takes ownership of cancel and invokes it on exit, releasing the parent
-// context's timer. Callers should still stop publishing on the siphon after
-// the supervisor reports shutdown; the drain only covers the race window
-// where a send was already in flight when shutdown began.
-func (r *Runner) drainConfigSiphon(ctx context.Context, cancel context.CancelFunc) {
+// drainConfigSiphon spawns a goroutine that consumes and discards values from
+// r.configSiphon, unparking any external goroutines parked in a send on the
+// publicly-exposed siphon channel while the main event loop tears down. It
+// returns a done channel that closes when the drain has exited; Run blocks
+// on this channel before returning so the drain runs for its full
+// shutdownTimeout budget rather than dying the moment Run returns. The drain
+// exits on (1) the inactivity window elapsing, (2) the siphon being closed,
+// or (3) ctx being Done — whichever comes first. Callers should still stop
+// publishing on the siphon after the supervisor reports shutdown; the drain
+// only covers the race window where a send was already in flight when
+// shutdown began.
+func (r *Runner) drainConfigSiphon(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	const quiescence = 100 * time.Millisecond
 	go func() {
-		defer cancel()
+		defer close(done)
 		inactivity := time.NewTimer(quiescence)
 		defer inactivity.Stop()
 		for {
@@ -290,6 +297,7 @@ func (r *Runner) drainConfigSiphon(ctx context.Context, cancel context.CancelFun
 			}
 		}
 	}()
+	return done
 }
 
 // Stop signals the cluster to stop all servers and shut down.
