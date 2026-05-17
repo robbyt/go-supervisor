@@ -195,21 +195,21 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			shutdownCtx, cancel := r.newShutdownContext()
+			shutdownCtx, cancel := r.newShutdownContext(ctx)
 			r.drainConfigSiphon(shutdownCtx, cancel)
 			return r.shutdown(shutdownCtx)
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
-			shutdownCtx, cancel := r.newShutdownContext()
+			shutdownCtx, cancel := r.newShutdownContext(ctx)
 			r.drainConfigSiphon(shutdownCtx, cancel)
 			return r.shutdown(shutdownCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Debug("Config siphon closed, initiating shutdown")
-				shutdownCtx, cancel := r.newShutdownContext()
+				shutdownCtx, cancel := r.newShutdownContext(ctx)
 				defer cancel()
 				return r.shutdown(shutdownCtx)
 			}
@@ -227,16 +227,26 @@ func (r *Runner) Run(ctx context.Context) error {
 // phase. Both the synchronous shutdown path and the background siphon drain
 // observe this context, so a configured shutdownTimeout cascades to every
 // shutdown sub-task — when the deadline fires the drain's ctx.Done case
-// fires and any ctx-aware code inside shutdown unblocks. The returned cancel
-// must be invoked to release the timer; the drain owns it in drain-spawning
-// paths, and a defer-call covers the no-drain (siphon-closed) path. A
-// shutdownTimeout of zero disables the deadline; the ctx then cancels only
-// when its CancelFunc is invoked.
-func (r *Runner) newShutdownContext() (context.Context, context.CancelFunc) {
+// fires and any ctx-aware code inside shutdown unblocks.
+//
+// The parent's cancellation is intentionally detached via
+// context.WithoutCancel: in two of the three shutdown branches the parent
+// is already done (runCtx.Done fired, or Stop() just called runCancel), so
+// deriving the cancellation chain would yield an already-cancelled context
+// and the drain/shutdown would have no time to run. Values propagate via
+// WithoutCancel so loggers and trace IDs attached to Run's input ctx still
+// reach shutdown sub-tasks.
+//
+// The returned cancel must be invoked to release the timer; the drain owns
+// it in drain-spawning paths, and a defer-call covers the no-drain
+// (siphon-closed) path. A shutdownTimeout of zero disables the deadline;
+// the ctx then cancels only when its CancelFunc is invoked.
+func (r *Runner) newShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(parent)
 	if r.shutdownTimeout > 0 {
-		return context.WithTimeout(context.Background(), r.shutdownTimeout)
+		return context.WithTimeout(base, r.shutdownTimeout)
 	}
-	return context.WithCancel(context.Background())
+	return context.WithCancel(base)
 }
 
 // drainConfigSiphon spawns a background goroutine that consumes and discards
