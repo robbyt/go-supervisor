@@ -397,8 +397,11 @@ func (r *Runner) setConfig(config *Config) {
 // getConfig returns the current configuration, loading it via callback if not
 // set. The hot path is an atomic load with no synchronization; the cold path
 // (config currently nil) uses double-checked locking on configMu to serialize
-// the callback so a non-idempotent ConfigCallback runs at most once per nil
-// window. Mirrors composite.Runner.getConfig.
+// callback execution, so concurrent callers cannot all invoke the callback in
+// parallel and orphan each other's Config. The callback may still run more
+// than once across calls — if it returns an error or nil, r.config stays
+// nil and the next caller retries (serialized, not concurrent). Mirrors
+// composite.Runner.getConfig.
 func (r *Runner) getConfig() *Config {
 	if config := r.config.Load(); config != nil {
 		return config

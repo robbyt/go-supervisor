@@ -215,10 +215,10 @@ func TestGetConfig_ConcurrentAccess(t *testing.T) {
 // TestGetConfig_ConcurrentAccess deliberately avoids: r.config is nil when
 // multiple goroutines call getConfig concurrently. Without double-checked
 // locking around the callback, every concurrent caller sees nil and runs
-// the callback — a non-idempotent callback (counter, file read, side-
-// effecting init) would misbehave. With the lock, exactly one caller per
-// nil-window runs the callback; the others recheck under the lock, find
-// non-nil, and return the freshly-stored config.
+// the callback in parallel — last-write-wins on r.config and the other
+// callers' configs are orphaned. With the lock, callback executions are
+// serialized; once any caller stores a non-nil config, every later caller
+// in the same nil-window rechecks under the lock and returns that pointer.
 //
 // The sleep inside the callback widens the race window so the pre-fix
 // behavior (callbackCount climbs with each concurrent caller) is
@@ -267,10 +267,12 @@ func TestGetConfig_SerializesCallback(t *testing.T) {
 	wg.Wait()
 
 	// Without double-checked locking, every concurrent caller would
-	// have run the callback (callbackCount jumps by `goroutines`). With
-	// the lock, exactly one caller runs it per nil-window.
+	// have run the callback in parallel (callbackCount jumps by
+	// `goroutines`). With the lock, callbacks are serialized and only
+	// the one that wins the race actually invokes the callback — the
+	// others see the populated config when they recheck under the lock.
 	assert.Equal(t, int64(2), callbackCount.Load(),
-		"callback must run at most once per nil-window")
+		"concurrent callback executions must be serialized to a single winner")
 
 	// All callers must observe the same config pointer.
 	for i := range configs {
