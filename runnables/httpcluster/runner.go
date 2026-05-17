@@ -192,15 +192,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Main event loop. Runs until any shutdown trigger fires; Run then
 	// drives the bounded shutdown phase.
-	r.eventLoop(runCtx, runCancel)
+	r.eventLoop(runCtx)
 	return r.shutdownPhase(ctx)
 }
 
 // eventLoop is the runner's config-update select loop. It returns as soon
 // as any shutdown trigger fires — runCtx cancellation, Stop() (via
 // r.lc.StopCh), or the configSiphon being closed — so Run can drive the
-// shutdown phase from a single site.
-func (r *Runner) eventLoop(runCtx context.Context, runCancel context.CancelFunc) {
+// shutdown phase from a single site. runCtx is left alive on return; Run's
+// own defer runCancel() at the top of Run handles its cleanup, and the
+// shutdown phase uses its own bounded context regardless.
+func (r *Runner) eventLoop(runCtx context.Context) {
 	logger := r.logger.WithGroup("eventLoop")
 	for {
 		select {
@@ -210,7 +212,6 @@ func (r *Runner) eventLoop(runCtx context.Context, runCancel context.CancelFunc)
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
-			runCancel()
 			return
 
 		case newConfigs, ok := <-r.configSiphon:
