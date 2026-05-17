@@ -290,7 +290,7 @@ func (r *Runner[T]) drainReloadCh() {
 			// <-req.result branch returns a non-nil error per T3.1.
 			// Without this, an accepted-then-drained reload would
 			// silently look like success.
-			req.result <- errors.New("runner stopped before reload was handled")
+			req.result <- ErrReloadAbandoned
 		default:
 			return
 		}

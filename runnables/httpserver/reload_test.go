@@ -376,9 +376,8 @@ func TestReloadCanDispatchReturnsFalse_RunnerStopped(t *testing.T) {
 
 		useUpdated = true
 		err = runner.Reload(t.Context())
-		require.Error(t, err,
-			"canDispatchReload returns false → Reload returns 'runner stopped' error")
-		require.Contains(t, err.Error(), "runner stopped")
+		require.ErrorIs(t, err, ErrReloadAbandoned,
+			"canDispatchReload returns false → Reload returns ErrReloadAbandoned")
 		// FSM must be back in Running after the cleanup transition; not
 		// stuck in Reloading and not pushed to Error.
 		require.Equal(t, finitestate.StatusRunning, runner.GetState())

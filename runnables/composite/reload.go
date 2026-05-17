@@ -111,7 +111,7 @@ func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) er
 		return ctx.Err()
 	case <-r.lc.DoneCh():
 		r.abortDispatch("Runner stopped before reload dispatch")
-		return errors.New("runner stopped before reload dispatch")
+		return ErrReloadAbandoned
 	}
 }
 

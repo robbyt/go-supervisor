@@ -858,8 +858,8 @@ func TestDispatchReload_AbortBranches(t *testing.T) {
 		newConfig, err := NewConfig("dispatched", []RunnableEntry[*mocks.Runnable]{})
 		require.NoError(t, err)
 
-		require.Error(t, runner.dispatchReload(t.Context(), newConfig),
-			"lc.DoneCh branch must surface 'runner stopped' error")
+		require.ErrorIs(t, runner.dispatchReload(t.Context(), newConfig), ErrReloadAbandoned,
+			"lc.DoneCh branch must surface ErrReloadAbandoned")
 
 		assert.Equal(t, finitestate.StatusRunning, runner.fsm.GetState())
 	})

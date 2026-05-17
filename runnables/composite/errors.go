@@ -22,4 +22,10 @@ var (
 
 	// ErrConfigCallbackNil is returned when ConfigCallback returns (nil, nil).
 	ErrConfigCallbackNil = errors.New("config callback returned nil")
+
+	// ErrReloadAbandoned is returned when a pending reload cannot
+	// complete because the runner stopped first — either before the
+	// reload request was accepted into Run's event loop, or while a
+	// caller was waiting for the accepted request to finish.
+	ErrReloadAbandoned = errors.New("reload abandoned because runner stopped")
 )
