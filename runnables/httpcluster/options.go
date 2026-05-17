@@ -84,13 +84,14 @@ func WithRestartDelay(delay time.Duration) Option {
 	}
 }
 
-// WithShutdownTimeout sets the upper bound on the cluster runner's shutdown
-// phase. It currently bounds the background drain that unparks senders blocked
-// on the publicly-exposed configSiphon when the supervisor cancels the
-// runner's context. A timeout of 0 disables the bound; the drain then exits
-// only on quiescence (the channel has been quiet for an internal inactivity
-// window) or when the channel is closed. The default is 5 seconds, matching
-// the supervisor's stateMonitorShutdownTimeout default.
+// WithShutdownTimeout sets the deadline on the context that the cluster
+// runner builds when it begins shutting down. Both the synchronous shutdown
+// path and the background siphon drain observe that context, so the deadline
+// cascades to every shutdown sub-task: when it fires, the drain exits via
+// ctx.Done and any ctx-aware code inside the shutdown path unblocks. A
+// timeout of 0 disables the deadline; the drain then exits only on quiescence
+// (an internal inactivity window) or when the channel is closed. The default
+// is 5 seconds, matching the supervisor's stateMonitorShutdownTimeout default.
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(r *Runner) error {
 		if d < 0 {

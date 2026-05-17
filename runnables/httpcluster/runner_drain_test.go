@@ -112,11 +112,13 @@ func TestShutdownDrainsConfigSiphon(t *testing.T) {
 				// deadlock when the bubble exits.
 				senderWg.Wait()
 
-				// The drain does not observe ctx — it exits when its
-				// inactivity timer (100ms synthetic) fires. Synthetic
-				// sleep past it so the drain returns cleanly before the
-				// bubble checks for lingering goroutines. (Real elapsed
-				// time inside the bubble is zero.)
+				// Senders stop publishing once they complete, so the
+				// drain reaches quiescence (its 100ms synthetic
+				// inactivity window) before the parent shutdownCtx's
+				// 5s default deadline. Synthetic-sleep past quiescence
+				// so the drain returns cleanly before the bubble checks
+				// for lingering goroutines. (Real elapsed time inside
+				// the bubble is zero.)
 				time.Sleep(150 * time.Millisecond)
 			})
 		})

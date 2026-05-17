@@ -195,19 +195,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			r.drainConfigSiphon()
-			return r.shutdown(runCtx)
+			shutdownCtx, cancel := r.newShutdownContext()
+			r.drainConfigSiphon(shutdownCtx, cancel)
+			return r.shutdown(shutdownCtx)
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
-			r.drainConfigSiphon()
-			return r.shutdown(runCtx)
+			shutdownCtx, cancel := r.newShutdownContext()
+			r.drainConfigSiphon(shutdownCtx, cancel)
+			return r.shutdown(shutdownCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Debug("Config siphon closed, initiating shutdown")
-				return r.shutdown(runCtx)
+				shutdownCtx, cancel := r.newShutdownContext()
+				defer cancel()
+				return r.shutdown(shutdownCtx)
 			}
 
 			logger.Debug("Received configuration update", "serverCount", len(newConfigs))
@@ -219,28 +223,39 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
+// newShutdownContext returns the context that bounds the runner's shutdown
+// phase. Both the synchronous shutdown path and the background siphon drain
+// observe this context, so a configured shutdownTimeout cascades to every
+// shutdown sub-task — when the deadline fires the drain's ctx.Done case
+// fires and any ctx-aware code inside shutdown unblocks. The returned cancel
+// must be invoked to release the timer; the drain owns it in drain-spawning
+// paths, and a defer-call covers the no-drain (siphon-closed) path. A
+// shutdownTimeout of zero disables the deadline; the ctx then cancels only
+// when its CancelFunc is invoked.
+func (r *Runner) newShutdownContext() (context.Context, context.CancelFunc) {
+	if r.shutdownTimeout > 0 {
+		return context.WithTimeout(context.Background(), r.shutdownTimeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
 // drainConfigSiphon spawns a background goroutine that consumes and discards
 // values from r.configSiphon. It is invoked when shutdown begins to unpark
 // any external goroutines parked in a send on the publicly-exposed siphon
 // channel while the main event loop tears down. The drain runs in the
 // background — it does not block Run() from returning — and exits once the
 // channel has been quiet for the inactivity window, the channel is closed,
-// or r.shutdownTimeout has elapsed (whichever comes first). A shutdownTimeout
-// of zero disables the hard deadline; the drain then exits only on quiescence
-// or close. Callers should still stop publishing on the siphon after the
-// supervisor reports shutdown; the drain only covers the race window where a
-// send was already in flight when shutdown began.
-func (r *Runner) drainConfigSiphon() {
+// or the parent shutdown context is done (whichever comes first). The drain
+// takes ownership of cancel and invokes it on exit, releasing the parent
+// context's timer. Callers should still stop publishing on the siphon after
+// the supervisor reports shutdown; the drain only covers the race window
+// where a send was already in flight when shutdown began.
+func (r *Runner) drainConfigSiphon(ctx context.Context, cancel context.CancelFunc) {
 	const quiescence = 100 * time.Millisecond
 	go func() {
+		defer cancel()
 		inactivity := time.NewTimer(quiescence)
 		defer inactivity.Stop()
-		var hardDeadline <-chan time.Time
-		if r.shutdownTimeout > 0 {
-			t := time.NewTimer(r.shutdownTimeout)
-			defer t.Stop()
-			hardDeadline = t.C
-		}
 		for {
 			select {
 			case _, ok := <-r.configSiphon:
@@ -248,7 +263,7 @@ func (r *Runner) drainConfigSiphon() {
 					// Siphon closed by its owner (WithCustomSiphonChannel
 					// callers can do this). Receives would otherwise return
 					// immediately forever, resetting the inactivity timer on
-					// every iteration and spinning until shutdownTimeout.
+					// every iteration and spinning until ctx.Done.
 					return
 				}
 				if !inactivity.Stop() {
@@ -260,7 +275,7 @@ func (r *Runner) drainConfigSiphon() {
 				inactivity.Reset(quiescence)
 			case <-inactivity.C:
 				return
-			case <-hardDeadline:
+			case <-ctx.Done():
 				return
 			}
 		}
