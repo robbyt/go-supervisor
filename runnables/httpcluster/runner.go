@@ -190,24 +190,33 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to running state: %w", err)
 	}
 
-	// Main event loop. All three shutdown triggers fall out of the loop
-	// via labeled break so the shutdown ctx is created once, in one place.
-loop:
+	// Main event loop. Runs until any shutdown trigger fires; Run then
+	// drives the bounded shutdown phase.
+	r.eventLoop(runCtx, runCancel)
+	return r.shutdownPhase(ctx)
+}
+
+// eventLoop is the runner's config-update select loop. It returns as soon
+// as any shutdown trigger fires — runCtx cancellation, Stop() (via
+// r.lc.StopCh), or the configSiphon being closed — so Run can drive the
+// shutdown phase from a single site.
+func (r *Runner) eventLoop(runCtx context.Context, runCancel context.CancelFunc) {
+	logger := r.logger.WithGroup("eventLoop")
 	for {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			break loop
+			return
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
-			break loop
+			return
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Debug("Config siphon closed, initiating shutdown")
-				break loop
+				return
 			}
 
 			logger.Debug("Received configuration update", "serverCount", len(newConfigs))
@@ -217,11 +226,16 @@ loop:
 			}
 		}
 	}
+}
 
-	// The drain is safe to run unconditionally: in the siphon-closed
-	// branch its receive returns ok=false immediately and the drain
-	// exits in one iteration.
-	shutdownCtx, cancel := r.newShutdownContext(ctx)
+// shutdownPhase orchestrates the runner's shutdown sequence: it builds the
+// bounded shutdown context once, spawns the siphon drain, runs the
+// synchronous server shutdown, and waits for the drain to exit before
+// returning. The drain is safe to run unconditionally: in the
+// siphon-closed branch its receive returns ok=false immediately and the
+// drain exits in one iteration.
+func (r *Runner) shutdownPhase(parent context.Context) error {
+	shutdownCtx, cancel := r.newShutdownContext(parent)
 	defer cancel()
 	drainDone := r.drainConfigSiphon(shutdownCtx)
 	err := r.shutdown(shutdownCtx)
