@@ -411,9 +411,14 @@ func (r *Runner) setConfig(config *Config) {
 //
 // On callback failure the returned error wraps ErrConfigCallback together
 // with the underlying error; on a nil-from-callback the returned error is
-// ErrConfigCallbackNil. Callers that only want the cached value (display
-// paths, opportunistic reads) should call r.config.Load() directly to avoid
-// triggering the callback at all.
+// ErrConfigCallbackNil.
+//
+// Callers that must NOT trigger the callback (shutdown paths, where invoking
+// caller code while tearing the runner down is unsafe) should call
+// r.config.Load() directly and treat nil as "no config available." Display
+// helpers (String) intentionally still use getConfig so callers calling them
+// before Run() see a populated view; the callback runs at most once per
+// nil-window per the double-checked locking above.
 func (r *Runner) getConfig() (*Config, error) {
 	if config := r.config.Load(); config != nil {
 		return config, nil

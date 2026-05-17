@@ -47,12 +47,12 @@ func (r *Runner) Reload(ctx context.Context) error {
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
 		r.setStateError()
-		return fmt.Errorf("config callback failed: %w", err)
+		return fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
 	if newCfg == nil {
 		logger.Error("config callback returned nil")
 		r.setStateError()
-		return errors.New("config callback returned nil")
+		return ErrConfigCallbackNil
 	}
 	if old := r.config.Load(); old != nil && newCfg.Equal(old) {
 		logger.Debug("Config unchanged, skipping reload")

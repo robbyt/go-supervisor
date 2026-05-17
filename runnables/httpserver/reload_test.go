@@ -504,6 +504,8 @@ func TestReloadConfigCallbackFailureSetsError(t *testing.T) {
 		"T3.1 contract: configCallback failure must surface via Reload's return")
 	require.ErrorIs(t, reloadErr, callbackErr,
 		"the wrapped callback error must be retrievable via errors.Is")
+	require.ErrorIs(t, reloadErr, ErrConfigCallback,
+		"the package sentinel must also be reachable via errors.Is")
 }
 
 func TestReloadNilConfigSetsError(t *testing.T) {
@@ -526,6 +528,8 @@ func TestReloadNilConfigSetsError(t *testing.T) {
 	assert.Equal(t, finitestate.StatusError, runner.GetState())
 	require.Error(t, reloadErr,
 		"T3.1 contract: a nil configCallback result must surface via Reload's return")
+	require.ErrorIs(t, reloadErr, ErrConfigCallbackNil,
+		"the nil-from-callback sentinel must be reachable via errors.Is")
 }
 
 func TestDrainReloadChUnblocksPendingReloadWithSynctest(t *testing.T) {
