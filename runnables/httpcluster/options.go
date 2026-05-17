@@ -83,3 +83,20 @@ func WithRestartDelay(delay time.Duration) Option {
 		return nil
 	}
 }
+
+// WithShutdownTimeout sets the upper bound on the cluster runner's shutdown
+// phase. It currently bounds the background drain that unparks senders blocked
+// on the publicly-exposed configSiphon when the supervisor cancels the
+// runner's context. A timeout of 0 disables the bound; the drain then exits
+// only on quiescence (the channel has been quiet for an internal inactivity
+// window) or when the channel is closed. The default is 5 seconds, matching
+// the supervisor's stateMonitorShutdownTimeout default.
+func WithShutdownTimeout(d time.Duration) Option {
+	return func(r *Runner) error {
+		if d < 0 {
+			return fmt.Errorf("shutdown timeout cannot be negative: %v", d)
+		}
+		r.shutdownTimeout = d
+		return nil
+	}
+}

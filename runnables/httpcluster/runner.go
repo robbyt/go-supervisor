@@ -16,6 +16,7 @@ import (
 const (
 	defaultDeadlineServerStart = 10 * time.Second
 	defaultRestartDelay        = 10 * time.Millisecond
+	defaultShutdownTimeout     = 5 * time.Second
 )
 
 type fsm interface {
@@ -38,6 +39,7 @@ type Runner struct {
 	runnerFactory       runnerFactory
 	restartDelay        time.Duration
 	deadlineServerStart time.Duration
+	shutdownTimeout     time.Duration
 
 	// Configuration siphon channel
 	configSiphon chan map[string]*httpserver.Config
@@ -80,6 +82,7 @@ func NewRunner(opts ...Option) (*Runner, error) {
 		logger:              slog.Default().WithGroup("httpcluster.Runner"),
 		restartDelay:        defaultRestartDelay,
 		deadlineServerStart: defaultDeadlineServerStart,
+		shutdownTimeout:     defaultShutdownTimeout,
 		configSiphon: make(
 			chan map[string]*httpserver.Config,
 		), // unbuffered by default
@@ -192,11 +195,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
+			r.drainConfigSiphon()
 			return r.shutdown(runCtx)
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
 			runCancel()
+			r.drainConfigSiphon()
 			return r.shutdown(runCtx)
 
 		case newConfigs, ok := <-r.configSiphon:
@@ -212,6 +217,54 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// drainConfigSiphon spawns a background goroutine that consumes and discards
+// values from r.configSiphon. It is invoked when shutdown begins to unpark
+// any external goroutines parked in a send on the publicly-exposed siphon
+// channel while the main event loop tears down. The drain runs in the
+// background — it does not block Run() from returning — and exits once the
+// channel has been quiet for the inactivity window, the channel is closed,
+// or r.shutdownTimeout has elapsed (whichever comes first). A shutdownTimeout
+// of zero disables the hard deadline; the drain then exits only on quiescence
+// or close. Callers should still stop publishing on the siphon after the
+// supervisor reports shutdown; the drain only covers the race window where a
+// send was already in flight when shutdown began.
+func (r *Runner) drainConfigSiphon() {
+	const quiescence = 100 * time.Millisecond
+	go func() {
+		inactivity := time.NewTimer(quiescence)
+		defer inactivity.Stop()
+		var hardDeadline <-chan time.Time
+		if r.shutdownTimeout > 0 {
+			t := time.NewTimer(r.shutdownTimeout)
+			defer t.Stop()
+			hardDeadline = t.C
+		}
+		for {
+			select {
+			case _, ok := <-r.configSiphon:
+				if !ok {
+					// Siphon closed by its owner (WithCustomSiphonChannel
+					// callers can do this). Receives would otherwise return
+					// immediately forever, resetting the inactivity timer on
+					// every iteration and spinning until shutdownTimeout.
+					return
+				}
+				if !inactivity.Stop() {
+					select {
+					case <-inactivity.C:
+					default:
+					}
+				}
+				inactivity.Reset(quiescence)
+			case <-inactivity.C:
+				return
+			case <-hardDeadline:
+				return
+			}
+		}
+	}()
 }
 
 // Stop signals the cluster to stop all servers and shut down.
