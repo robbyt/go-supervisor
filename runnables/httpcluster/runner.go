@@ -190,24 +190,34 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to transition to running state: %w", err)
 	}
 
-	// Main event loop
+	// Main event loop. Runs until any shutdown trigger fires; Run then
+	// drives the bounded shutdown phase.
+	r.eventLoop(runCtx)
+	return r.shutdownPhase(ctx)
+}
+
+// eventLoop is the runner's config-update select loop. It returns as soon
+// as any shutdown trigger fires — runCtx cancellation, Stop() (via
+// r.lc.StopCh), or the configSiphon being closed — so Run can drive the
+// shutdown phase from a single site. runCtx is left alive on return; Run's
+// own defer runCancel() at the top of Run handles its cleanup, and the
+// shutdown phase uses its own bounded context regardless.
+func (r *Runner) eventLoop(runCtx context.Context) {
+	logger := r.logger.WithGroup("eventLoop")
 	for {
 		select {
 		case <-runCtx.Done():
 			logger.Debug("Run context cancelled, initiating shutdown")
-			r.drainConfigSiphon()
-			return r.shutdown(runCtx)
+			return
 
 		case <-r.lc.StopCh():
 			logger.Debug("Stop() called, initiating shutdown")
-			runCancel()
-			r.drainConfigSiphon()
-			return r.shutdown(runCtx)
+			return
 
 		case newConfigs, ok := <-r.configSiphon:
 			if !ok {
 				logger.Debug("Config siphon closed, initiating shutdown")
-				return r.shutdown(runCtx)
+				return
 			}
 
 			logger.Debug("Received configuration update", "serverCount", len(newConfigs))
@@ -219,28 +229,65 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-// drainConfigSiphon spawns a background goroutine that consumes and discards
-// values from r.configSiphon. It is invoked when shutdown begins to unpark
-// any external goroutines parked in a send on the publicly-exposed siphon
-// channel while the main event loop tears down. The drain runs in the
-// background — it does not block Run() from returning — and exits once the
-// channel has been quiet for the inactivity window, the channel is closed,
-// or r.shutdownTimeout has elapsed (whichever comes first). A shutdownTimeout
-// of zero disables the hard deadline; the drain then exits only on quiescence
-// or close. Callers should still stop publishing on the siphon after the
-// supervisor reports shutdown; the drain only covers the race window where a
-// send was already in flight when shutdown began.
-func (r *Runner) drainConfigSiphon() {
+// shutdownPhase orchestrates the runner's shutdown sequence: it builds the
+// bounded shutdown context once, spawns the siphon drain, runs the
+// synchronous server shutdown, and waits for the drain to exit before
+// returning. The drain is safe to run unconditionally: in the
+// siphon-closed branch its receive returns ok=false immediately and the
+// drain exits in one iteration.
+func (r *Runner) shutdownPhase(parent context.Context) error {
+	shutdownCtx, cancel := r.newShutdownContext(parent)
+	defer cancel()
+	drainDone := r.drainConfigSiphon(shutdownCtx)
+	err := r.shutdown(shutdownCtx)
+	<-drainDone
+	return err
+}
+
+// newShutdownContext returns the context that bounds the runner's shutdown
+// phase. Both the synchronous shutdown path and the background siphon drain
+// observe this context, so a configured shutdownTimeout cascades to every
+// shutdown sub-task — when the deadline fires the drain's ctx.Done case
+// fires and any ctx-aware code inside shutdown unblocks.
+//
+// The parent's cancellation is intentionally detached via
+// context.WithoutCancel: in two of the three shutdown branches the parent
+// is already done (runCtx.Done fired, or Stop() just called runCancel), so
+// deriving the cancellation chain would yield an already-cancelled context
+// and the drain/shutdown would have no time to run. Values still propagate
+// via WithoutCancel so loggers and trace IDs attached to Run's input ctx
+// reach shutdown sub-tasks.
+//
+// The caller owns the returned cancel and is expected to defer it; the
+// drain just observes the context and exits when its Done fires. A
+// shutdownTimeout of zero disables the deadline; the ctx then cancels only
+// when its CancelFunc is invoked.
+func (r *Runner) newShutdownContext(parent context.Context) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(parent)
+	if r.shutdownTimeout > 0 {
+		return context.WithTimeout(base, r.shutdownTimeout)
+	}
+	return context.WithCancel(base)
+}
+
+// drainConfigSiphon spawns a goroutine that consumes and discards values from
+// r.configSiphon, unparking any external goroutines parked in a send on the
+// publicly-exposed siphon channel while the main event loop tears down. It
+// returns a done channel that closes when the drain has exited; Run blocks
+// on this channel before returning so the drain runs for its full
+// shutdownTimeout budget rather than dying the moment Run returns. The drain
+// exits on (1) the inactivity window elapsing, (2) the siphon being closed,
+// or (3) ctx being Done — whichever comes first. Callers should still stop
+// publishing on the siphon after the supervisor reports shutdown; the drain
+// only covers the race window where a send was already in flight when
+// shutdown began.
+func (r *Runner) drainConfigSiphon(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	const quiescence = 100 * time.Millisecond
 	go func() {
+		defer close(done)
 		inactivity := time.NewTimer(quiescence)
 		defer inactivity.Stop()
-		var hardDeadline <-chan time.Time
-		if r.shutdownTimeout > 0 {
-			t := time.NewTimer(r.shutdownTimeout)
-			defer t.Stop()
-			hardDeadline = t.C
-		}
 		for {
 			select {
 			case _, ok := <-r.configSiphon:
@@ -248,7 +295,7 @@ func (r *Runner) drainConfigSiphon() {
 					// Siphon closed by its owner (WithCustomSiphonChannel
 					// callers can do this). Receives would otherwise return
 					// immediately forever, resetting the inactivity timer on
-					// every iteration and spinning until shutdownTimeout.
+					// every iteration and spinning until ctx.Done.
 					return
 				}
 				if !inactivity.Stop() {
@@ -260,11 +307,12 @@ func (r *Runner) drainConfigSiphon() {
 				inactivity.Reset(quiescence)
 			case <-inactivity.C:
 				return
-			case <-hardDeadline:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+	return done
 }
 
 // Stop signals the cluster to stop all servers and shut down.

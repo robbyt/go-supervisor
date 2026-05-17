@@ -105,19 +105,16 @@ func TestShutdownDrainsConfigSiphon(t *testing.T) {
 				// durably blocked here, synctest advances time so the
 				// reader's factory sleep completes, the shutdown path
 				// runs, and the drain consumes the parked senders.
+				// Run also blocks on drainDone before returning, so by
+				// the time runErr fires the drain has already exited
+				// — no lingering background goroutine for the bubble
+				// cleanup to trip on.
 				<-runErr
 
 				// All senders must have completed. Without the drain
 				// (bug), these stay parked and synctest reports a
 				// deadlock when the bubble exits.
 				senderWg.Wait()
-
-				// The drain does not observe ctx — it exits when its
-				// inactivity timer (100ms synthetic) fires. Synthetic
-				// sleep past it so the drain returns cleanly before the
-				// bubble checks for lingering goroutines. (Real elapsed
-				// time inside the bubble is zero.)
-				time.Sleep(150 * time.Millisecond)
 			})
 		})
 	}
@@ -172,14 +169,15 @@ func TestDrainExitsWhenSiphonClosed(t *testing.T) {
 // a caller keeps publishing to the siphon faster than the drain's internal
 // inactivity window, quiescence can never fire and the drain must rely on
 // WithShutdownTimeout as its safety bound. Without that bound, a misbehaving
-// publisher could keep the drain goroutine alive indefinitely.
+// publisher could keep the drain alive indefinitely and Run would block on
+// drainDone forever.
 //
 // The test publishes every 50ms (well below the 100ms quiescence window) so
 // the drain's inactivity timer is reset on every receive. The only exit path
-// left is the shutdownTimeout. After it elapses, the drain returns and the
-// publisher's next send parks forever — which the test asserts by observing
-// that the publisher's success counter stops growing across additional
-// synthetic time.
+// left is shutdownCtx.Done firing at the configured shutdownTimeout. After
+// that, the drain exits, Run unblocks, runErr fires, and the publisher's
+// next send parks forever — which the test asserts by observing that the
+// publisher's success counter stops growing across additional synthetic time.
 func TestDrainExitsOnShutdownTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -198,11 +196,12 @@ func TestDrainExitsOnShutdownTimeout(t *testing.T) {
 		synctest.Wait()
 		require.True(t, runner.IsReady())
 
-		// Trigger shutdown: cancel and let Run return. The drain is now
-		// the only consumer on the siphon and is running on its own
-		// 500ms deadline.
+		// Cancel so Run enters its shutdown branch. After synctest.Wait
+		// the drain has spawned, shutdown has completed (no servers),
+		// and Run is blocked on drainDone — making the drain the only
+		// consumer on the siphon.
 		cancel()
-		<-runErr
+		synctest.Wait()
 
 		// Continuous publisher: 50ms interval < 100ms quiescence, so
 		// the drain's inactivity timer is reset on every receive and
@@ -224,11 +223,14 @@ func TestDrainExitsOnShutdownTimeout(t *testing.T) {
 			}
 		}()
 
-		// Advance well past the deadline. If the drain were missing or
-		// unbounded, it would still be receiving and sent would keep
-		// climbing. If the deadline fires, the drain exits and the
-		// publisher's next send parks; sent freezes.
-		time.Sleep(2 * time.Second)
+		// Run will unblock when the drain exits — i.e. when the 500ms
+		// shutdownTimeout fires. If the deadline didn't bound the drain,
+		// the continuous publisher would keep it alive forever and this
+		// receive would deadlock under synctest.
+		<-runErr
+
+		// Publisher's next send is now parked (no consumer). Sample
+		// what it managed to deliver before the deadline fired.
 		synctest.Wait()
 		frozen := sent.Load()
 		require.Positive(t, frozen,
