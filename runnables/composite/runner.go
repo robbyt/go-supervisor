@@ -112,15 +112,11 @@ func NewRunner[T runnable](
 }
 
 // String returns a string representation of the CompositeRunner instance.
-// Lazily triggers the config callback so callers calling String() before
-// Run() get the configured runner's name. Errors are logged and treated as
-// "no config" for display purposes.
+// Inspection-only: reads the cached config directly, so it never triggers
+// the user-provided callback. Returns "CompositeRunner<nil>" if no config
+// has been loaded yet (call Run or Reload first to populate).
 func (r *Runner[T]) String() string {
-	cfg, err := r.getConfig()
-	if err != nil {
-		r.logger.Debug("String: config unavailable", "error", err)
-		return "CompositeRunner<nil>"
-	}
+	cfg := r.currentConfig.Load()
 	if cfg == nil {
 		return "CompositeRunner<nil>"
 	}
@@ -446,13 +442,11 @@ func (r *Runner[T]) setConfig(config *Config[T]) {
 // with the underlying error; on a nil-from-callback the returned error is
 // ErrConfigCallbackNil.
 //
-// Callers that must NOT trigger the callback (shutdown paths, where invoking
-// caller code while tearing the runner down is unsafe) should call
-// r.currentConfig.Load() directly and treat nil as "no config available."
-// Display/inspection helpers (String, GetChildStates) intentionally still
-// use getConfig so callers calling them before Run() see a populated view;
-// the callback runs at most once per nil-window per the double-checked
-// locking above.
+// Callers that must NOT trigger the callback as a side effect (inspection
+// helpers like String/GetChildStates, shutdown paths where invoking caller
+// code is unsafe) should call r.currentConfig.Load() directly and treat
+// nil as "no config available." Reserve getConfig for live paths that
+// legitimately need to load configuration on demand (boot, handleReload).
 func (r *Runner[T]) getConfig() (*Config[T], error) {
 	if config := r.currentConfig.Load(); config != nil {
 		return config, nil

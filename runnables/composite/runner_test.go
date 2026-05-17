@@ -111,6 +111,11 @@ func TestCompositeRunner_String(t *testing.T) {
 
 	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
+	// Pre-load config: String() is inspection-only and won't trigger
+	// the callback. Live callers see this via Run; tests do it
+	// explicitly.
+	_, err = runner.getConfig()
+	require.NoError(t, err)
 
 	str := runner.String()
 	assert.Contains(t, str, "CompositeRunner")

@@ -127,10 +127,9 @@ func (r *Runner) String() string {
 	if r.name != "" {
 		args = append(args, "name: "+r.name)
 	}
-	cfg, err := r.getConfig()
-	if err != nil {
-		r.logger.Debug("String: config unavailable", "error", err)
-	} else if cfg != nil {
+	// Inspection-only: read the cached config directly to avoid
+	// triggering the user-provided callback as a side effect.
+	if cfg := r.config.Load(); cfg != nil {
 		args = append(args, "listening: "+cfg.ListenAddr)
 	}
 	if len(args) == 0 {
@@ -413,12 +412,11 @@ func (r *Runner) setConfig(config *Config) {
 // with the underlying error; on a nil-from-callback the returned error is
 // ErrConfigCallbackNil.
 //
-// Callers that must NOT trigger the callback (shutdown paths, where invoking
-// caller code while tearing the runner down is unsafe) should call
-// r.config.Load() directly and treat nil as "no config available." Display
-// helpers (String) intentionally still use getConfig so callers calling them
-// before Run() see a populated view; the callback runs at most once per
-// nil-window per the double-checked locking above.
+// Callers that must NOT trigger the callback as a side effect (inspection
+// helpers like String, shutdown paths where invoking caller code is unsafe)
+// should call r.config.Load() directly and treat nil as "no config
+// available." Reserve getConfig for live paths that legitimately need to
+// load configuration on demand (NewRunner, boot).
 func (r *Runner) getConfig() (*Config, error) {
 	if config := r.config.Load(); config != nil {
 		return config, nil

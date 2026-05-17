@@ -43,11 +43,10 @@ func (r *Runner[T]) GetChildStates() map[string]string {
 	// does not modify any internal state
 
 	states := make(map[string]string)
-	cfg, err := r.getConfig()
-	if err != nil {
-		r.logger.Debug("GetChildStates: config unavailable", "error", err)
-		return states
-	}
+	// Inspection helper: read the cached config directly and avoid
+	// triggering the user-provided callback as a side effect. If no
+	// config has been loaded yet, return an empty map.
+	cfg := r.currentConfig.Load()
 	if cfg == nil {
 		return states
 	}

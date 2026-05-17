@@ -39,6 +39,11 @@ func TestCompositeRunner_GetChildStates(t *testing.T) {
 	// Create runner with the supervisor.Runnable interface type
 	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
+	// Pre-load config: GetChildStates is inspection-only and won't
+	// trigger the callback. Live callers see this via Run; tests do
+	// it explicitly.
+	_, err = runner.getConfig()
+	require.NoError(t, err)
 
 	// Get child states
 	states := runner.GetChildStates()
@@ -195,6 +200,11 @@ func TestGetChildStates_WithStateables(t *testing.T) {
 	// Create runner
 	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
+	// Pre-load config: GetChildStates is inspection-only and won't
+	// trigger the callback. Live callers see this via Run; tests do
+	// it explicitly.
+	_, err = runner.getConfig()
+	require.NoError(t, err)
 
 	// Call GetChildStates
 	states := runner.GetChildStates()
@@ -233,6 +243,11 @@ func TestCompositeRunner_GetStringWithConfig(t *testing.T) {
 
 	// Create runner
 	runner, err := NewRunner(configCallback)
+	require.NoError(t, err)
+	// Pre-load config: String is inspection-only and won't trigger
+	// the callback. Live callers see this via Run; tests do it
+	// explicitly.
+	_, err = runner.getConfig()
 	require.NoError(t, err)
 
 	// Get string representation
