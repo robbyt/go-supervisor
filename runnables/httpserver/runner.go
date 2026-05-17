@@ -51,6 +51,7 @@ type Runner struct {
 	mutex          sync.RWMutex
 	name           string
 	config         atomic.Pointer[Config]
+	configMu       sync.Mutex
 	configCallback ConfigCallback
 
 	reloadCh chan *reloadReq
@@ -393,10 +394,25 @@ func (r *Runner) setConfig(config *Config) {
 	r.logger.Debug("Config updated", "config", config)
 }
 
-// getConfig returns the current configuration, loading it via callback if not set.
+// getConfig returns the current configuration, loading it via callback if not
+// set. The hot path is an atomic load with no synchronization; the cold path
+// (config currently nil) uses double-checked locking on configMu to serialize
+// callback execution, so concurrent callers cannot all invoke the callback in
+// parallel and orphan each other's Config. The callback may still run more
+// than once across calls — if it returns an error or nil, r.config stays
+// nil and the next caller retries (serialized, not concurrent). Mirrors
+// composite.Runner.getConfig.
 func (r *Runner) getConfig() *Config {
-	config := r.config.Load()
-	if config != nil {
+	if config := r.config.Load(); config != nil {
+		return config
+	}
+
+	r.configMu.Lock()
+	defer r.configMu.Unlock()
+
+	// Recheck under the lock: another caller that won the race has
+	// already populated config while we were blocked.
+	if config := r.config.Load(); config != nil {
 		return config
 	}
 
