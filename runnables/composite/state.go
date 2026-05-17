@@ -43,7 +43,11 @@ func (r *Runner[T]) GetChildStates() map[string]string {
 	// does not modify any internal state
 
 	states := make(map[string]string)
-	cfg := r.getConfig()
+	cfg, err := r.getConfig()
+	if err != nil {
+		r.logger.Debug("GetChildStates: config unavailable", "error", err)
+		return states
+	}
 	if cfg == nil {
 		return states
 	}

@@ -197,7 +197,9 @@ func TestGetConfig_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range goroutines {
 		wg.Go(func() {
-			configs[i] = runner.getConfig()
+			cfg, err := runner.getConfig()
+			assert.NoError(t, err)
+			configs[i] = cfg
 		})
 	}
 	wg.Wait()
@@ -261,7 +263,9 @@ func TestGetConfig_SerializesCallback(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range goroutines {
 		wg.Go(func() {
-			configs[i] = runner.getConfig()
+			cfg, err := runner.getConfig()
+			assert.NoError(t, err)
+			configs[i] = cfg
 		})
 	}
 	wg.Wait()

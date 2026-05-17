@@ -54,7 +54,7 @@ func (r *Runner) Reload(ctx context.Context) error {
 		r.setStateError()
 		return errors.New("config callback returned nil")
 	}
-	if old := r.getConfig(); old != nil && newCfg.Equal(old) {
+	if old := r.config.Load(); old != nil && newCfg.Equal(old) {
 		logger.Debug("Config unchanged, skipping reload")
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)

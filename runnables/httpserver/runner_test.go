@@ -58,7 +58,8 @@ func TestCustomServerCreator(t *testing.T) {
 
 	// We can't use boot() directly because it would start the server and wait for it to be ready
 	// Instead, we'll just create the server and set it directly
-	cfg := runner.getConfig()
+	cfg, err := runner.getConfig()
+	require.NoError(t, err)
 	require.NotNil(t, cfg, "Config should not be nil")
 	require.NotNil(t, cfg.ServerCreator, "ServerCreator should not be nil")
 
@@ -459,7 +460,9 @@ func TestHandleReloadSetsErrorWhenExecuteReloadFails(t *testing.T) {
 	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
 	require.Error(t, server.handleReload(t.Context(), updatedCfg))
 	stateMachine.AssertExpectations(t)
-	assert.Same(t, updatedCfg, server.getConfig())
+	got, err := server.getConfig()
+	require.NoError(t, err)
+	assert.Same(t, updatedCfg, got)
 }
 
 func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
@@ -491,7 +494,9 @@ func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
 
 	oldServer.AssertExpectations(t)
 	stateMachine.AssertExpectations(t)
-	assert.Same(t, updatedCfg, server.getConfig())
+	got, err := server.getConfig()
+	require.NoError(t, err)
+	assert.Same(t, updatedCfg, got)
 }
 
 // TestHandleReload_CtxCancelDoesNotForceError covers the Copilot review catch

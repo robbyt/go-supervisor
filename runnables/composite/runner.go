@@ -112,8 +112,15 @@ func NewRunner[T runnable](
 }
 
 // String returns a string representation of the CompositeRunner instance.
+// Lazily triggers the config callback so callers calling String() before
+// Run() get the configured runner's name. Errors are logged and treated as
+// "no config" for display purposes.
 func (r *Runner[T]) String() string {
-	cfg := r.getConfig()
+	cfg, err := r.getConfig()
+	if err != nil {
+		r.logger.Debug("String: config unavailable", "error", err)
+		return "CompositeRunner<nil>"
+	}
 	if cfg == nil {
 		return "CompositeRunner<nil>"
 	}
@@ -224,13 +231,15 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 // transition fails the runner is already terminal and we accept whatever
 // state it's in. The cancellation error still propagates to the caller.
 func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
-	oldConfig := r.getConfig()
-	if oldConfig == nil {
+	oldConfig, err := r.getConfig()
+	if err != nil {
+		r.logger.Warn("Failed to load current config during reload, treating as empty", "error", err)
+		oldConfig = &Config[T]{}
+	} else if oldConfig == nil {
 		r.logger.Warn("No current config during reload, treating as empty")
 		oldConfig = &Config[T]{}
 	}
 
-	var err error
 	if hasMembershipChanged(oldConfig, cfg) {
 		err = r.reloadWithRestart(ctx, cfg)
 	} else {
@@ -301,7 +310,10 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
-	cfg := r.getConfig()
+	cfg, err := r.getConfig()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrConfigMissing, err)
+	}
 	if cfg == nil {
 		return fmt.Errorf("%w: configuration is unavailable", ErrConfigMissing)
 	}
@@ -379,7 +391,10 @@ func (r *Runner[T]) stopAllRunnables() error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
-	cfg := r.getConfig()
+	// Read the cached config directly: this is a shutdown path and has
+	// no business triggering the callback. If no config has ever loaded
+	// there's nothing to stop, which is itself a configuration failure.
+	cfg := r.currentConfig.Load()
 	if cfg == nil {
 		return ErrConfigMissing
 	}
@@ -421,35 +436,40 @@ func (r *Runner[T]) setConfig(config *Config[T]) {
 	r.logger.Debug("Config updated", "config", config)
 }
 
-// getConfig returns the current configuration, loading it via the callback if necessary.
-func (r *Runner[T]) getConfig() *Config[T] {
-	// First try to get config without locking
-	config := r.currentConfig.Load()
-	if config != nil {
-		return config
+// getConfig returns the current configuration, loading it via the callback
+// if necessary. The hot path is an atomic load with no synchronization; the
+// cold path (config currently nil) uses double-checked locking on configMu
+// to serialize callback execution, so concurrent callers cannot all invoke
+// the callback in parallel and orphan each other's Config.
+//
+// On callback failure the returned error wraps ErrConfigCallback together
+// with the underlying error; on a nil-from-callback the returned error is
+// ErrConfigCallbackNil. Callers that only want the cached value (display
+// paths, opportunistic reads) should call r.currentConfig.Load() directly
+// to avoid triggering the callback at all.
+func (r *Runner[T]) getConfig() (*Config[T], error) {
+	if config := r.currentConfig.Load(); config != nil {
+		return config, nil
 	}
 
-	// Need to load config, acquire write lock
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
 
-	// Check again after acquiring lock (double-checked locking pattern)
+	// Recheck under the lock: another caller that won the race has
+	// already populated config while we were blocked.
 	if config := r.currentConfig.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.logger.Debug("Loading new config via callback")
 	newConfig, err := r.configCallback()
 	if err != nil {
-		r.logger.Error("Failed to load config", "error", err)
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
-
 	if newConfig == nil {
-		r.logger.Error("Config callback returned nil")
-		return nil
+		return nil, ErrConfigCallbackNil
 	}
 
 	r.setConfig(newConfig)
-	return newConfig
+	return newConfig, nil
 }

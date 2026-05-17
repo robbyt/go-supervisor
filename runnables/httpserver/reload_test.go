@@ -186,7 +186,9 @@ func TestReloadSkipsUnchangedConfigWithSynctest(t *testing.T) {
 			t.Fatal("unchanged reload should not dispatch to the Run event loop")
 		default:
 		}
-		assert.Same(t, cfg, runner.getConfig())
+		got, err := runner.getConfig()
+		require.NoError(t, err)
+		assert.Same(t, cfg, got)
 	})
 }
 
@@ -243,7 +245,9 @@ func TestReloadDispatchesChangedConfigWithSynctest(t *testing.T) {
 		default:
 			t.Fatal("Reload should return once the accepted request is completed")
 		}
-		assert.Same(t, initialCfg, runner.getConfig(),
+		got, err := runner.getConfig()
+		require.NoError(t, err)
+		assert.Same(t, initialCfg, got,
 			"Reload should not mutate config until the event loop executes the restart")
 	})
 }
@@ -339,7 +343,9 @@ func TestReloadCallerContextCanceledBeforeDispatchWithSynctest(t *testing.T) {
 			t.Fatal("pre-canceled caller context should prevent reload dispatch")
 		default:
 		}
-		assert.Same(t, initialCfg, runner.getConfig())
+		got, err := runner.getConfig()
+		require.NoError(t, err)
+		assert.Same(t, initialCfg, got)
 	})
 }
 
@@ -407,7 +413,9 @@ func TestReloadStopsBeforeDispatchWithSynctest(t *testing.T) {
 			t.Fatal("reload should not dispatch when no Run loop is active")
 		default:
 		}
-		assert.Same(t, initialCfg, runner.getConfig())
+		got, err := runner.getConfig()
+		require.NoError(t, err)
+		assert.Same(t, initialCfg, got)
 	})
 }
 
@@ -467,7 +475,9 @@ func TestReloadCallerContextCanceledWhileWaitingToDispatchWithSynctest(t *testin
 		default:
 			t.Fatal("existing buffered reload request should remain queued")
 		}
-		assert.Same(t, initialCfg, runner.getConfig())
+		got, err := runner.getConfig()
+		require.NoError(t, err)
+		assert.Same(t, initialCfg, got)
 	})
 }
 
@@ -584,7 +594,9 @@ func TestExecuteReloadStopsExistingServerWithMock(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrServerBoot)
 	oldServer.AssertExpectations(t)
-	assert.Same(t, updatedCfg, runner.getConfig())
+	got, err := runner.getConfig()
+	require.NoError(t, err)
+	assert.Same(t, updatedCfg, got)
 }
 
 func TestExecuteReloadLogsFailureInsteadOfCompletion(t *testing.T) {
@@ -809,7 +821,8 @@ func TestReload(t *testing.T) {
 		assert.Equal(t, finitestate.StatusNew, server.GetState(), "Initial state should be New")
 
 		// Capture server config before reload
-		configBefore := server.getConfig()
+		configBefore, err := server.getConfig()
+		require.NoError(t, err)
 
 		// Call Reload - should fail because transition to Reloading isn't valid from New state
 		require.NoError(t, server.Reload(t.Context()))
@@ -818,7 +831,8 @@ func TestReload(t *testing.T) {
 		assert.Equal(t, finitestate.StatusNew, server.GetState(), "State should remain New")
 
 		// Verify config didn't change
-		configAfter := server.getConfig()
+		configAfter, err := server.getConfig()
+		require.NoError(t, err)
 		assert.Same(t, configBefore, configAfter, "Config should remain unchanged")
 	})
 
@@ -833,7 +847,8 @@ func TestReload(t *testing.T) {
 		server, initialPort := createTestServer(t, initialHandler, "/", 1*time.Second)
 
 		// Verify the initial configuration is stored
-		initialCfg := server.getConfig()
+		initialCfg, err := server.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, initialCfg)
 		require.Equal(t, initialPort, initialCfg.ListenAddr)
 
@@ -884,7 +899,8 @@ func TestReload(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond)
 
 		// Verify the config was updated
-		actualCfg := server.getConfig()
+		actualCfg, err := server.getConfig()
+		require.NoError(t, err)
 		require.Equal(t, updatedPort, actualCfg.ListenAddr)
 		require.Equal(t, 2*time.Second, actualCfg.DrainTimeout)
 		require.Len(t, actualCfg.Routes, 1)
@@ -913,14 +929,16 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 
 		// Store the initial config
-		initialConfig := server.getConfig()
+		initialConfig, err := server.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, initialConfig)
 
 		// Call Reload which should reload config
 		require.NoError(t, server.Reload(t.Context()))
 
 		// Verify the config was loaded (this doesn't test nil case, but ensures reload works)
-		cfg := server.getConfig()
+		cfg, err := server.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, cfg)
 		require.Same(t, config, cfg, "Config should be the one from callback")
 	})

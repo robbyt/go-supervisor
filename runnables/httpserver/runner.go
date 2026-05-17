@@ -111,8 +111,8 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	r.fsm = machine
 
 	// Load initial config
-	if cfg := r.getConfig(); cfg == nil {
-		return nil, fmt.Errorf("%w: initial configuration", ErrConfigCallback)
+	if _, err := r.getConfig(); err != nil {
+		return nil, fmt.Errorf("initial configuration: %w", err)
 	}
 
 	return r, nil
@@ -127,7 +127,10 @@ func (r *Runner) String() string {
 	if r.name != "" {
 		args = append(args, "name: "+r.name)
 	}
-	if cfg := r.getConfig(); cfg != nil {
+	cfg, err := r.getConfig()
+	if err != nil {
+		r.logger.Debug("String: config unavailable", "error", err)
+	} else if cfg != nil {
 		args = append(args, "listening: "+cfg.ListenAddr)
 	}
 	if len(args) == 0 {
@@ -319,7 +322,10 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 }
 
 func (r *Runner) boot(ctx context.Context) error {
-	originalCfg := r.getConfig()
+	originalCfg, err := r.getConfig()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRetrieveConfig, err)
+	}
 	if originalCfg == nil {
 		return ErrRetrieveConfig
 	}
@@ -402,9 +408,15 @@ func (r *Runner) setConfig(config *Config) {
 // than once across calls — if it returns an error or nil, r.config stays
 // nil and the next caller retries (serialized, not concurrent). Mirrors
 // composite.Runner.getConfig.
-func (r *Runner) getConfig() *Config {
+//
+// On callback failure the returned error wraps ErrConfigCallback together
+// with the underlying error; on a nil-from-callback the returned error is
+// ErrConfigCallbackNil. Callers that only want the cached value (display
+// paths, opportunistic reads) should call r.config.Load() directly to avoid
+// triggering the callback at all.
+func (r *Runner) getConfig() (*Config, error) {
 	if config := r.config.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.configMu.Lock()
@@ -413,23 +425,20 @@ func (r *Runner) getConfig() *Config {
 	// Recheck under the lock: another caller that won the race has
 	// already populated config while we were blocked.
 	if config := r.config.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.logger.Debug("Loading new config via callback")
 	newConfig, err := r.configCallback()
 	if err != nil {
-		r.logger.Error("Failed to load config", "error", err)
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
-
 	if newConfig == nil {
-		r.logger.Error("Config callback returned nil")
-		return nil
+		return nil, ErrConfigCallbackNil
 	}
 
 	r.setConfig(newConfig)
-	return newConfig
+	return newConfig, nil
 }
 
 // stopServer invokes http.Server.Shutdown with a timeout of
@@ -457,7 +466,10 @@ func (r *Runner) stopServer(ctx context.Context) error {
 		}
 		r.logger.Debug("Stopping HTTP server")
 
-		cfg := r.getConfig()
+		// Read the cached config directly: this is a shutdown path and
+		// has no business triggering the callback. Falls back to a sane
+		// default if no config has ever been loaded.
+		cfg := r.config.Load()
 		drainTimeout := 5 * time.Second
 		if cfg != nil {
 			drainTimeout = cfg.DrainTimeout

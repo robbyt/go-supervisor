@@ -202,7 +202,8 @@ func TestCompositeRunner_Reload(t *testing.T) {
 			require.NoError(t, runner.Reload(t.Context()))
 			synctest.Wait()
 
-			config := runner.getConfig()
+			config, err := runner.getConfig()
+			require.NoError(t, err)
 			require.NotNil(t, config)
 			assert.Len(t, config.Entries, 2)
 			assert.Equal(t, mockRunnable1, config.Entries[0].Runnable)
@@ -293,7 +294,8 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 1, callbackCalls)
 
 		// Verify original config
-		config := runner.getConfig()
+		config, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, config)
 		assert.Equal(
 			t,
@@ -322,7 +324,8 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 2, callbackCalls, "Reload should call config callback again")
 
 		// Verify updated config
-		config = runner.getConfig()
+		config, err = runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, config)
 		assert.Equal(
 			t,
@@ -492,7 +495,8 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 1, callbackCalls)
 
 		// Verify initial config is properly set
-		config := runner.getConfig()
+		config, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, config)
 		assert.Equal(
 			t,
@@ -520,7 +524,8 @@ func TestCompositeRunner_Reload(t *testing.T) {
 		assert.Equal(t, 2, callbackCalls, "Config callback should be called again during reload")
 
 		// Verify updated config
-		updatedConfig := runner.getConfig()
+		updatedConfig, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, updatedConfig)
 		assert.Equal(
 			t,
@@ -677,15 +682,17 @@ func TestGetConfig_NilCase(t *testing.T) {
 		// Clear the config cache
 		runner.currentConfig.Store(nil)
 
-		// Get config should return nil
-		config := runner.getConfig()
+		// Get config should return ErrConfigCallbackNil and a nil config
+		config, err := runner.getConfig()
 		assert.Nil(t, config)
+		require.ErrorIs(t, err, ErrConfigCallbackNil)
 	})
 
 	t.Run("callback returns error", func(t *testing.T) {
 		// Create callback that returns an error
+		callerSentinel := errors.New("config error")
 		configCallback := func() (*Config[*mocks.Runnable], error) {
-			return nil, errors.New("config error")
+			return nil, callerSentinel
 		}
 
 		// Create runner
@@ -695,9 +702,13 @@ func TestGetConfig_NilCase(t *testing.T) {
 		// Clear the config cache
 		runner.currentConfig.Store(nil)
 
-		// Get config should return nil on error
-		config := runner.getConfig()
+		// Get config should return a wrapped error and a nil config.
+		// Both the package sentinel and the caller's sentinel must be
+		// reachable via errors.Is.
+		config, err := runner.getConfig()
 		assert.Nil(t, config)
+		require.ErrorIs(t, err, ErrConfigCallback)
+		require.ErrorIs(t, err, callerSentinel)
 	})
 }
 
@@ -1169,7 +1180,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		require.NoError(t, err)
 
 		// Make sure initial config is loaded
-		initialConfigLoaded := runner.getConfig()
+		initialConfigLoaded, err := runner.getConfig()
+		require.NoError(t, err)
 		assert.NotNil(t, initialConfigLoaded)
 		assert.Len(t, initialConfigLoaded.Entries, 2)
 
@@ -1177,7 +1189,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify config was updated
-		updatedConfig := runner.getConfig()
+		updatedConfig, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, updatedConfig)
 		assert.Len(t, updatedConfig.Entries, 2)
 		assert.Equal(t, mockRunnable3, updatedConfig.Entries[0].Runnable)
@@ -1261,7 +1274,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		}, 1*time.Second, 10*time.Millisecond, "Runner should transition to Running state")
 
 		// Verify we're running with empty entries
-		initialConfig := runner.getConfig()
+		initialConfig, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, initialConfig)
 		assert.Empty(t, initialConfig.Entries, "Initial config should have empty entries")
 
@@ -1274,7 +1288,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		}, 1*time.Second, 10*time.Millisecond, "Runner should transition to Running state")
 
 		// Verify the config was updated with the new runnable
-		updatedConfig := runner.getConfig()
+		updatedConfig, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, updatedConfig)
 		require.Len(t, updatedConfig.Entries, 1, "Updated config should have 1 entry")
 		assert.Same(t, mockRunnable, updatedConfig.Entries[0].Runnable)
@@ -1322,7 +1337,8 @@ func TestReloadMembershipChanged(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify config was updated
-		updatedConfig := runner.getConfig()
+		updatedConfig, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, updatedConfig)
 		assert.Empty(t, updatedConfig.Entries, "Config should have empty entries")
 	})
@@ -1484,7 +1500,8 @@ func TestHasMembershipChanged(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond, "Runner should reach StatusRunning")
 
 		// Verify initial config loaded
-		config := runner.getConfig()
+		config, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, config)
 		assert.Len(t, config.Entries, 2)
 		assert.Equal(t, mockRunnable1, config.Entries[0].Runnable)
@@ -1500,7 +1517,8 @@ func TestHasMembershipChanged(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond, "Runner should return to Running state")
 
 		// Verify updated config contains only the new runnables
-		config = runner.getConfig()
+		config, err = runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, config)
 		assert.Len(t, config.Entries, 2)
 		assert.Equal(t, mockRunnable3, config.Entries[0].Runnable)
@@ -1735,7 +1753,8 @@ func TestCompositeRunner_PreCancelledReloadCtx(t *testing.T) {
 	go func() { runErr <- runner.Run(runCtx) }()
 	require.Eventually(t, runner.IsReady, 2*time.Second, 10*time.Millisecond)
 
-	originalCfg := runner.getConfig()
+	originalCfg, err := runner.getConfig()
+	require.NoError(t, err)
 	useSwapped.Store(true)
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
@@ -1748,7 +1767,9 @@ func TestCompositeRunner_PreCancelledReloadCtx(t *testing.T) {
 	require.Equal(t, finitestate.StatusRunning, runner.GetState(),
 		"FSM must not be in Error after cancelled reload")
 	mockChild.AssertNotCalled(t, "Stop")
-	require.Same(t, originalCfg, runner.getConfig(),
+	currentCfg, err := runner.getConfig()
+	require.NoError(t, err)
+	require.Same(t, originalCfg, currentCfg,
 		"config must not have been swapped for a cancelled reload")
 	altChild.AssertNotCalled(t, "Run")
 
