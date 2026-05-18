@@ -47,14 +47,14 @@ func (r *Runner) Reload(ctx context.Context) error {
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
 		r.setStateError()
-		return fmt.Errorf("config callback failed: %w", err)
+		return fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
 	if newCfg == nil {
 		logger.Error("config callback returned nil")
 		r.setStateError()
-		return errors.New("config callback returned nil")
+		return ErrConfigCallbackNil
 	}
-	if old := r.getConfig(); old != nil && newCfg.Equal(old) {
+	if old := r.config.Load(); old != nil && newCfg.Equal(old) {
 		logger.Debug("Config unchanged, skipping reload")
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
@@ -74,7 +74,7 @@ func (r *Runner) Reload(ctx context.Context) error {
 		case <-ctx.Done():
 			dispatchErr = ctx.Err()
 		case <-r.lc.DoneCh():
-			dispatchErr = errors.New("runner stopped before reload dispatch")
+			dispatchErr = ErrReloadAbandoned
 		}
 		if err := r.fsm.Transition(finitestate.StatusRunning); err != nil {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
@@ -108,7 +108,7 @@ func (r *Runner) Reload(ctx context.Context) error {
 			logger.Error("Failed to transition from Reloading to Running", "error", err)
 			r.setStateError()
 		}
-		return errors.New("runner stopped before reload dispatch")
+		return ErrReloadAbandoned
 	}
 }
 

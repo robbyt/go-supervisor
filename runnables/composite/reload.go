@@ -76,12 +76,12 @@ func (r *Runner[T]) Reload(ctx context.Context) error {
 	if err != nil {
 		logger.Error("config callback failed", "error", err)
 		r.setStateError()
-		return fmt.Errorf("config callback failed: %w", err)
+		return fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
 	if newConfig == nil {
 		logger.Error("config callback returned nil")
 		r.setStateError()
-		return errors.New("config callback returned nil")
+		return ErrConfigCallbackNil
 	}
 
 	return r.dispatchReload(ctx, newConfig)
@@ -111,7 +111,7 @@ func (r *Runner[T]) dispatchReload(ctx context.Context, newConfig *Config[T]) er
 		return ctx.Err()
 	case <-r.lc.DoneCh():
 		r.abortDispatch("Runner stopped before reload dispatch")
-		return errors.New("runner stopped before reload dispatch")
+		return ErrReloadAbandoned
 	}
 }
 

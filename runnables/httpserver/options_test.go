@@ -103,7 +103,8 @@ func TestWithServerCreator(t *testing.T) {
 	)
 	require.NoError(t, err)
 	// Get the config to verify the server creator was set
-	cfg := server.getConfig()
+	cfg, err := server.getConfig()
+	require.NoError(t, err)
 	assert.NotNil(t, cfg.ServerCreator, "Server creator should be set in config")
 	// Call the ServerCreator directly to test it properly
 	mux := http.NewServeMux()

@@ -112,8 +112,11 @@ func NewRunner[T runnable](
 }
 
 // String returns a string representation of the CompositeRunner instance.
+// Inspection-only: reads the cached config directly, so it never triggers
+// the user-provided callback. Returns "CompositeRunner<nil>" if no config
+// has been loaded yet (call Run or Reload first to populate).
 func (r *Runner[T]) String() string {
-	cfg := r.getConfig()
+	cfg := r.currentConfig.Load()
 	if cfg == nil {
 		return "CompositeRunner<nil>"
 	}
@@ -224,9 +227,14 @@ func (r *Runner[T]) waitForEvent(ctx context.Context) error {
 // transition fails the runner is already terminal and we accept whatever
 // state it's in. The cancellation error still propagates to the caller.
 func (r *Runner[T]) handleReload(ctx context.Context, cfg *Config[T]) error {
-	oldConfig := r.getConfig()
+	// Use the cached value directly: the new cfg is already in hand,
+	// and triggering the user-provided callback in the middle of a
+	// reload would be a surprising side effect. If no config has been
+	// loaded yet (cold-start reload), treat membership as empty so the
+	// reload proceeds as a fresh boot.
+	oldConfig := r.currentConfig.Load()
 	if oldConfig == nil {
-		r.logger.Warn("No current config during reload, treating as empty")
+		r.logger.Debug("No cached config during reload, treating as empty")
 		oldConfig = &Config[T]{}
 	}
 
@@ -285,7 +293,7 @@ func (r *Runner[T]) drainReloadCh() {
 			// <-req.result branch returns a non-nil error per T3.1.
 			// Without this, an accepted-then-drained reload would
 			// silently look like success.
-			req.result <- errors.New("runner stopped before reload was handled")
+			req.result <- ErrReloadAbandoned
 		default:
 			return
 		}
@@ -301,10 +309,13 @@ func (r *Runner[T]) boot(ctx context.Context) error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
-	cfg := r.getConfig()
-	if cfg == nil {
-		return fmt.Errorf("%w: configuration is unavailable", ErrConfigMissing)
+	cfg, err := r.getConfig()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrConfigMissing, err)
 	}
+	// cfg is guaranteed non-nil when err == nil per getConfig's
+	// contract — the (nil, nil) return path collapses to
+	// ErrConfigCallbackNil handled above.
 
 	// If there are no entries, log and return without error
 	if len(cfg.Entries) == 0 {
@@ -379,7 +390,10 @@ func (r *Runner[T]) stopAllRunnables() error {
 	r.runnablesMu.Lock()
 	defer r.runnablesMu.Unlock()
 
-	cfg := r.getConfig()
+	// Read the cached config directly: this is a shutdown path and has
+	// no business triggering the callback. If no config has ever loaded
+	// there's nothing to stop, which is itself a configuration failure.
+	cfg := r.currentConfig.Load()
 	if cfg == nil {
 		return ErrConfigMissing
 	}
@@ -421,35 +435,44 @@ func (r *Runner[T]) setConfig(config *Config[T]) {
 	r.logger.Debug("Config updated", "config", config)
 }
 
-// getConfig returns the current configuration, loading it via the callback if necessary.
-func (r *Runner[T]) getConfig() *Config[T] {
-	// First try to get config without locking
-	config := r.currentConfig.Load()
-	if config != nil {
-		return config
+// getConfig returns the current configuration, loading it via the callback
+// if necessary. The hot path is an atomic load with no synchronization; the
+// cold path (config currently nil) uses double-checked locking on configMu
+// to serialize callback execution, so concurrent callers cannot all invoke
+// the callback in parallel and orphan each other's Config.
+//
+// On callback failure the returned error wraps ErrConfigCallback together
+// with the underlying error; on a nil-from-callback the returned error is
+// ErrConfigCallbackNil.
+//
+// Callers that must NOT trigger the callback as a side effect (inspection
+// helpers like String/GetChildStates, shutdown paths where invoking caller
+// code is unsafe) should call r.currentConfig.Load() directly and treat
+// nil as "no config available." Reserve getConfig for live paths that
+// legitimately need to load configuration on demand (boot, handleReload).
+func (r *Runner[T]) getConfig() (*Config[T], error) {
+	if config := r.currentConfig.Load(); config != nil {
+		return config, nil
 	}
 
-	// Need to load config, acquire write lock
 	r.configMu.Lock()
 	defer r.configMu.Unlock()
 
-	// Check again after acquiring lock (double-checked locking pattern)
+	// Recheck under the lock: another caller that won the race has
+	// already populated config while we were blocked.
 	if config := r.currentConfig.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.logger.Debug("Loading new config via callback")
 	newConfig, err := r.configCallback()
 	if err != nil {
-		r.logger.Error("Failed to load config", "error", err)
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
-
 	if newConfig == nil {
-		r.logger.Error("Config callback returned nil")
-		return nil
+		return nil, ErrConfigCallbackNil
 	}
 
 	r.setConfig(newConfig)
-	return newConfig
+	return newConfig, nil
 }

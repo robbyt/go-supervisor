@@ -14,4 +14,18 @@ var (
 
 	// ErrOldConfig is returned when the config hasn't changed during a reload
 	ErrOldConfig = errors.New("configuration unchanged")
+
+	// ErrConfigCallback wraps any error returned by ConfigCallback so callers
+	// can react via errors.Is. The underlying callback error is preserved in
+	// the chain via multi-%w wrapping.
+	ErrConfigCallback = errors.New("failed to load configuration from callback")
+
+	// ErrConfigCallbackNil is returned when ConfigCallback returns (nil, nil).
+	ErrConfigCallbackNil = errors.New("config callback returned nil")
+
+	// ErrReloadAbandoned is returned when a pending reload cannot
+	// complete because the runner stopped first — either before the
+	// reload request was accepted into Run's event loop, or while a
+	// caller was waiting for the accepted request to finish.
+	ErrReloadAbandoned = errors.New("reload abandoned because runner stopped")
 )

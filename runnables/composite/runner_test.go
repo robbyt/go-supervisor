@@ -111,6 +111,11 @@ func TestCompositeRunner_String(t *testing.T) {
 
 	runner, err := NewRunner(configCallback)
 	require.NoError(t, err)
+	// Pre-load config: String() is inspection-only and won't trigger
+	// the callback. Live callers see this via Run; tests do it
+	// explicitly.
+	_, err = runner.getConfig()
+	require.NoError(t, err)
 
 	str := runner.String()
 	assert.Contains(t, str, "CompositeRunner")
@@ -273,7 +278,8 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Run and expect an error immediately
 		err = runner.Run(context.Background())
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "configuration is unavailable")
+		require.ErrorIs(t, err, ErrConfigMissing)
+		require.ErrorIs(t, err, ErrConfigCallbackNil)
 	})
 
 	t.Run("no runnables", func(t *testing.T) {
@@ -305,7 +311,8 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Verify runner is running with no entries
 		assert.Equal(t, finitestate.StatusRunning, runner.GetState())
 
-		cfg := runner.getConfig()
+		cfg, err := runner.getConfig()
+		require.NoError(t, err)
 		require.NotNil(t, cfg)
 		assert.Empty(t, cfg.Entries, "Config should have empty entries")
 
@@ -374,7 +381,8 @@ func TestCompositeRunner_Run(t *testing.T) {
 		}, 500*time.Millisecond, 10*time.Millisecond, "Runner should transition to Running state")
 
 		// Verify initial empty state
-		initialCfg := runner.getConfig() // Store the initial config pointer
+		initialCfg, err := runner.getConfig() // Store the initial config pointer
+		require.NoError(t, err)
 		require.NotNil(t, initialCfg)
 		assert.Empty(t, initialCfg.Entries, "Initial config should have empty entries")
 
@@ -385,7 +393,11 @@ func TestCompositeRunner_Run(t *testing.T) {
 		// Wait for reload to complete by checking if the config pointer has changed
 		var updatedCfg *Config[*mocks.Runnable]
 		assert.Eventually(t, func() bool {
-			updatedCfg = runner.getConfig()
+			cfg, gerr := runner.getConfig()
+			if gerr != nil {
+				return false
+			}
+			updatedCfg = cfg
 			// Condition is met when the config pointer is different from the initial one
 			return updatedCfg != initialCfg
 		}, 200*time.Millisecond, 10*time.Millisecond, "Config should be updated after reload")

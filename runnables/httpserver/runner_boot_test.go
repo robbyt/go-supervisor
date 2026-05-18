@@ -49,7 +49,7 @@ func TestBootFailure(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, runner)
-		require.ErrorIs(t, err, ErrConfigCallback)
+		require.ErrorIs(t, err, ErrConfigCallbackNil)
 	})
 
 	t.Run("Config callback returns error", func(t *testing.T) {
@@ -61,6 +61,23 @@ func TestBootFailure(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, runner)
 		require.ErrorIs(t, err, ErrConfigCallback)
+	})
+
+	t.Run("Config callback error is preserved in the chain", func(t *testing.T) {
+		// A custom sentinel from a hypothetical caller should remain
+		// reachable via errors.Is alongside ErrConfigCallback, so
+		// callers can react to their own error types rather than only
+		// the package sentinel.
+		callerSentinel := errors.New("caller's specific failure")
+		callback := func() (*Config, error) { return nil, callerSentinel }
+		runner, err := NewRunner(
+			WithConfigCallback(callback),
+		)
+
+		require.Error(t, err)
+		assert.Nil(t, runner)
+		require.ErrorIs(t, err, ErrConfigCallback)
+		require.ErrorIs(t, err, callerSentinel)
 	})
 
 	t.Run("Server boot fails with invalid port", func(t *testing.T) {

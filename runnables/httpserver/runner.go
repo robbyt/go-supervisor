@@ -111,8 +111,8 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	r.fsm = machine
 
 	// Load initial config
-	if cfg := r.getConfig(); cfg == nil {
-		return nil, fmt.Errorf("%w: initial configuration", ErrConfigCallback)
+	if _, err := r.getConfig(); err != nil {
+		return nil, fmt.Errorf("initial configuration: %w", err)
 	}
 
 	return r, nil
@@ -127,7 +127,9 @@ func (r *Runner) String() string {
 	if r.name != "" {
 		args = append(args, "name: "+r.name)
 	}
-	if cfg := r.getConfig(); cfg != nil {
+	// Inspection-only: read the cached config directly to avoid
+	// triggering the user-provided callback as a side effect.
+	if cfg := r.config.Load(); cfg != nil {
 		args = append(args, "listening: "+cfg.ListenAddr)
 	}
 	if len(args) == 0 {
@@ -255,7 +257,7 @@ func (r *Runner) drainReloadCh() {
 			// <-req.result branch returns a non-nil error per T3.1.
 			// Without this, an accepted-then-drained reload would
 			// silently look like success.
-			req.result <- errors.New("runner stopped before reload was handled")
+			req.result <- ErrReloadAbandoned
 		default:
 			return
 		}
@@ -319,10 +321,13 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 }
 
 func (r *Runner) boot(ctx context.Context) error {
-	originalCfg := r.getConfig()
-	if originalCfg == nil {
-		return ErrRetrieveConfig
+	originalCfg, err := r.getConfig()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRetrieveConfig, err)
 	}
+	// originalCfg is guaranteed non-nil when err == nil per getConfig's
+	// contract — the (nil, nil) return path collapses to
+	// ErrConfigCallbackNil handled above.
 
 	serverCfg, err := NewConfig(
 		originalCfg.ListenAddr,
@@ -402,9 +407,19 @@ func (r *Runner) setConfig(config *Config) {
 // than once across calls — if it returns an error or nil, r.config stays
 // nil and the next caller retries (serialized, not concurrent). Mirrors
 // composite.Runner.getConfig.
-func (r *Runner) getConfig() *Config {
+//
+// On callback failure the returned error wraps ErrConfigCallback together
+// with the underlying error; on a nil-from-callback the returned error is
+// ErrConfigCallbackNil.
+//
+// Callers that must NOT trigger the callback as a side effect (inspection
+// helpers like String, shutdown paths where invoking caller code is unsafe)
+// should call r.config.Load() directly and treat nil as "no config
+// available." Reserve getConfig for live paths that legitimately need to
+// load configuration on demand (NewRunner, boot).
+func (r *Runner) getConfig() (*Config, error) {
 	if config := r.config.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.configMu.Lock()
@@ -413,23 +428,20 @@ func (r *Runner) getConfig() *Config {
 	// Recheck under the lock: another caller that won the race has
 	// already populated config while we were blocked.
 	if config := r.config.Load(); config != nil {
-		return config
+		return config, nil
 	}
 
 	r.logger.Debug("Loading new config via callback")
 	newConfig, err := r.configCallback()
 	if err != nil {
-		r.logger.Error("Failed to load config", "error", err)
-		return nil
+		return nil, fmt.Errorf("%w: %w", ErrConfigCallback, err)
 	}
-
 	if newConfig == nil {
-		r.logger.Error("Config callback returned nil")
-		return nil
+		return nil, ErrConfigCallbackNil
 	}
 
 	r.setConfig(newConfig)
-	return newConfig
+	return newConfig, nil
 }
 
 // stopServer invokes http.Server.Shutdown with a timeout of
@@ -457,7 +469,10 @@ func (r *Runner) stopServer(ctx context.Context) error {
 		}
 		r.logger.Debug("Stopping HTTP server")
 
-		cfg := r.getConfig()
+		// Read the cached config directly: this is a shutdown path and
+		// has no business triggering the callback. Falls back to a sane
+		// default if no config has ever been loaded.
+		cfg := r.config.Load()
 		drainTimeout := 5 * time.Second
 		if cfg != nil {
 			drainTimeout = cfg.DrainTimeout
