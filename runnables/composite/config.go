@@ -32,13 +32,41 @@ type Config[T runnable] struct {
 	Entries []RunnableEntry[T]
 }
 
-// NewConfig creates a new Config instance for a CompositeRunner
+// isNil reports whether v is nil. Handles three cases that all satisfy
+// the runnable interface constraint:
+//   - true nil interface (no concrete type): reflect.ValueOf returns an
+//     invalid Value.
+//   - typed-nil pointer/interface/etc held in an interface T: the Value
+//     is valid with a nillable Kind and IsNil() == true.
+//   - non-nil pointer or struct-valued T: caught by the default branch.
+func isNil[T runnable](v T) bool {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return true
+	}
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Chan, reflect.Func,
+		reflect.Map, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
+// NewConfig creates a new Config instance for a CompositeRunner. Returns
+// ErrNilRunnable if any entry's Runnable is nil — see ErrNilRunnable's
+// godoc for context.
 func NewConfig[T runnable](
 	name string,
 	entries []RunnableEntry[T],
 ) (*Config[T], error) {
 	if name == "" {
 		return nil, errors.New("name cannot be empty")
+	}
+	for i, entry := range entries {
+		if isNil(entry.Runnable) {
+			return nil, fmt.Errorf("%w: index %d", ErrNilRunnable, i)
+		}
 	}
 
 	return &Config[T]{
@@ -47,28 +75,22 @@ func NewConfig[T runnable](
 	}, nil
 }
 
-// NewConfigFromRunnables creates a Config from a list of runnables, all using the same config
+// NewConfigFromRunnables creates a Config from a list of runnables, all
+// using the same config. Delegates to NewConfig so nil-runnable validation
+// runs in one place.
 func NewConfigFromRunnables[T runnable](
 	name string,
 	runnables []T,
 	sharedConfig any,
 ) (*Config[T], error) {
-	if name == "" {
-		return nil, errors.New("name cannot be empty")
-	}
-
 	entries := make([]RunnableEntry[T], len(runnables))
-	for i, runnable := range runnables {
+	for i, r := range runnables {
 		entries[i] = RunnableEntry[T]{
-			Runnable: runnable,
+			Runnable: r,
 			Config:   sharedConfig,
 		}
 	}
-
-	return &Config[T]{
-		Name:    name,
-		Entries: entries,
-	}, nil
+	return NewConfig(name, entries)
 }
 
 // Equal compares two configs for equality
