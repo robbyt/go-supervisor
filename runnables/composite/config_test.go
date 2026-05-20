@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/robbyt/go-supervisor/internal/mocks"
+	"github.com/robbyt/go-supervisor/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -76,6 +77,78 @@ func TestNewConfigFromRunnables(t *testing.T) {
 	assert.Equal(t, mockRunnable2, cfg.Entries[1].Runnable)
 	assert.Equal(t, sharedConfig, cfg.Entries[0].Config)
 	assert.Equal(t, sharedConfig, cfg.Entries[1].Config)
+}
+
+// TestNewConfig_RejectsNilEntry verifies that a typed-nil pointer in a
+// RunnableEntry is caught at construction time rather than panicking
+// later inside the lifecycle (Equal, boot, stopAll, GetChildStates all
+// call methods on the runnable).
+func TestNewConfig_RejectsNilEntry(t *testing.T) {
+	t.Parallel()
+
+	entries := []RunnableEntry[*mocks.Runnable]{
+		{Runnable: nil, Config: nil},
+	}
+	cfg, err := NewConfig("name", entries)
+	assert.Nil(t, cfg)
+	require.ErrorIs(t, err, ErrNilRunnable)
+	assert.Contains(t, err.Error(), "index 0")
+}
+
+// TestNewConfig_RejectsNilInterfaceEntry verifies the same protection
+// when T is the supervisor.Runnable interface type. An interface holding
+// a nil concrete pointer is itself non-nil (the classic Go gotcha), so
+// the validation must use reflect-based nil-checking to catch both.
+func TestNewConfig_RejectsNilInterfaceEntry(t *testing.T) {
+	t.Parallel()
+
+	entries := []RunnableEntry[supervisor.Runnable]{
+		{Runnable: nil, Config: nil},
+	}
+	cfg, err := NewConfig("name", entries)
+	assert.Nil(t, cfg)
+	require.ErrorIs(t, err, ErrNilRunnable)
+	assert.Contains(t, err.Error(), "index 0")
+}
+
+// TestNewConfig_RejectsTypedNilInInterface verifies the classic Go nil
+// gotcha: an interface value with a non-nil dynamic type but a nil
+// dynamic value. The interface itself satisfies `!= nil`, but every
+// method call on it panics. isNil's reflect.Pointer branch must catch
+// this — guarding against the case the docs explicitly call out.
+func TestNewConfig_RejectsTypedNilInInterface(t *testing.T) {
+	t.Parallel()
+
+	var nilPtr *mocks.Runnable                   // typed nil pointer
+	var asInterface supervisor.Runnable = nilPtr // non-nil interface holding the nil pointer
+	// Go-level `asInterface != nil` is true here (interface has a
+	// type even though the value is nil) — that's the gotcha. Calling
+	// any method on it would panic. testify's NotNil is smart enough
+	// to look through this so we don't bother asserting it.
+
+	entries := []RunnableEntry[supervisor.Runnable]{
+		{Runnable: &mocks.Runnable{}, Config: nil},
+		{Runnable: asInterface, Config: nil},
+	}
+	cfg, err := NewConfig("name", entries)
+	assert.Nil(t, cfg)
+	require.ErrorIs(t, err, ErrNilRunnable)
+	assert.Contains(t, err.Error(), "index 1")
+}
+
+// TestNewConfigFromRunnables_RejectsNilRunnable verifies the validation
+// runs via the delegated NewConfig call. Reports the offending index.
+func TestNewConfigFromRunnables_RejectsNilRunnable(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := NewConfigFromRunnables(
+		"test",
+		[]*mocks.Runnable{{}, nil},
+		nil,
+	)
+	assert.Nil(t, cfg)
+	require.ErrorIs(t, err, ErrNilRunnable)
+	assert.Contains(t, err.Error(), "index 1")
 }
 
 func TestConfig_Equal(t *testing.T) {

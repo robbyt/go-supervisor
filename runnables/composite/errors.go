@@ -28,4 +28,12 @@ var (
 	// reload request was accepted into Run's event loop, or while a
 	// caller was waiting for the accepted request to finish.
 	ErrReloadAbandoned = errors.New("reload abandoned because runner stopped")
+
+	// ErrNilRunnable is returned by NewConfig / NewConfigFromRunnables
+	// when a RunnableEntry's Runnable field is nil. Typically surfaces
+	// from accidentally passing a typed-nil pointer (e.g.,
+	// `var x *MyRunnable` left uninitialized) which satisfies the
+	// interface constraint at compile time but blows up later inside
+	// the lifecycle when any method is called on it.
+	ErrNilRunnable = errors.New("entry has nil runnable")
 )
