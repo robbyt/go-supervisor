@@ -27,9 +27,25 @@ var (
 // ConfigCallback is the function type signature for the callback used to load initial config, and new config during Reload()
 type ConfigCallback func() (*Config, error)
 
-// HttpServer is the interface for the HTTP server
+// HttpServer is the runner's abstraction over the underlying HTTP server.
+// It exposes the subset of net/http.Server's methods the runner needs, so
+// alternative implementations (test doubles, custom server types) can be
+// plugged in via ServerCreator. *net/http.Server satisfies this interface
+// directly; see DefaultServerCreator for the default factory.
 type HttpServer interface {
+	// ListenAndServe binds the configured listen address and serves
+	// HTTP requests until Shutdown is called or a fatal error occurs.
+	// Returns http.ErrServerClosed after a successful Shutdown; any
+	// other non-nil return is treated as a fatal startup or runtime
+	// error and trips the cluster FSM into Error.
 	ListenAndServe() error
+
+	// Shutdown gracefully terminates the server. Stops accepting new
+	// connections immediately, then waits for in-flight requests to
+	// complete or for ctx to be canceled — whichever comes first.
+	// Returns ctx.Err() if the deadline elapses with active requests
+	// still running (those requests continue on connections that
+	// outlive Shutdown); returns nil on clean drain.
 	Shutdown(ctx context.Context) error
 }
 
