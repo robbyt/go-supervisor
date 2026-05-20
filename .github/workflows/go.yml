@@ -50,7 +50,7 @@ jobs:
           github.com/robbyt/go-supervisor/supervisor/...
 
       - name: Build examples
-        run: cd examples/http && go build .
+        run: go build ./examples/...
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v8
