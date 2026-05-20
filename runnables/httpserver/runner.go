@@ -375,8 +375,14 @@ func (r *Runner) boot(ctx context.Context) error {
 
 	// Initialize server instance. The fresh *serverInstance carries
 	// its own sync.Once for shutdown, so we don't need to reset
-	// anything from a prior boot.
-	inst := &serverInstance{server: serverCfg.createServer()}
+	// anything from a prior boot. A misbehaving ServerCreator that
+	// returns nil is caught here rather than panicking later in
+	// ListenAndServe or Shutdown.
+	serverImpl := serverCfg.createServer()
+	if serverImpl == nil {
+		return fmt.Errorf("%w: server creator returned nil", ErrServerBoot)
+	}
+	inst := &serverInstance{server: serverImpl}
 	r.instance.Store(inst)
 
 	r.logger.Debug("Starting HTTP server",
@@ -486,7 +492,11 @@ func (r *Runner) getConfig() (*Config, error) {
 // fresh instance brings a fresh gate.
 func (r *Runner) stopServer(ctx context.Context) error {
 	inst := r.instance.Load()
-	if inst == nil {
+	// Treat a nil-server instance the same as a missing instance — the
+	// boot path validates the ServerCreator's return value, but this
+	// guard keeps the shutdown path safe against any future caller
+	// that stores a partially-constructed *serverInstance.
+	if inst == nil || inst.server == nil {
 		return ErrServerNotRunning
 	}
 

@@ -389,6 +389,61 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	assert.Equal(t, 1, calls, "Second server should be shut down once")
 }
 
+// TestStopServer_NilServerInstance verifies the defensive nil-server
+// guard in stopServer: if a partially-constructed *serverInstance ever
+// reaches r.instance (the boot path validates ServerCreator's return,
+// but this branch protects future callers and tests), stopServer
+// returns ErrServerNotRunning instead of panicking on inst.server.Shutdown.
+func TestStopServer_NilServerInstance(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(port, Routes{*route})
+	}
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// Install a serverInstance whose server is nil (the scenario the
+	// guard protects against).
+	runner.instance.Store(&serverInstance{server: nil})
+
+	err = runner.stopServer(context.Background())
+	require.ErrorIs(t, err, ErrServerNotRunning,
+		"nil-server instance must surface as ErrServerNotRunning, not panic")
+}
+
+// TestBoot_NilFromServerCreator verifies that a custom ServerCreator
+// that returns a nil HttpServer causes boot to fail fast with
+// ErrServerBoot rather than installing a broken instance and
+// panicking later inside ListenAndServe.
+func TestBoot_NilFromServerCreator(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	nilCreator := func(addr string, h http.Handler, cfg *Config) HttpServer {
+		return nil
+	}
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(port, Routes{*route}, WithServerCreator(nilCreator))
+	}
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	bootErr := runner.boot(context.Background())
+	require.Error(t, bootErr)
+	require.ErrorIs(t, bootErr, ErrServerBoot)
+	assert.Contains(t, bootErr.Error(), "server creator returned nil")
+	assert.Nil(t, runner.instance.Load(),
+		"boot must not install a broken instance when ServerCreator returns nil")
+}
+
 // TestRun_ShutdownDeadlineExceeded tests shutdown behavior when a handler exceeds the drain timeout
 func TestRun_ShutdownDeadlineExceeded(t *testing.T) {
 	if testing.Short() {
