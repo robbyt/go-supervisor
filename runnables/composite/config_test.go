@@ -118,7 +118,7 @@ func TestNewConfigFromRunnables_RejectsNilRunnable(t *testing.T) {
 
 	cfg, err := NewConfigFromRunnables(
 		"test",
-		[]*mocks.Runnable{&mocks.Runnable{}, nil},
+		[]*mocks.Runnable{{}, nil},
 		nil,
 	)
 	assert.Nil(t, cfg)

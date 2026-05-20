@@ -45,7 +45,7 @@ func isNil[T runnable](v T) bool {
 		return true
 	}
 	switch rv.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Chan, reflect.Func,
+	case reflect.Pointer, reflect.Interface, reflect.Chan, reflect.Func,
 		reflect.Map, reflect.Slice:
 		return rv.IsNil()
 	default:
