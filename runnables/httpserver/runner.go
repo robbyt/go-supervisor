@@ -75,12 +75,26 @@ type Runner struct {
 
 	reloadCh chan *reloadReq
 
-	server          HttpServer
-	serverCloseOnce sync.Once
-	serverMutex     sync.RWMutex
-	serverErrors    chan error
+	// instance holds the live HttpServer alongside its one-shot
+	// shutdown gate. Each boot creates a fresh *serverInstance and
+	// installs it via atomic Store; stopServer reads it via atomic
+	// Load and clears it via CompareAndSwap on completion. The
+	// sync.Once is bound to the specific server it shipped with, so
+	// there is no "reset between boots" pattern — see serverInstance.
+	instance     atomic.Pointer[serverInstance]
+	serverErrors chan error
 
 	logger *slog.Logger
+}
+
+// serverInstance bundles an HttpServer with its one-shot shutdown gate.
+// Each boot constructs a fresh instance; the closeOnce is bound to this
+// specific server, so a subsequent boot's instance carries a fresh
+// sync.Once instead of reassigning one — eliminating the "reset
+// sync.Once between operations" pattern flagged in the audit.
+type serverInstance struct {
+	server    HttpServer
+	closeOnce sync.Once
 }
 
 // reloadReq carries an accepted reload from Reload(ctx) into Run's event loop
@@ -102,13 +116,12 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	logger := slog.Default().WithGroup("httpserver.Runner")
 
 	r := &Runner{
-		lc:              lifecycle.New(),
-		name:            "",
-		config:          atomic.Pointer[Config]{},
-		serverCloseOnce: sync.Once{},
-		serverErrors:    make(chan error, 1),
-		reloadCh:        make(chan *reloadReq, 1),
-		logger:          logger,
+		lc:           lifecycle.New(),
+		name:         "",
+		config:       atomic.Pointer[Config]{},
+		serverErrors: make(chan error, 1),
+		reloadCh:     make(chan *reloadReq, 1),
+		logger:       logger,
 	}
 
 	// Apply options
@@ -360,11 +373,17 @@ func (r *Runner) boot(ctx context.Context) error {
 
 	listenAddr := serverCfg.ListenAddr
 
-	// Initialize server instance and reset shutdown guard
-	r.serverMutex.Lock()
-	r.server = serverCfg.createServer()
-	r.serverCloseOnce = sync.Once{}
-	r.serverMutex.Unlock()
+	// Initialize server instance. The fresh *serverInstance carries
+	// its own sync.Once for shutdown, so we don't need to reset
+	// anything from a prior boot. A misbehaving ServerCreator that
+	// returns nil is caught here rather than panicking later in
+	// ListenAndServe or Shutdown.
+	serverImpl := serverCfg.createServer()
+	if serverImpl == nil {
+		return fmt.Errorf("%w: server creator returned nil", ErrServerBoot)
+	}
+	inst := &serverInstance{server: serverImpl}
+	r.instance.Store(inst)
 
 	r.logger.Debug("Starting HTTP server",
 		"listenOn", listenAddr,
@@ -373,18 +392,11 @@ func (r *Runner) boot(ctx context.Context) error {
 		"idleTimeout", serverCfg.IdleTimeout,
 		"drainTimeout", serverCfg.DrainTimeout)
 
-	// Start HTTP server in background goroutine
+	// Start HTTP server in background goroutine. The local `inst`
+	// captured here is the same pointer we just stored — a later boot
+	// can install a new instance without disturbing this goroutine.
 	go func() {
-		r.serverMutex.RLock()
-		server := r.server
-		r.serverMutex.RUnlock()
-
-		if server == nil {
-			r.logger.Debug("Server was nil, not starting")
-			return
-		}
-
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := inst.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			r.serverErrors <- err
 		}
 		r.logger.Debug("HTTP server stopped", "listenOn", listenAddr)
@@ -398,13 +410,13 @@ func (r *Runner) boot(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", ErrServerBoot, err)
 	}
 
-	// Retrieve actual listening address for port 0 assignments
+	// Retrieve actual listening address for port 0 assignments.
+	// Reuse the local `inst` captured at boot — it's still the live
+	// instance because boot serializes with stopServer via r.mutex.
 	actualAddr := listenAddr
-	r.serverMutex.RLock()
-	if tcpAddr, ok := r.server.(interface{ Addr() net.Addr }); ok && tcpAddr.Addr() != nil {
+	if tcpAddr, ok := inst.server.(interface{ Addr() net.Addr }); ok && tcpAddr.Addr() != nil {
 		actualAddr = tcpAddr.Addr().String()
 	}
-	r.serverMutex.RUnlock()
 
 	r.logger.Debug("HTTP server is ready",
 		"addr", actualAddr)
@@ -475,17 +487,22 @@ func (r *Runner) getConfig() (*Config, error) {
 // its ctx fires; it just stops waiting and returns. Active requests
 // continue running on connections that outlive Shutdown.
 //
-// sync.Once ensures shutdown runs at most once per server instance.
+// Each *serverInstance carries its own sync.Once, so shutdown runs at
+// most once per server instance — even across the boot/reload cycle a
+// fresh instance brings a fresh gate.
 func (r *Runner) stopServer(ctx context.Context) error {
+	inst := r.instance.Load()
+	// Treat a nil-server instance the same as a missing instance — the
+	// boot path validates the ServerCreator's return value, but this
+	// guard keeps the shutdown path safe against any future caller
+	// that stores a partially-constructed *serverInstance.
+	if inst == nil || inst.server == nil {
+		return ErrServerNotRunning
+	}
+
 	var shutdownErr error
 	//nolint:contextcheck // intentional: Run cancels runCtx before shutdown(); a ctx-derived timeout would fire immediately and skip the drain
-	r.serverCloseOnce.Do(func() {
-		r.serverMutex.RLock()
-		defer r.serverMutex.RUnlock()
-		if r.server == nil {
-			shutdownErr = ErrServerNotRunning
-			return
-		}
+	inst.closeOnce.Do(func() {
 		r.logger.Debug("Stopping HTTP server")
 
 		// Read the cached config directly: this is a shutdown path and
@@ -503,7 +520,7 @@ func (r *Runner) stopServer(ctx context.Context) error {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainTimeout)
 		defer shutdownCancel()
 
-		localErr := r.server.Shutdown(shutdownCtx)
+		localErr := inst.server.Shutdown(shutdownCtx)
 
 		// Detect timeout regardless of Shutdown() return value
 		select {
@@ -524,10 +541,11 @@ func (r *Runner) stopServer(ctx context.Context) error {
 		}
 	})
 
-	// Reset server reference after shutdown attempt
-	r.serverMutex.Lock()
-	r.server = nil
-	r.serverMutex.Unlock()
+	// Clear the instance only if it's still the one we shut down. If a
+	// concurrent boot installed a fresh instance, leave it in place
+	// rather than stomping it. (In practice r.mutex serializes
+	// stopServer and boot; the CAS is belt-and-suspenders.)
+	r.instance.CompareAndSwap(inst, nil)
 
 	return shutdownErr
 }

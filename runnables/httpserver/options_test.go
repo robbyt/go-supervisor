@@ -109,12 +109,12 @@ func TestWithServerCreator(t *testing.T) {
 	// Call the ServerCreator directly to test it properly
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {})
-	server.server = cfg.ServerCreator(testAddr, mux, cfg)
+	server.instance.Store(&serverInstance{server: cfg.ServerCreator(testAddr, mux, cfg)})
 	// Verify the custom creator was called with correct parameters
 	assert.Equal(t, testAddr, capturedAddr, "Server creator should receive correct address")
 	assert.NotNil(t, capturedHandler, "Server creator should receive a handler")
 	// Verify the created server is our mock
-	assert.Same(t, mockServer, server.server, "Server should be our mock instance")
+	assert.Same(t, mockServer, server.instance.Load().server, "Server should be our mock instance")
 	// The server is created but not started, so we don't need to stop it
 	// The FSM would be in the 'New' state, not 'Running', so stopServer would fail
 }

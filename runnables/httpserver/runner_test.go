@@ -64,10 +64,10 @@ func TestCustomServerCreator(t *testing.T) {
 	require.NotNil(t, cfg.ServerCreator, "ServerCreator should not be nil")
 
 	// Create and set the server using the custom creator
-	runner.server = cfg.ServerCreator(cfg.ListenAddr, http.HandlerFunc(handler), cfg)
+	runner.instance.Store(&serverInstance{server: cfg.ServerCreator(cfg.ListenAddr, http.HandlerFunc(handler), cfg)})
 
 	// Verify the server was created with our custom creator
-	assert.Same(t, mockServer, runner.server, "Server should be our mock instance")
+	assert.Same(t, mockServer, runner.instance.Load().server, "Server should be our mock instance")
 
 	// Directly test the mock's methods without going through the runner's FSM
 	// This avoids FSM state transition issues in the test
@@ -477,7 +477,7 @@ func TestHandleReloadSetsErrorWhenRunningTransitionFails(t *testing.T) {
 
 	oldServer := &MockHttpServer{}
 	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
-	server.server = oldServer
+	server.instance.Store(&serverInstance{server: oldServer})
 
 	stateMachine := NewMockStateMachine()
 	stateMachine.On("Transition", finitestate.StatusRunning).Return(assert.AnError).Once()

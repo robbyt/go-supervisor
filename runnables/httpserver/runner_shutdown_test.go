@@ -38,7 +38,7 @@ func TestStopServerFailures(t *testing.T) {
 		runner, err := NewRunner(WithConfigCallback(callback))
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		err = runner.stopServer(context.Background())
 		require.Error(t, err)
@@ -59,7 +59,7 @@ func TestStopServerFailures(t *testing.T) {
 		runner, err := NewRunner(WithConfigCallback(callback))
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		err = runner.stopServer(context.Background())
 		require.Error(t, err)
@@ -78,7 +78,7 @@ func TestStopServerFailures(t *testing.T) {
 		runner, err := NewRunner(WithConfigCallback(callback))
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		// Clear config to test default drain timeout path
 		runner.config.Store(nil)
@@ -133,7 +133,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 		err = runner.fsm.Transition("Running")
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		// Call shutdown and verify state transitions
 		err = runner.shutdown(context.Background())
@@ -163,7 +163,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 		err = runner.fsm.Transition("Running")
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		// Call shutdown and expect error
 		err = runner.shutdown(context.Background())
@@ -191,7 +191,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 		err = runner.fsm.Transition("Running")
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		// Force FSM into Stopping state, then call shutdown which will try to transition to Stopping again
 		// This should cause the first transition to fail, but continue
@@ -221,7 +221,7 @@ func TestShutdownFSMTransitions(t *testing.T) {
 		err = runner.fsm.Transition("Error")
 		require.NoError(t, err)
 
-		runner.server = mockServer
+		runner.instance.Store(&serverInstance{server: mockServer})
 
 		// Call shutdown - initial FSM transition will fail but shutdown should continue
 		err = runner.shutdown(context.Background())
@@ -294,7 +294,7 @@ func TestServerCleanupOnlyOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replace the server with our mock server
-	runner.server = mockServer
+	runner.instance.Store(&serverInstance{server: mockServer})
 
 	// Run stopServer twice concurrently to verify that sync.Once prevents
 	// the actual shutdown from running more than once
@@ -359,33 +359,89 @@ func TestStopServerResetsOnRestart(t *testing.T) {
 	runner, err := NewRunner(WithConfigCallback(cfgCallback))
 	require.NoError(t, err)
 
-	// Replace the server with our mock server
-	runner.server = mockServer
+	// Install the mock as the live server instance
+	runner.instance.Store(&serverInstance{server: mockServer})
 
 	// Stop the server once
 	err = runner.stopServer(context.Background())
 	require.NoError(t, err)
 
-	// Server should be nil after stopServer completes
-	assert.Nil(t, runner.server)
+	// instance should be nil after stopServer completes
+	assert.Nil(t, runner.instance.Load())
 
-	// Simulate a boot sequence that sets a new server and resets serverCloseOnce
+	// Simulate a boot sequence that installs a fresh instance. The
+	// new *serverInstance carries its own sync.Once gate, so no
+	// reset step is needed (which is the whole point of FS-4).
 	mockServer2 := &mockCountingServer{}
-	runner.server = mockServer2
-	runner.serverCloseOnce = sync.Once{} // This would normally be done by boot()
+	runner.instance.Store(&serverInstance{server: mockServer2})
 
 	// Attempt to stop the new server
 	err = runner.stopServer(context.Background())
 	require.NoError(t, err)
 
-	// The server should be nil again after the second shutdown
-	assert.Nil(t, runner.server)
+	// instance should be nil again after the second shutdown
+	assert.Nil(t, runner.instance.Load())
 
 	// Verify second server was also shut down
 	mockServer2.mutex.Lock()
 	calls := mockServer2.shutdownCount
 	mockServer2.mutex.Unlock()
 	assert.Equal(t, 1, calls, "Second server should be shut down once")
+}
+
+// TestStopServer_NilServerInstance verifies the defensive nil-server
+// guard in stopServer: if a partially-constructed *serverInstance ever
+// reaches r.instance (the boot path validates ServerCreator's return,
+// but this branch protects future callers and tests), stopServer
+// returns ErrServerNotRunning instead of panicking on inst.server.Shutdown.
+func TestStopServer_NilServerInstance(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(port, Routes{*route})
+	}
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	// Install a serverInstance whose server is nil (the scenario the
+	// guard protects against).
+	runner.instance.Store(&serverInstance{server: nil})
+
+	err = runner.stopServer(context.Background())
+	require.ErrorIs(t, err, ErrServerNotRunning,
+		"nil-server instance must surface as ErrServerNotRunning, not panic")
+}
+
+// TestBoot_NilFromServerCreator verifies that a custom ServerCreator
+// that returns a nil HttpServer causes boot to fail fast with
+// ErrServerBoot rather than installing a broken instance and
+// panicking later inside ListenAndServe.
+func TestBoot_NilFromServerCreator(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {}
+	route, err := NewRouteFromHandlerFunc("test", "/test", handler)
+	require.NoError(t, err)
+	port := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+	nilCreator := func(addr string, h http.Handler, cfg *Config) HttpServer {
+		return nil
+	}
+	cfgCallback := func() (*Config, error) {
+		return NewConfig(port, Routes{*route}, WithServerCreator(nilCreator))
+	}
+	runner, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
+
+	bootErr := runner.boot(context.Background())
+	require.Error(t, bootErr)
+	require.ErrorIs(t, bootErr, ErrServerBoot)
+	assert.Contains(t, bootErr.Error(), "server creator returned nil")
+	assert.Nil(t, runner.instance.Load(),
+		"boot must not install a broken instance when ServerCreator returns nil")
 }
 
 // TestRun_ShutdownDeadlineExceeded tests shutdown behavior when a handler exceeds the drain timeout

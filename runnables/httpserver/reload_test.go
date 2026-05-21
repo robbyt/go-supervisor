@@ -589,7 +589,7 @@ func TestExecuteReloadStopsExistingServerWithMock(t *testing.T) {
 
 	oldServer := &MockHttpServer{}
 	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
-	runner.server = oldServer
+	runner.instance.Store(&serverInstance{server: oldServer})
 
 	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
 	err = runner.executeReload(t.Context(), updatedCfg)
@@ -617,7 +617,7 @@ func TestExecuteReloadLogsFailureInsteadOfCompletion(t *testing.T) {
 
 	oldServer := &MockHttpServer{}
 	oldServer.On("Shutdown", mock.Anything).Return(nil).Once()
-	runner.server = oldServer
+	runner.instance.Store(&serverInstance{server: oldServer})
 
 	updatedCfg := createReloadTestConfig(t, "invalid-port", "/", 2*time.Second)
 	err = runner.executeReload(t.Context(), updatedCfg)
