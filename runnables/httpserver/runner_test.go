@@ -403,7 +403,10 @@ func TestWaitForEventReturnsServerError(t *testing.T) {
 	server, err := NewRunner(WithConfig(cfg))
 	require.NoError(t, err)
 
-	server.serverErrors <- assert.AnError
+	// The error arrives on the live instance's own channel.
+	inst := &serverInstance{errCh: make(chan error, 1)}
+	server.instance.Store(inst)
+	inst.errCh <- assert.AnError
 
 	err = server.waitForEvent(t.Context())
 
@@ -419,9 +422,11 @@ func TestServerReadinessProbeReturnsServerError(t *testing.T) {
 	server, err := NewRunner(WithConfig(cfg))
 	require.NoError(t, err)
 
-	server.serverErrors <- assert.AnError
+	inst := &serverInstance{errCh: make(chan error, 1)}
+	server.instance.Store(inst)
+	inst.errCh <- assert.AnError
 
-	err = server.serverReadinessProbe(t.Context(), "127.0.0.1:1")
+	err = server.serverReadinessProbe(t.Context(), "127.0.0.1:1", inst)
 
 	require.ErrorIs(t, err, assert.AnError)
 }
