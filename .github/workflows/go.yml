@@ -68,3 +68,24 @@ jobs:
             -Dsonar.test.inclusions=**/*_test.go
             -Dsonar.language=go
             -Dsonar.sourceEncoding=UTF-8
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Shares the module (~/go/pkg/mod) and build (~/.cache/go-build)
+          # caches with the `build` job: setup-go keys the cache on the OS, Go
+          # version, and go.sum hash, so both jobs restore from the same entry.
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Display Go version
+        run: go version
+
+      - name: Go test (race detector)
+        run: go test -race -timeout 5m ./...
