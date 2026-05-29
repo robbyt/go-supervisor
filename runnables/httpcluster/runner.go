@@ -327,8 +327,13 @@ func (r *Runner) Stop() {
 func (r *Runner) shutdown(ctx context.Context) error {
 	logger := r.logger.WithGroup("shutdown")
 	logger.Debug("Shutting down...")
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	// Write lock: shutdown reassigns r.currentEntries (the commit below), so
+	// it must exclude the RLock readers GetServerCount()/String(). Holding
+	// only RLock here was a data race. The call chain (executeActions →
+	// stopServers/startServers) never re-acquires r.mu, so this can't
+	// self-deadlock; a concurrent removeEntryIfMatches (Lock) simply waits.
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
