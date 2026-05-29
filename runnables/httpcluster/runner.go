@@ -17,6 +17,15 @@ const (
 	defaultDeadlineServerStart = 10 * time.Second
 	defaultRestartDelay        = 10 * time.Millisecond
 	defaultShutdownTimeout     = 5 * time.Second
+
+	// Crash-supervision defaults (one_for_one with CrashLoopBackOff). A
+	// backend that crashes at runtime is restarted with exponential backoff;
+	// only a crash loop — more than maxRestarts failures within restartWindow —
+	// escalates the whole cluster to Error.
+	defaultRestartBackoffInitial = 100 * time.Millisecond
+	defaultRestartBackoffMax     = 30 * time.Second
+	defaultMaxRestarts           = 5
+	defaultRestartWindow         = 1 * time.Minute
 )
 
 type fsm interface {
@@ -41,6 +50,16 @@ type Runner struct {
 	deadlineServerStart time.Duration
 	shutdownTimeout     time.Duration
 
+	// Crash supervision (one_for_one + CrashLoopBackOff).
+	restartBackoffInitial time.Duration
+	restartBackoffMax     time.Duration
+	maxRestarts           int
+	restartWindow         time.Duration
+	// restartTracker records recent crash timestamps per server id. Guarded by
+	// mu; mutated only from superviseRestart, which always holds the write lock
+	// while touching it.
+	restartTracker map[string]*restartState
+
 	// Configuration siphon channel
 	configSiphon chan map[string]*httpserver.Config
 
@@ -57,6 +76,15 @@ var (
 	_ supervisor.Runnable  = (*Runner)(nil)
 	_ supervisor.Stateable = (*Runner)(nil)
 )
+
+// restartState tracks a single server's crash history for CrashLoopBackOff.
+type restartState struct {
+	// failures holds crash timestamps inside the current restartWindow.
+	failures []time.Time
+	// attempts counts consecutive restart attempts and drives the exponential
+	// backoff; it resets once a restart succeeds.
+	attempts int
+}
 
 type runnerFactory func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error)
 
@@ -77,12 +105,17 @@ func defaultRunnerFactory(
 // NewRunner creates a new HTTP cluster runner with the provided options.
 func NewRunner(opts ...Option) (*Runner, error) {
 	r := &Runner{
-		lc:                  lifecycle.New(),
-		runnerFactory:       defaultRunnerFactory,
-		logger:              slog.Default().WithGroup("httpcluster.Runner"),
-		restartDelay:        defaultRestartDelay,
-		deadlineServerStart: defaultDeadlineServerStart,
-		shutdownTimeout:     defaultShutdownTimeout,
+		lc:                    lifecycle.New(),
+		runnerFactory:         defaultRunnerFactory,
+		logger:                slog.Default().WithGroup("httpcluster.Runner"),
+		restartDelay:          defaultRestartDelay,
+		deadlineServerStart:   defaultDeadlineServerStart,
+		shutdownTimeout:       defaultShutdownTimeout,
+		restartBackoffInitial: defaultRestartBackoffInitial,
+		restartBackoffMax:     defaultRestartBackoffMax,
+		maxRestarts:           defaultMaxRestarts,
+		restartWindow:         defaultRestartWindow,
+		restartTracker:        make(map[string]*restartState),
 		configSiphon: make(
 			chan map[string]*httpserver.Config,
 		), // unbuffered by default
@@ -606,8 +639,11 @@ func (r *Runner) createAndStartServer(
 		return nil, nil, err
 	}
 
-	// Start that Runnable implementation in a goroutine
-	go func(id string, runner httpServerRunner, c context.Context, cancel context.CancelFunc) {
+	// Start that Runnable implementation in a goroutine. parentCtx (the
+	// cluster's runCtx, not this server's ctx) is captured so the crash
+	// supervisor outlives the dead server's ctx and is bounded by the cluster
+	// lifetime instead.
+	go func(id string, runner httpServerRunner, parentCtx, c context.Context, cancel context.CancelFunc) {
 		// Always release this server's ctx when the goroutine exits — the
 		// crash path didn't otherwise call cancel(), so per-server ctx
 		// resources would have stayed referenced until the cluster runCtx
@@ -618,28 +654,138 @@ func (r *Runner) createAndStartServer(
 		logger.Debug("Starting server instance")
 		err := runner.Run(c)
 		if err != nil && c.Err() == nil {
-			// Context not cancelled, this is an actual error: mark the
-			// cluster degraded so consumers watching GetStateChan see it,
-			// and drop the dead entry from currentEntries.
+			// Context not cancelled, so this is a real runtime crash (not a
+			// stop/reload). Hand off to the crash supervisor, which restarts
+			// the server with backoff (one_for_one isolation) and only
+			// escalates the cluster to Error on a crash loop.
 			logger.Error("Server instance failed", "error", err)
-			r.setStateError()
-			r.removeEntryIfMatches(id, runner)
+			go r.superviseRestart(parentCtx, id, runner, err)
 		}
 		logger.Debug("Instance stopped")
-	}(entry.id, runner, serverCtx, serverCancel)
+	}(entry.id, runner, ctx, serverCtx, serverCancel)
 
 	return runner, serverCancel, nil
 }
 
-// removeEntryIfMatches drops the entry stored under id only if it still points
-// at the given runner. Called from the per-server crash handler to avoid
-// racing a concurrent restart that has already committed a different runner
-// under the same id — without this guard, an old goroutine's late error path
-// would delete the new healthy server from currentEntries.
-func (r *Runner) removeEntryIfMatches(id string, runner httpServerRunner) {
+// superviseRestart implements one_for_one crash supervision with
+// CrashLoopBackOff. It runs in its own goroutine, one per crash. The dead
+// runner is restarted after an exponential backoff; the whole cluster is only
+// escalated to Error when a server exceeds maxRestarts crashes within
+// restartWindow (a crash loop). All currentEntries / FSM / restartTracker
+// mutations happen under r.mu, so this serializes with processConfigUpdate the
+// same way the old removeEntryIfMatches did — the runner-identity guard below
+// drops the work if a config update already superseded this server.
+func (r *Runner) superviseRestart(
+	ctx context.Context,
+	id string,
+	crashed httpServerRunner,
+	cause error,
+) {
+	logger := r.logger.WithGroup("superviseRestart").With("id", id)
+
+	r.mu.Lock()
+	cur := r.currentEntries.get(id)
+	if cur == nil || cur.runner != crashed {
+		// Superseded by a config update (or already handled). Not our problem.
+		r.mu.Unlock()
+		return
+	}
+
+	st := r.recordFailureLocked(id, time.Now())
+	if len(st.failures) > r.maxRestarts {
+		logger.Error("Server exceeded restart intensity; escalating cluster to Error",
+			"restarts", len(st.failures), "window", r.restartWindow, "cause", cause)
+		r.currentEntries = r.currentEntries.removeEntry(id)
+		delete(r.restartTracker, id)
+		r.setStateError()
+		r.mu.Unlock()
+		return
+	}
+	st.attempts++
+	backoff := r.backoffForLocked(st.attempts)
+	// Clear the dead runtime so the entry reads as "not running"; this also
+	// makes a racing config update or a second crash fail the identity guard.
+	if updated := r.currentEntries.clearRuntime(id); updated != nil {
+		r.currentEntries = updated
+	}
+	addr := cur.config.ListenAddr
+	r.mu.Unlock()
+
+	logger.Warn("Server crashed; scheduling restart",
+		"cause", cause, "backoff", backoff, "attempt", st.attempts, "addr", addr)
+
+	select {
+	case <-ctx.Done():
+		logger.Debug("Restart aborted: cluster shutting down")
+		return
+	case <-time.After(backoff):
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cur := r.currentEntries.get(id); cur != nil && cur.runner == runner {
-		r.currentEntries = r.currentEntries.removeEntry(id)
+	cur = r.currentEntries.get(id)
+	if cur == nil {
+		logger.Debug("Restart aborted: entry removed during backoff")
+		return
 	}
+	if cur.runner != nil {
+		logger.Debug("Restart aborted: server already running (replaced by config update)")
+		return
+	}
+
+	updated, failed := r.startServers(ctx, r.currentEntries, []string{id})
+	r.currentEntries = updated
+	if failed {
+		if ctx.Err() != nil {
+			// Cluster is shutting down; startServers already cleaned up.
+			return
+		}
+		// The restart itself couldn't bring the server back to ready. Don't
+		// spin: escalate so the failure is visible (a config update can later
+		// recover the cluster).
+		logger.Error("Restart attempt failed to become ready; escalating cluster to Error")
+		delete(r.restartTracker, id)
+		r.setStateError()
+		return
+	}
+
+	// Healthy again: reset the backoff ramp but keep the crash timestamps so a
+	// slow-burn crash loop still trips maxRestarts within the window.
+	st.attempts = 0
+	logger.Info("Server restarted successfully", "addr", addr)
+}
+
+// recordFailureLocked appends a crash timestamp for id, pruning entries older
+// than restartWindow, and returns the live restartState. Caller must hold mu.
+func (r *Runner) recordFailureLocked(id string, now time.Time) *restartState {
+	st := r.restartTracker[id]
+	if st == nil {
+		st = &restartState{}
+		r.restartTracker[id] = st
+	}
+	cutoff := now.Add(-r.restartWindow)
+	kept := st.failures[:0]
+	for _, t := range st.failures {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	st.failures = append(kept, now)
+	return st
+}
+
+// backoffForLocked returns the exponential backoff for the given consecutive
+// attempt number (1-based), capped at restartBackoffMax. Caller must hold mu.
+func (r *Runner) backoffForLocked(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	d := r.restartBackoffInitial
+	for i := 1; i < attempt; i++ {
+		if d >= r.restartBackoffMax/2 {
+			return r.restartBackoffMax
+		}
+		d *= 2
+	}
+	return d
 }
