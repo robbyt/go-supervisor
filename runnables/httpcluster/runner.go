@@ -366,14 +366,36 @@ func (r *Runner) processConfigUpdate(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Check and transition while holding the update lock. This prevents a
-	// TOCTOU race where the cluster is Running before the lock, but Stop()
-	// moves it to Stopped before this update enters Reloading.
-	if err := r.fsm.TransitionIfCurrentState(
-		finitestate.StatusRunning,
-		finitestate.StatusReloading,
-	); err != nil {
-		logger.Warn("Ignoring config update - cluster not running", "state", r.fsm.GetState())
+	// Admit the update and move to Reloading while holding the update lock.
+	// Two entry states are accepted:
+	//
+	//   - Running: the normal path. A guarded TransitionIfCurrentState avoids a
+	//     TOCTOU race where the cluster is Running before the lock but Stop()
+	//     moves it to Stopped before this update enters Reloading.
+	//
+	//   - Error: recovery. A crashed backend (or a failed prior update) leaves
+	//     the cluster in Error, and the FSM has no Error->Running edge — so
+	//     without this path every subsequent update would be silently dropped
+	//     and the operator could never push a corrected config. Force the FSM
+	//     to Reloading via SetState (Error has no valid Transition to
+	//     Reloading) and let this update rebuild the cluster.
+	switch state := r.fsm.GetState(); state {
+	case finitestate.StatusRunning:
+		if err := r.fsm.TransitionIfCurrentState(
+			finitestate.StatusRunning,
+			finitestate.StatusReloading,
+		); err != nil {
+			logger.Warn("Ignoring config update - cluster left Running", "state", r.fsm.GetState())
+			return nil
+		}
+	case finitestate.StatusError:
+		logger.Info("Recovering cluster from Error state via config update")
+		if err := r.fsm.SetState(finitestate.StatusReloading); err != nil {
+			r.setStateError()
+			return fmt.Errorf("failed to enter reloading state for recovery: %w", err)
+		}
+	default:
+		logger.Warn("Ignoring config update - cluster not running", "state", state)
 		return nil
 	}
 
