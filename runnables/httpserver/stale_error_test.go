@@ -2,11 +2,13 @@ package httpserver
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/robbyt/go-supervisor/internal/finitestate"
+	"github.com/robbyt/go-supervisor/internal/networking"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,47 +16,87 @@ import (
 // TestWaitForEvent_IgnoresStaleInstanceError is a regression test for a bug
 // where a late error from a superseded server instance (the old server after
 // a reload) would crash the healthy current runner. The fix makes each
-// serverInstance own its error channel, so waitForEvent — which listens only
-// on the current instance's channel — never observes a superseded server's
-// error.
+// serverInstance own its error channel, and waitForEvent re-loads the current
+// instance's channel on every loop iteration — so once a reload has swapped in
+// a new instance, an error arriving on the *old* instance's channel is never
+// observed.
 //
-// Written with testing/synctest: synctest.Wait() returns once waitForEvent has
-// parked in its select on the current instance's channel, making the "did it
-// crash?" assertion deterministic without sleeps.
+// To exercise the real swap path (per review feedback), this drives an actual
+// reload: the old instance is live first, a reload swaps in a new instance,
+// and only then is a late error injected on the OLD instance's channel. A
+// non-faithful version that simply sends on a never-current channel would pass
+// trivially without proving the swap behavior.
 func TestWaitForEvent_IgnoresStaleInstanceError(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cfg := createReloadTestConfig(t, ":0", "/", time.Second)
-		server, err := NewRunner(WithConfig(cfg))
-		require.NoError(t, err)
+	t.Parallel()
 
-		// Drive the FSM to Running so a fatal error would be observable as a
-		// transition to Error.
-		require.NoError(t, server.fsm.Transition(finitestate.StatusBooting))
-		require.NoError(t, server.fsm.Transition(finitestate.StatusRunning))
+	// Each callback invocation returns a config on a fresh port with a
+	// different IdleTimeout, so the reload is a real config change that boots a
+	// new server instance rather than being skipped as a no-op.
+	var version int
+	cfgCallback := func() (*Config, error) {
+		version++
+		addr := fmt.Sprintf(":%d", networking.GetRandomPort(t))
+		return createReloadTestConfigWithIdle(t, addr, "/", time.Second,
+			time.Minute+time.Duration(version)*time.Millisecond), nil
+	}
 
-		// The live instance, plus a superseded one from a "previous boot".
-		curInst := &serverInstance{errCh: make(chan error, 1)}
-		server.instance.Store(curInst)
-		staleInst := &serverInstance{errCh: make(chan error, 1)}
+	server, err := NewRunner(WithConfigCallback(cfgCallback))
+	require.NoError(t, err)
 
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		eventErr := make(chan error, 1)
-		go func() { eventErr <- server.waitForEvent(ctx) }()
-
-		// Late error from the superseded instance, on its own channel.
-		staleInst.errCh <- assert.AnError
-
-		// Let waitForEvent reach steady state (parked on curInst.errCh).
-		synctest.Wait()
-
-		// The stale error must NOT have crashed the runner.
-		assert.Equal(t, finitestate.StatusRunning, server.GetState(),
-			"stale instance error should be ignored, runner should stay Running")
-
-		// Clean shutdown trigger: waitForEvent returns nil on ctx cancel.
-		cancel()
-		require.NoError(t, <-eventErr)
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	t.Cleanup(func() {
+		server.Stop()
+		<-done
 	})
+
+	require.Eventually(t, func() bool {
+		return server.GetState() == finitestate.StatusRunning
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Capture the live (soon-to-be-superseded) instance.
+	oldInst := server.instance.Load()
+	require.NotNil(t, oldInst)
+	require.NotNil(t, oldInst.errCh)
+
+	// Reload swaps in a new instance; waitForEvent re-loops onto its channel.
+	require.NoError(t, server.Reload(ctx))
+	require.Eventually(t, func() bool {
+		newInst := server.instance.Load()
+		return newInst != nil && newInst != oldInst &&
+			server.GetState() == finitestate.StatusRunning
+	}, 2*time.Second, 10*time.Millisecond, "reload should swap in a new instance and stay Running")
+
+	// Late error from the now-superseded instance, on its own buffered channel.
+	// If waitForEvent were still listening on the old channel, this would crash
+	// the runner into Error.
+	oldInst.errCh <- assert.AnError
+
+	// The stale error must NOT crash the healthy runner.
+	require.Never(t, func() bool {
+		return server.GetState() == finitestate.StatusError
+	}, 250*time.Millisecond, 25*time.Millisecond,
+		"a superseded instance's late error must be ignored")
+	require.Equal(t, finitestate.StatusRunning, server.GetState())
+}
+
+// createReloadTestConfigWithIdle is like createReloadTestConfig but lets the
+// caller set IdleTimeout so successive reloads produce distinct configs.
+func createReloadTestConfigWithIdle(
+	t *testing.T,
+	addr, path string,
+	drainTimeout, idleTimeout time.Duration,
+) *Config {
+	t.Helper()
+	route, err := NewRouteFromHandlerFunc("test", path, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	require.NoError(t, err)
+	cfg, err := NewConfig(addr, Routes{*route},
+		WithDrainTimeout(drainTimeout), WithIdleTimeout(idleTimeout))
+	require.NoError(t, err)
+	return cfg
 }
