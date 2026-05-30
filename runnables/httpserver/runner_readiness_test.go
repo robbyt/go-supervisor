@@ -37,7 +37,8 @@ func TestServerReadinessProbe(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
-		err := runner.serverReadinessProbe(ctx, "test.invalid:80")
+		inst := &serverInstance{errCh: make(chan error, 1)}
+		err := runner.serverReadinessProbe(ctx, "test.invalid:80", inst)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrServerReadinessTimeout)
 	})
@@ -61,7 +62,8 @@ func TestServerReadinessProbe(t *testing.T) {
 			}
 		}()
 
-		err = runner.serverReadinessProbe(context.Background(), addr)
+		inst := &serverInstance{errCh: make(chan error, 1)}
+		err = runner.serverReadinessProbe(context.Background(), addr, inst)
 		assert.NoError(t, err)
 	})
 }

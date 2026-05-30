@@ -81,8 +81,7 @@ type Runner struct {
 	// Load and clears it via CompareAndSwap on completion. The
 	// sync.Once is bound to the specific server it shipped with, so
 	// there is no "reset between boots" pattern — see serverInstance.
-	instance     atomic.Pointer[serverInstance]
-	serverErrors chan error
+	instance atomic.Pointer[serverInstance]
 
 	logger *slog.Logger
 }
@@ -95,6 +94,12 @@ type Runner struct {
 type serverInstance struct {
 	server    HttpServer
 	closeOnce sync.Once
+	// errCh receives this instance's ListenAndServe error (if any). It is
+	// per-instance on purpose: the error belongs to the server that produced
+	// it, so a superseded instance (the old server after a reload) cannot
+	// deliver a late error onto the current instance's path and crash a
+	// healthy runner. Buffered (1) so the background goroutine never blocks.
+	errCh chan error
 }
 
 // reloadReq carries an accepted reload from Reload(ctx) into Run's event loop
@@ -116,12 +121,11 @@ func NewRunner(opts ...Option) (*Runner, error) {
 	logger := slog.Default().WithGroup("httpserver.Runner")
 
 	r := &Runner{
-		lc:           lifecycle.New(),
-		name:         "",
-		config:       atomic.Pointer[Config]{},
-		serverErrors: make(chan error, 1),
-		reloadCh:     make(chan *reloadReq, 1),
-		logger:       logger,
+		lc:       lifecycle.New(),
+		name:     "",
+		config:   atomic.Pointer[Config]{},
+		reloadCh: make(chan *reloadReq, 1),
+		logger:   logger,
 	}
 
 	// Apply options
@@ -221,8 +225,21 @@ func (r *Runner) Run(ctx context.Context) error {
 // error. Reload requests are processed inline so executeReload runs with
 // ctx (= Run's runCtx), giving the new server's BaseContext a lifetime tied
 // to the runner rather than the caller of Reload().
+//
+// It listens on the current instance's own error channel, re-read each
+// iteration: a reload (handled inline below) swaps r.instance, so the next
+// loop picks up the new server's channel and a superseded server's late error
+// is simply never observed. Instance swaps only happen in this goroutine, so
+// the re-read is race-free.
 func (r *Runner) waitForEvent(ctx context.Context) error {
 	for {
+		// A nil channel blocks forever, which is the correct behavior when no
+		// instance is installed yet (waitForEvent only runs after a successful
+		// boot, so this is defensive).
+		var serverErr <-chan error
+		if inst := r.instance.Load(); inst != nil {
+			serverErr = inst.errCh
+		}
 		select {
 		case <-ctx.Done():
 			r.logger.Debug("Local context canceled")
@@ -230,7 +247,7 @@ func (r *Runner) waitForEvent(ctx context.Context) error {
 		case <-r.lc.StopCh():
 			r.logger.Debug("Stop() called")
 			return nil
-		case err := <-r.serverErrors:
+		case err := <-serverErr:
 			r.setStateError()
 			return fmt.Errorf("%w: %w", ErrHttpServer, err)
 		case req := <-r.reloadCh:
@@ -311,8 +328,11 @@ func (r *Runner) Stop() {
 }
 
 // serverReadinessProbe verifies the HTTP server is accepting connections by
-// repeatedly attempting TCP connections until success or timeout.
-func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
+// repeatedly attempting TCP connections until success or timeout. It watches
+// the booting instance's own error channel so an immediate ListenAndServe
+// failure (e.g. a bind error) aborts the probe early instead of waiting out
+// the timeout.
+func (r *Runner) serverReadinessProbe(ctx context.Context, addr string, inst *serverInstance) error {
 	// Configure TCP dialer with connection timeout
 	dialer := &net.Dialer{
 		Timeout: 100 * time.Millisecond,
@@ -328,7 +348,7 @@ func (r *Runner) serverReadinessProbe(ctx context.Context, addr string) error {
 
 	for {
 		select {
-		case err := <-r.serverErrors:
+		case err := <-inst.errCh:
 			return fmt.Errorf("server failed to start: %w", err)
 		case <-probeCtx.Done():
 			return fmt.Errorf("%w: %w", ErrServerReadinessTimeout, probeCtx.Err())
@@ -382,7 +402,7 @@ func (r *Runner) boot(ctx context.Context) error {
 	if serverImpl == nil {
 		return fmt.Errorf("%w: server creator returned nil", ErrServerBoot)
 	}
-	inst := &serverInstance{server: serverImpl}
+	inst := &serverInstance{server: serverImpl, errCh: make(chan error, 1)}
 	r.instance.Store(inst)
 
 	r.logger.Debug("Starting HTTP server",
@@ -394,16 +414,18 @@ func (r *Runner) boot(ctx context.Context) error {
 
 	// Start HTTP server in background goroutine. The local `inst`
 	// captured here is the same pointer we just stored — a later boot
-	// can install a new instance without disturbing this goroutine.
+	// can install a new instance without disturbing this goroutine. The
+	// error goes to this instance's own channel, so a late error from a
+	// superseded server can never reach the current instance's path.
 	go func() {
 		if err := inst.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			r.serverErrors <- err
+			inst.errCh <- err
 		}
 		r.logger.Debug("HTTP server stopped", "listenOn", listenAddr)
 	}()
 
 	// Verify server is ready to accept connections
-	if err := r.serverReadinessProbe(ctx, listenAddr); err != nil {
+	if err := r.serverReadinessProbe(ctx, listenAddr, inst); err != nil {
 		if err := r.stopServer(ctx); err != nil {
 			r.logger.Warn("Error stopping server", "error", err)
 		}
