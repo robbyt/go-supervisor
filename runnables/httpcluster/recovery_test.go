@@ -61,22 +61,31 @@ func TestRunner_RecoversFromErrorViaConfigUpdate(t *testing.T) {
 		"cluster should recover to Running with the new server")
 
 	cancel()
-	select {
-	case err := <-runErr:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("cluster did not shut down after ctx cancel")
-	}
+	var stopErr error
+	require.Eventually(t, func() bool {
+		select {
+		case stopErr = <-runErr:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "cluster did not shut down after ctx cancel")
+	require.NoError(t, stopErr)
 }
 
 // sendConfig pushes a config on the cluster's siphon, failing fast instead of
 // hanging until the test timeout if the event loop is not receiving (e.g. Run
-// exited early).
+// exited early). The non-blocking send is retried via require.Eventually until
+// the event loop accepts it.
 func sendConfig(t *testing.T, c *Runner, cfg map[string]*httpserver.Config) {
 	t.Helper()
-	select {
-	case c.configSiphon <- cfg:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out sending config on siphon - event loop not receiving")
-	}
+	require.Eventually(t, func() bool {
+		select {
+		case c.configSiphon <- cfg:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond,
+		"timed out sending config on siphon - event loop not receiving")
 }
