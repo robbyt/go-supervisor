@@ -84,6 +84,13 @@ type restartState struct {
 	// attempts counts consecutive restart attempts and drives the exponential
 	// backoff; it resets once a restart succeeds.
 	attempts int
+	// gen is a per-id restart generation, bumped each time a crash begins being
+	// supervised. A supervising goroutine captures it before its backoff and
+	// re-checks it after: if a newer crash for the same id started supervising
+	// in the meantime (e.g. a config-update replacement that itself crashed and
+	// cleared the runtime to nil), the stale goroutine aborts instead of firing
+	// a restart on the wrong generation's schedule.
+	gen int
 }
 
 type runnerFactory func(ctx context.Context, id string, cfg *httpserver.Config, handler slog.Handler) (httpServerRunner, error)
@@ -702,6 +709,8 @@ func (r *Runner) superviseRestart(
 		return
 	}
 	st.attempts++
+	st.gen++
+	gen := st.gen
 	backoff := r.backoffForLocked(st.attempts)
 	// Clear the dead runtime so the entry reads as "not running"; this also
 	// makes a racing config update or a second crash fail the identity guard.
@@ -730,6 +739,15 @@ func (r *Runner) superviseRestart(
 	}
 	if cur.runner != nil {
 		logger.Debug("Restart aborted: server already running (replaced by config update)")
+		return
+	}
+	// A newer crash for this id began supervising during our backoff (it owns
+	// the live "not running" runtime now), so this restart belongs to a stale
+	// generation. Abort and let the newer goroutine drive the restart on its
+	// own backoff schedule.
+	if live := r.restartTracker[id]; live == nil || live.gen != gen {
+		logger.Debug("Restart aborted: superseded by a newer crash generation",
+			"ourGen", gen)
 		return
 	}
 
