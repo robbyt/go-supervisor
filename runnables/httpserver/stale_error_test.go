@@ -27,7 +27,10 @@ import (
 // non-faithful version that simply sends on a never-current channel would pass
 // trivially without proving the swap behavior.
 func TestWaitForEvent_IgnoresStaleInstanceError(t *testing.T) {
-	t.Parallel()
+	// Not parallel: this drives two real server boots (initial + reload). Under
+	// the race detector on a loaded CI runner the boot readiness probes are
+	// timing-sensitive, so we avoid competing for CPU/ports with the package's
+	// other parallel real-network tests.
 
 	// Each callback invocation returns a config on a fresh port with a
 	// different IdleTimeout, so the reload is a real config change that boots a
@@ -55,7 +58,7 @@ func TestWaitForEvent_IgnoresStaleInstanceError(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return server.GetState() == finitestate.StatusRunning
-	}, 2*time.Second, 10*time.Millisecond)
+	}, 10*time.Second, 10*time.Millisecond)
 
 	// Capture the live (soon-to-be-superseded) instance.
 	oldInst := server.instance.Load()
@@ -68,7 +71,7 @@ func TestWaitForEvent_IgnoresStaleInstanceError(t *testing.T) {
 		newInst := server.instance.Load()
 		return newInst != nil && newInst != oldInst &&
 			server.GetState() == finitestate.StatusRunning
-	}, 2*time.Second, 10*time.Millisecond, "reload should swap in a new instance and stay Running")
+	}, 10*time.Second, 10*time.Millisecond, "reload should swap in a new instance and stay Running")
 
 	// Late error from the now-superseded instance, on its own buffered channel.
 	// If waitForEvent were still listening on the old channel, this would crash
