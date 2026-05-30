@@ -43,17 +43,17 @@ func TestRunner_RecoversFromErrorViaConfigUpdate(t *testing.T) {
 	require.Eventually(t, cluster.IsReady, time.Second, 5*time.Millisecond)
 
 	// 1. Wedge the cluster: a failing server trips it into Error.
-	cluster.configSiphon <- map[string]*httpserver.Config{
+	sendConfig(t, cluster, map[string]*httpserver.Config{
 		brokenID: createTestHTTPConfig(t, ":18301"),
-	}
+	})
 	require.Eventually(t, func() bool {
 		return cluster.GetState() == finitestate.StatusError
 	}, 2*time.Second, 10*time.Millisecond, "cluster should enter Error")
 
 	// 2. Recover: a new valid config must be applied, not silently dropped.
-	cluster.configSiphon <- map[string]*httpserver.Config{
+	sendConfig(t, cluster, map[string]*httpserver.Config{
 		"good": createTestHTTPConfig(t, ":18302"),
-	}
+	})
 	require.Eventually(t, func() bool {
 		return cluster.GetState() == finitestate.StatusRunning &&
 			cluster.GetServerCount() == 1
@@ -66,5 +66,17 @@ func TestRunner_RecoversFromErrorViaConfigUpdate(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("cluster did not shut down after ctx cancel")
+	}
+}
+
+// sendConfig pushes a config on the cluster's siphon, failing fast instead of
+// hanging until the test timeout if the event loop is not receiving (e.g. Run
+// exited early).
+func sendConfig(t *testing.T, c *Runner, cfg map[string]*httpserver.Config) {
+	t.Helper()
+	select {
+	case c.configSiphon <- cfg:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out sending config on siphon - event loop not receiving")
 	}
 }
