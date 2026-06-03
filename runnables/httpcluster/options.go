@@ -84,6 +84,48 @@ func WithRestartDelay(delay time.Duration) Option {
 	}
 }
 
+// WithRestartBackoff configures the CrashLoopBackOff used when a backend
+// crashes at runtime: the first restart waits initial, each subsequent restart
+// doubles the wait, capped at max. Defaults are 100ms and 30s.
+func WithRestartBackoff(initial, max time.Duration) Option {
+	return func(r *Runner) error {
+		if initial <= 0 {
+			return fmt.Errorf("restart backoff initial must be positive: %v", initial)
+		}
+		if max < initial {
+			return fmt.Errorf("restart backoff max (%v) must be >= initial (%v)", max, initial)
+		}
+		r.restartBackoffInitial = initial
+		r.restartBackoffMax = max
+		return nil
+	}
+}
+
+// WithMaxRestarts sets the crash-loop threshold: a server that crashes more
+// than max times within the restart window escalates the whole cluster to
+// Error instead of being restarted again. Default is 5.
+func WithMaxRestarts(max int) Option {
+	return func(r *Runner) error {
+		if max < 0 {
+			return fmt.Errorf("max restarts cannot be negative: %d", max)
+		}
+		r.maxRestarts = max
+		return nil
+	}
+}
+
+// WithRestartWindow sets the sliding window over which crashes are counted
+// against the max-restarts threshold. Default is 1 minute.
+func WithRestartWindow(window time.Duration) Option {
+	return func(r *Runner) error {
+		if window <= 0 {
+			return fmt.Errorf("restart window must be positive: %v", window)
+		}
+		r.restartWindow = window
+		return nil
+	}
+}
+
 // WithShutdownTimeout sets the deadline on the context that the cluster
 // runner builds when it begins shutting down. Both the synchronous shutdown
 // path and the background siphon drain observe that context, so the deadline
