@@ -127,3 +127,27 @@ func TestOptionError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to apply option")
 }
+
+// TestRestartSupervisionDefaults verifies NewRunner installs the documented
+// crash-supervision defaults, and that the options override them.
+func TestRestartSupervisionDefaults(t *testing.T) {
+	t.Parallel()
+
+	r, err := NewRunner()
+	require.NoError(t, err)
+	assert.Equal(t, defaultRestartBackoffInitial, r.restartBackoffInitial)
+	assert.Equal(t, defaultRestartBackoffMax, r.restartBackoffMax)
+	assert.Equal(t, defaultMaxRestarts, r.maxRestarts)
+	assert.Equal(t, defaultRestartWindow, r.restartWindow)
+
+	r, err = NewRunner(
+		WithRestartBackoff(250*time.Millisecond, 10*time.Second),
+		WithMaxRestarts(7),
+		WithRestartWindow(2*time.Minute),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 250*time.Millisecond, r.restartBackoffInitial)
+	assert.Equal(t, 10*time.Second, r.restartBackoffMax)
+	assert.Equal(t, 7, r.maxRestarts)
+	assert.Equal(t, 2*time.Minute, r.restartWindow)
+}

@@ -58,11 +58,14 @@ func createErroredMockServer(ctx context.Context) *mocks.MockRunnableWithStateab
 	return mockServer
 }
 
-// TestRunner_ChildRuntimeError_TransitionsToError covers Bug A: a child
-// server's Run() returning an error during steady-state must transition the
-// cluster to StatusError and drop the dead entry. Cluster Run() must not exit;
-// healthy siblings must keep running.
-func TestRunner_ChildRuntimeError_TransitionsToError(t *testing.T) {
+// TestRunner_ChildRuntimeError_IsolatedAndRestarted covers the historical
+// "Bug A" scenario under the current one_for_one supervision model: a child
+// server's Run() returning an error during steady-state used to wedge the
+// WHOLE cluster into Error. It must now be isolated — the dead server is
+// restarted (CrashLoopBackOff), the cluster stays Running, Run() does not exit,
+// and healthy siblings are untouched. (Crash-loop escalation to Error is
+// covered by TestRunner_ServerCrashLoop_EscalatesToError.)
+func TestRunner_ChildRuntimeError_IsolatedAndRestarted(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -73,21 +76,31 @@ func TestRunner_ChildRuntimeError_TransitionsToError(t *testing.T) {
 
 	var (
 		mu              sync.Mutex
+		failingCalls    int
 		survivor        *mocks.MockRunnableWithStateable
 		failingServerID = "failing"
 	)
 
-	mockFactory := func(_ context.Context, id string, _ *httpserver.Config, _ slog.Handler) (httpServerRunner, error) {
+	mockFactory := func(serverCtx context.Context, id string, _ *httpserver.Config, _ slog.Handler) (httpServerRunner, error) {
 		if id == failingServerID {
-			return createCrashingMockServer(ctx, crashCh, crashErr), nil
+			mu.Lock()
+			defer mu.Unlock()
+			failingCalls++
+			if failingCalls == 1 {
+				return createCrashingMockServer(serverCtx, crashCh, crashErr), nil
+			}
+			return createMockServer(serverCtx), nil
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		survivor = createMockServer(ctx)
+		survivor = createMockServer(serverCtx)
 		return survivor, nil
 	}
 
-	cluster, err := NewRunner(WithRunnerFactory(mockFactory))
+	cluster, err := NewRunner(
+		WithRunnerFactory(mockFactory),
+		WithRestartBackoff(time.Millisecond, 5*time.Millisecond),
+	)
 	require.NoError(t, err)
 
 	runErr := make(chan error, 1)
@@ -105,11 +118,16 @@ func TestRunner_ChildRuntimeError_TransitionsToError(t *testing.T) {
 
 	close(crashCh)
 
+	// The crashed server is restarted; the cluster stays Running with both.
 	require.Eventually(t, func() bool {
-		return cluster.GetState() == finitestate.StatusError &&
-			cluster.GetServerCount() == 1
+		mu.Lock()
+		restarted := failingCalls >= 2
+		mu.Unlock()
+		return restarted &&
+			cluster.GetState() == finitestate.StatusRunning &&
+			cluster.GetServerCount() == 2
 	}, 2*time.Second, 10*time.Millisecond,
-		"cluster must enter Error and drop the dead entry")
+		"crashed server must be restarted and cluster stay Running")
 
 	select {
 	case err := <-runErr:
@@ -243,60 +261,6 @@ func TestRunner_PartialFailure_GoodSiblingsSurvive(t *testing.T) {
 	}
 }
 
-// TestRemoveEntryIfMatches covers the per-server crash handler's identity
-// guard. The fix keeps an old goroutine's late error path from removing a
-// healthy replacement entry that landed under the same id during a restart.
-func TestRemoveEntryIfMatches(t *testing.T) {
-	t.Parallel()
-
-	makeEntries := func(t *testing.T, id string, runner httpServerRunner) *entries {
-		t.Helper()
-		return &entries{
-			servers: map[string]*serverEntry{
-				id: {id: id, runner: runner},
-			},
-		}
-	}
-
-	t.Run("removes when runner matches", func(t *testing.T) {
-		runner, err := NewRunner()
-		require.NoError(t, err)
-
-		mockServer := mocks.NewMockRunnableWithStateable()
-		runner.currentEntries = makeEntries(t, "x", mockServer)
-
-		runner.removeEntryIfMatches("x", mockServer)
-
-		require.Equal(t, 0, runner.currentEntries.count(),
-			"entry should be removed when runner matches")
-	})
-
-	t.Run("keeps entry when runner differs (replacement race)", func(t *testing.T) {
-		runner, err := NewRunner()
-		require.NoError(t, err)
-
-		oldServer := mocks.NewMockRunnableWithStateable()
-		newServer := mocks.NewMockRunnableWithStateable()
-		runner.currentEntries = makeEntries(t, "x", newServer)
-
-		// Old goroutine fires its crash handler after the entry has been
-		// replaced — the stale id reference must not delete the new entry.
-		runner.removeEntryIfMatches("x", oldServer)
-
-		require.Equal(t, 1, runner.currentEntries.count(),
-			"replacement entry must not be dropped by old runner's crash path")
-		got := runner.currentEntries.get("x")
-		require.NotNil(t, got)
-		require.Same(t, newServer, got.runner)
-	})
-
-	t.Run("no-op when id absent", func(t *testing.T) {
-		runner, err := NewRunner()
-		require.NoError(t, err)
-		mockServer := mocks.NewMockRunnableWithStateable()
-
-		// Does not panic; entries collection unchanged.
-		runner.removeEntryIfMatches("missing", mockServer)
-		require.Equal(t, 0, runner.currentEntries.count())
-	})
-}
+// The per-server crash handler's identity guard (don't drop a healthy
+// replacement that landed under the same id during a restart) now lives inline
+// in superviseRestart and is covered by the restart_test.go suite.
