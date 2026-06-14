@@ -268,7 +268,8 @@ func TestSuperviseRestart_IgnoresSupersededRunner(t *testing.T) {
 }
 
 // TestSuperviseRestart_AbortsBackoffOnShutdown covers the failure-record +
-// runtime-clear + backoff-abort path when the cluster context is already done.
+// attempt-bookkeeping + runtime-clear + backoff-abort path when the cluster
+// context is already done.
 func TestSuperviseRestart_AbortsBackoffOnShutdown(t *testing.T) {
 	t.Parallel()
 
@@ -291,6 +292,7 @@ func TestSuperviseRestart_AbortsBackoffOnShutdown(t *testing.T) {
 	require.Equal(t, finitestate.StatusRunning, r.GetState(), "no escalation on shutdown abort")
 	require.Nil(t, r.currentEntries.get("x").runner, "dead runtime should be cleared before backoff")
 	require.Len(t, r.restartTracker["x"].failures, 1, "the crash should be recorded")
+	require.Equal(t, 1, r.restartTracker["x"].attempts, "the restart attempt should be recorded")
 }
 
 // TestRunner_RestartFailure_EscalatesToError covers the branch where the

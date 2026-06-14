@@ -710,8 +710,9 @@ func (r *Runner) superviseRestart(
 	}
 	st.attempts++
 	st.gen++
+	attempt := st.attempts
 	gen := st.gen
-	backoff := r.backoffForLocked(st.attempts)
+	backoff := r.backoffForLocked(attempt)
 	// Clear the dead runtime so the entry reads as "not running"; this also
 	// makes a racing config update or a second crash fail the identity guard.
 	if updated := r.currentEntries.clearRuntime(id); updated != nil {
@@ -721,7 +722,7 @@ func (r *Runner) superviseRestart(
 	r.mu.Unlock()
 
 	logger.Warn("Server crashed; scheduling restart",
-		"cause", cause, "backoff", backoff, "attempt", st.attempts, "addr", addr)
+		"cause", cause, "backoff", backoff, "attempt", attempt, "addr", addr)
 
 	timer := time.NewTimer(backoff)
 	defer timer.Stop()
