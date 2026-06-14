@@ -723,11 +723,14 @@ func (r *Runner) superviseRestart(
 	logger.Warn("Server crashed; scheduling restart",
 		"cause", cause, "backoff", backoff, "attempt", st.attempts, "addr", addr)
 
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+
 	select {
 	case <-ctx.Done():
 		logger.Debug("Restart aborted: cluster shutting down")
 		return
-	case <-time.After(backoff):
+	case <-timer.C:
 	}
 
 	r.mu.Lock()
