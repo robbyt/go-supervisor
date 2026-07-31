@@ -1,9 +1,9 @@
 module github.com/robbyt/go-supervisor
 
-go 1.26.4
+go 1.26.5
 
 require (
-	github.com/robbyt/go-fsm/v2 v2.5.0
+	github.com/robbyt/go-fsm/v2 v2.5.1
 	github.com/stretchr/testify v1.11.1
 )
 
