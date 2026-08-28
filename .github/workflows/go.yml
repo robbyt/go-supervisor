@@ -6,15 +6,14 @@ on:
   pull_request:
     branches: ["main"]
 
-permissions:
-  contents: read
-  # Optional: allow read access to pull request. Use with `only-new-issues` option.
-  pull-requests: read
-  # Optional: allow write access to checks to allow the action to annotate code in the PR.
-  checks: write
-
 jobs:
   build:
+    permissions:
+      contents: read
+      # Optional: allow read access to pull request. Use with `only-new-issues` option.
+      pull-requests: read
+      # Optional: allow write access to checks to allow the action to annotate code in the PR.
+      checks: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -70,6 +69,8 @@ jobs:
             -Dsonar.sourceEncoding=UTF-8
 
   race:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
